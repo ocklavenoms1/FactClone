@@ -14,7 +14,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
 
 static func test_name() -> String:
-	return "save/load round-trip (v7)"
+	return "save/load round-trip (v8)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -33,6 +33,10 @@ static func run(parent: Node) -> Dictionary:
 
 	# Water tile (simulating world-gen).
 	world_a.tiles[Vector2i(5, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	# Tile with explicit resource_node — Session B only has Type.NONE, but
+	# we set it explicitly to verify the field round-trips even at default.
+	# Once mining lands, this test should set a non-default node here too.
+	world_a.tiles[Vector2i(7, 7)] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.NONE)
 	# One of each overlay.
 	world_a.set_overlay(Vector2i(0, 0), Terrain.Overlay.SOIL_TILLED)
 	world_a.set_overlay(Vector2i(1, 0), Terrain.Overlay.PATH)
@@ -127,6 +131,7 @@ static func run(parent: Node) -> Dictionary:
 		var tb: Tile = world_b.tiles[pos]
 		_check(failures, ta.base == tb.base, "base mismatch at %s: %d vs %d" % [str(pos), ta.base, tb.base])
 		_check(failures, ta.overlay == tb.overlay, "overlay mismatch at %s: %d vs %d" % [str(pos), ta.overlay, tb.overlay])
+		_check(failures, ta.resource_node == tb.resource_node, "resource_node mismatch at %s: %d vs %d" % [str(pos), ta.resource_node, tb.resource_node])
 
 	# Building counts match.
 	_check(failures, world_a.buildings.size() == world_b.buildings.size(), "building count mismatch: %d vs %d" % [world_a.buildings.size(), world_b.buildings.size()])

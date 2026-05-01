@@ -11,9 +11,14 @@ extends RefCounted
 ##   v6 → v7: Tile model split into base + overlay. Tile entry shape
 ##            [x, y, terrain] → [x, y, base, overlay]. Player paints
 ##            overlays on grass; water is a base, not paintable.
+##   v7 → v8: Tile gains `resource_node` field (forward-prep for world-gen
+##            stone/ore/wood deposits, target session G/H — see NOTES.md).
+##            Tile entry shape [x, y, base, overlay] → [x, y, base, overlay, resource_node].
+##            No buildings consume resource_nodes yet; the bump just locks
+##            the save format so we don't bump twice when mining lands.
 ##            No migration code — old saves hard-fail with OS.alert.
 
-const SAVE_VERSION: int = 7
+const SAVE_VERSION: int = 8
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -29,7 +34,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	for tile_key in grid_world.tiles:
 		var pos: Vector2i = tile_key
 		var t: Tile = grid_world.tiles[pos]
-		tiles_data.append([pos.x, pos.y, t.base, t.overlay])
+		tiles_data.append([pos.x, pos.y, t.base, t.overlay, t.resource_node])
 
 	var buildings_data: Array = []
 	for anchor_key in grid_world.buildings:
@@ -96,7 +101,10 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 	for entry in data.get("tiles", []):
 		var pos := Vector2i(int(entry[0]), int(entry[1]))
-		grid_world.tiles[pos] = Tile.new(int(entry[2]), int(entry[3]))
+		# entry[4] = resource_node (added v8). Use .get-style fallback so a
+		# malformed v8 file with truncated entries still loads the base+overlay.
+		var rnode: int = int(entry[4]) if entry.size() > 4 else ResourceNodes.DEFAULT
+		grid_world.tiles[pos] = Tile.new(int(entry[2]), int(entry[3]), rnode)
 
 	for bdict in data.get("buildings", []):
 		var b: Building = Building.from_dict(bdict)
