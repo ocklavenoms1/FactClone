@@ -1,0 +1,26 @@
+# Godot 4+ specific ignores
+
+# Editor cache and import metadata regenerated on first open.
+.godot/
+
+# Older Godot import folder, harmless to ignore.
+.import/
+
+# Mono / .NET (we use GDScript, but ignore in case of future C# experiments).
+.mono/
+data_*/
+
+# Translation artifacts.
+*.translation
+
+# OS / editor cruft.
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# Claude Code per-project local settings (permissions, tool toggles).
+.claude/settings.local.json
