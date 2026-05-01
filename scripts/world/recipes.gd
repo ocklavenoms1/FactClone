@@ -3,30 +3,42 @@ extends RefCounted
 
 ## Recipe registry — all crafting recipes in the game.
 ##
-## Recipe IDs are STRINGS (not enum ints) because:
-##   - they're stored in building state and survive enum reordering
-##   - they're self-documenting in saves
-##   - they're stable for save compatibility across sessions
+## Recipe IDs are STRINGS (not enum ints) because they're stored in
+## building state and need to survive enum reordering and save round-trips.
 ##
-## Each recipe declares:
-##   - building_type: which Buildings.Type can run it (validation only, not serialized)
-##   - inputs:        Array of [item_type:int, count:int]
-##   - outputs:       Array of [item_type:int, count:int]
-##   - process_ticks: how many ticks one cycle takes (20Hz, so 80 = 4s)
-##   - input_capacity / output_capacity: max items the Processor will buffer
-##
-## Adding a recipe = add an entry here. No code changes elsewhere.
+## Recipe shape:
+##   id: String
+##   building_type: int          (Buildings.Type — validation only, not serialized)
+##   inputs_solid:  Array[[item_type, count]]
+##   inputs_fluid:  Array[[fluid_type, count]]   (count is reserved for future flow sim;
+##                                                connectivity-only model treats it as "yes/no")
+##   outputs_solid: Array[[item_type, count]]
+##   time_ticks: int
+##   input_capacity / output_capacity: max items the Processor will buffer (per item type)
+##   display_name: String
 
 const DATA: Dictionary = {
 	"mill_wheat_to_flour": {
 		"id": "mill_wheat_to_flour",
 		"building_type": Buildings.Type.MILL,
-		"inputs":  [[Items.Type.WHEAT, 1]],
-		"outputs": [[Items.Type.FLOUR, 1]],
-		"process_ticks": 80,
+		"inputs_solid":  [[Items.Type.WHEAT, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.FLOUR, 1]],
+		"time_ticks": 80,
 		"input_capacity":  8,
 		"output_capacity": 8,
 		"display_name": "Wheat → Flour",
+	},
+	"mixer_dough": {
+		"id": "mixer_dough",
+		"building_type": Buildings.Type.MIXER,
+		"inputs_solid":  [[Items.Type.FLOUR, 2], [Items.Type.YEAST, 1]],
+		"inputs_fluid":  [[Fluids.Type.WATER, 1]],
+		"outputs_solid": [[Items.Type.DOUGH, 1]],
+		"time_ticks": 100,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Flour + Yeast + Water → Dough",
 	},
 }
 

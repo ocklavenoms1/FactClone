@@ -13,7 +13,10 @@ extends Node
 
 const TESTS: Array = [
 	preload("res://scripts/tests/test_placement_rules.gd"),
+	preload("res://scripts/tests/test_save_load_roundtrip.gd"),
 	preload("res://scripts/tests/test_wheat_to_flour.gd"),
+	preload("res://scripts/tests/test_fluid_network.gd"),
+	preload("res://scripts/tests/test_mixer_dough.gd"),
 ]
 
 func _ready() -> void:

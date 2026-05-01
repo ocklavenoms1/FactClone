@@ -49,9 +49,9 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 	var recipe: Dictionary = Recipes.get_recipe(b.state.get("recipe_id", ""))
 	if is_running and not recipe.is_empty():
 		var progress: int = int(b.state.get("progress", 0))
-		var process_ticks: int = int(recipe["process_ticks"])
-		if process_ticks > 0:
-			var pct: float = float(progress) / float(process_ticks)
+		var time_ticks: int = int(recipe["time_ticks"])
+		if time_ticks > 0:
+			var pct: float = float(progress) / float(time_ticks)
 			canvas.draw_arc(center, radius + 3.0, -PI * 0.5, -PI * 0.5 + TAU * pct, 32, Color(0.4, 0.95, 0.4, 0.9), 2.0)
 
 	# In/out hopper indicators — aggregate buffer total / recipe capacity.

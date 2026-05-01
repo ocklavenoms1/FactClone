@@ -9,12 +9,16 @@ extends RefCounted
 enum Type {
 	WHEAT,
 	FLOUR,
-	# SEED, BREAD, FERTILIZER, ... will land here.
+	YEAST,
+	DOUGH,
+	# RISEN_DOUGH, BREAD, FUEL_BRIQUETTE, ... will land here.
 }
 
 const DATA: Dictionary = {
 	Type.WHEAT: { "name": "Wheat", "color": Color(0.95, 0.80, 0.25), "max_stack": 100 },
 	Type.FLOUR: { "name": "Flour", "color": Color(0.95, 0.92, 0.85), "max_stack": 100 },
+	Type.YEAST: { "name": "Yeast", "color": Color(0.85, 0.75, 0.55), "max_stack": 50  },
+	Type.DOUGH: { "name": "Dough", "color": Color(0.92, 0.86, 0.70), "max_stack": 50  },
 }
 
 static func name_of(t: int) -> String:

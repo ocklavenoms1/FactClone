@@ -46,6 +46,7 @@ func _build_categories() -> void:
 		"name": "Logistics",
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.BELT },
+			{ "kind": "building", "value": Buildings.Type.PIPE },
 		],
 		"selected": 0,
 	})
@@ -56,6 +57,8 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.PLANTER },
 			{ "kind": "building", "value": Buildings.Type.HARVESTER },
 			{ "kind": "building", "value": Buildings.Type.MILL },
+			{ "kind": "building", "value": Buildings.Type.MIXER },
+			{ "kind": "building", "value": Buildings.Type.PUMP },
 		],
 		"selected": 0,
 	})

@@ -30,7 +30,7 @@ func _ready() -> void:
 			_show_toast(SaveSystem.last_load_error if SaveSystem.last_load_error != "" else "Save file present but failed to load")
 	else:
 		grid_world.generate_default_world()
-		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · F5/F9 save/load")
+		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · Esc close · F5/F9 save/load")
 
 func _process(delta: float) -> void:
 	var mouse_world: Vector2 = get_global_mouse_position()
@@ -53,6 +53,14 @@ func _process(delta: float) -> void:
 
 	if Input.is_action_just_pressed("inspect_building"):
 		_try_inspect(hover_tile)
+	if Input.is_action_just_pressed("close_info_panel"):
+		info_panel.clear_target()
+
+	# Debug: F12 spawns yeast in player inventory. Removed once a Yeast Culture
+	# building lands (Session C) and yeast can be produced normally.
+	if Input.is_action_just_pressed("debug_spawn_yeast"):
+		var added: int = player_inventory.add(Items.Type.YEAST, 10)
+		_show_toast("[debug] +%d Yeast" % added)
 
 	if Input.is_action_just_pressed("quick_save"):
 		if SaveSystem.save_game(grid_world, player, player_inventory):
@@ -91,7 +99,7 @@ func _try_place(pos: Vector2i) -> void:
 				return
 			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
 			if not grid_world.place_building(t, pos, dir):
-				_rate_limited_fail_toast("%s needs: %s" % [Buildings.name_of(t), _overlay_list_str(Buildings.requires_overlay(t))])
+				_rate_limited_fail_toast(grid_world.last_building_place_error)
 
 func _try_remove(pos: Vector2i) -> void:
 	if not grid_world.clear_tile(pos):

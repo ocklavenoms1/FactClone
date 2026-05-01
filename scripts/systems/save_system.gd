@@ -14,7 +14,12 @@ extends RefCounted
 ##            No migration code — old saves hard-fail with OS.alert.
 
 const SAVE_VERSION: int = 7
-const SAVE_PATH: String = "user://save_slot_1.json"
+const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
+
+## Path used by save_game / load_game / save_exists. Tests override this
+## to a scratch path so they don't clobber the player's save. Restore to
+## DEFAULT_SAVE_PATH after the test.
+static var save_path: String = DEFAULT_SAVE_PATH
 
 ## Set by load_game on failure. main.gd reads this to surface a toast.
 static var last_load_error: String = ""
@@ -40,7 +45,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"player_inventory": player_inventory.to_array(),
 	}
 
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
 		push_error("Failed to open save file for writing: %s" % FileAccess.get_open_error())
 		return false
@@ -50,9 +55,9 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory) -> bool:
 	last_load_error = ""
-	if not FileAccess.file_exists(SAVE_PATH):
+	if not FileAccess.file_exists(save_path):
 		return false
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var file := FileAccess.open(save_path, FileAccess.READ)
 	if file == null:
 		last_load_error = "Could not open save file for reading."
 		push_error(last_load_error)
@@ -69,7 +74,13 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	var data: Dictionary = parsed
 	var version: int = int(data.get("version", 0))
 	if version != SAVE_VERSION:
-		var msg: String = "Save file is v%d; current version is v%d.\n\nOld saves are not compatible. Delete the file to start fresh:\n%s" % [version, SAVE_VERSION, ProjectSettings.globalize_path(SAVE_PATH)]
+		# Normalize path slashes for the user-facing dialog. globalize_path
+		# returns forward slashes on Windows; convert to native backslashes
+		# so the path is copy-pasteable into File Explorer / cmd.
+		var native_path: String = ProjectSettings.globalize_path(save_path)
+		if OS.get_name() == "Windows":
+			native_path = native_path.replace("/", "\\")
+		var msg: String = "Save file is v%d; current version is v%d.\n\nOld saves are not compatible. Delete the file to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
 		last_load_error = "Save incompatible (v%d vs v%d) — see dialog." % [version, SAVE_VERSION]
 		push_error(msg)
 		OS.alert(msg, "Save incompatible")
@@ -101,4 +112,4 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	return true
 
 static func save_exists() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	return FileAccess.file_exists(save_path)

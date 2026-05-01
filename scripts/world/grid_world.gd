@@ -22,10 +22,21 @@ var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2
 var hover_tile: Vector2i = Vector2i.ZERO
 var show_hover: bool = false
 
-## Failure reasons set by set_overlay / clear_tile when they return false.
+## Failure reasons set by set_overlay / clear_tile / can_place_building.
 ## main.gd reads these to surface a user-friendly toast.
 var last_place_error: String = ""
 var last_remove_error: String = ""
+var last_building_place_error: String = ""
+
+# ---------- fluid network state ----------
+# Connectivity-only model. No flow simulation; queries answer "is there
+# a pipe-network with a pump reachable from this position?"
+#
+# Rebuilt lazily via BFS over pipe positions. Any place_building/remove_building
+# touching a PIPE or PUMP marks the network dirty.
+var _fluid_network_dirty: bool = true
+var _pipe_component: Dictionary = {}      # Vector2i -> int (component id)
+var _component_has_pump: Dictionary = {}  # int -> bool
 
 @export var camera: Camera2D
 
@@ -135,15 +146,26 @@ func _footprint_cells(t: int, pos: Vector2i) -> Array:
 	return cells
 
 ## Can a building of `type` be placed with anchor at `pos`?
-## Checks footprint vacancy + overlay compatibility (buildings sit on
-## overlays, never directly on water/grass).
+## Checks footprint vacancy + overlay compatibility, plus type-specific
+## constraints (e.g. Pump must have an adjacent water tile).
+## On failure, sets last_building_place_error to a user-friendly reason.
 func can_place_building(t: int, pos: Vector2i) -> bool:
+	last_building_place_error = ""
 	var allowed_overlays: Array = Buildings.requires_overlay(t)
 	for cell in _footprint_cells(t, pos):
 		if has_building_at(cell):
+			last_building_place_error = "%s: tile already occupied" % Buildings.name_of(t)
 			return false
 		if not (overlay_at(cell) in allowed_overlays):
+			var names: Array = []
+			for o in allowed_overlays:
+				names.append(Terrain.overlay_name(o))
+			last_building_place_error = "%s needs: %s" % [Buildings.name_of(t), ", ".join(names)]
 			return false
+	# Type-specific extra rules.
+	if t == Buildings.Type.PUMP and not Pump.is_valid_placement(self, pos):
+		last_building_place_error = "Pump must be placed adjacent to water"
+		return false
 	return true
 
 func place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
@@ -155,6 +177,8 @@ func place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
 	buildings[pos] = b
 	for cell in _footprint_cells(t, pos):
 		occupied[cell] = pos
+	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
+		_fluid_network_dirty = true
 	return true
 
 func remove_building_at(pos: Vector2i) -> bool:
@@ -167,7 +191,79 @@ func remove_building_at(pos: Vector2i) -> bool:
 	for cell in _footprint_cells(b.type, anchor):
 		occupied.erase(cell)
 	buildings.erase(anchor)
+	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
+		_fluid_network_dirty = true
 	return true
+
+# ---------- fluid network resolver ----------
+
+const _CARDINALS: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]
+
+## Mark the fluid network as needing a rebuild on next query.
+## Useful for tests or future code paths that mutate buildings without
+## going through place_building / remove_building.
+func mark_fluid_network_dirty() -> void:
+	_fluid_network_dirty = true
+
+## Returns true iff the given position is adjacent to a pipe whose
+## connected component contains at least one pump.
+##
+## `_fluid_type` is reserved for future per-fluid networks (e.g. oil vs
+## water). For Session B all networks carry water; the parameter is unused
+## but documents intent at the call site.
+func fluid_available_at(pos: Vector2i, _fluid_type: int = Fluids.Type.WATER) -> bool:
+	if _fluid_network_dirty:
+		_rebuild_fluid_network()
+	for dir_vec in _CARDINALS:
+		var n: Vector2i = pos + dir_vec
+		if not _pipe_component.has(n):
+			continue
+		var comp_id: int = _pipe_component[n]
+		if _component_has_pump.get(comp_id, false):
+			return true
+	return false
+
+## Rebuild pipe → component map and mark each component with whether it
+## contains an adjacent pump. BFS from each unvisited pipe; sort starting
+## points to keep component IDs deterministic across runs.
+func _rebuild_fluid_network() -> void:
+	_pipe_component.clear()
+	_component_has_pump.clear()
+
+	var pipe_anchors: Array = []
+	for anchor in buildings:
+		if buildings[anchor].type == Buildings.Type.PIPE:
+			pipe_anchors.append(anchor)
+	# Determinism: sort lexicographically.
+	pipe_anchors.sort_custom(func(a, b): return a.x < b.x or (a.x == b.x and a.y < b.y))
+
+	var next_id: int = 0
+	for start in pipe_anchors:
+		if _pipe_component.has(start):
+			continue
+		var has_pump: bool = false
+		var queue: Array = [start]
+		while not queue.is_empty():
+			var p: Vector2i = queue.pop_front()
+			if _pipe_component.has(p):
+				continue
+			_pipe_component[p] = next_id
+			# Walk cardinal neighbors.
+			for dir_vec in _CARDINALS:
+				var n: Vector2i = p + dir_vec
+				if not has_building_at(n):
+					continue
+				var nb: Building = building_at(n)
+				if nb == null:
+					continue
+				if nb.type == Buildings.Type.PIPE and not _pipe_component.has(n):
+					queue.append(n)
+				elif nb.type == Buildings.Type.PUMP:
+					has_pump = true
+		_component_has_pump[next_id] = has_pump
+		next_id += 1
+
+	_fluid_network_dirty = false
 
 # ---------- simulation ----------
 

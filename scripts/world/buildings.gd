@@ -29,6 +29,9 @@ enum Type {
 	BELT,
 	MILL,
 	CHEST,
+	PIPE,
+	PUMP,
+	MIXER,
 }
 
 const DATA: Dictionary = {
@@ -72,6 +75,30 @@ const DATA: Dictionary = {
 		"supports_direction": false,
 		"player_drainable": true,
 	},
+	Type.PIPE: {
+		"name": "Pipe",
+		"swatch_color": Color(0.45, 0.55, 0.65),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.PUMP: {
+		"name": "Pump",
+		"swatch_color": Color(0.30, 0.55, 0.85),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.MIXER: {
+		"name": "Mixer",
+		"swatch_color": Color(0.65, 0.68, 0.75),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -104,6 +131,12 @@ static func make(t: int, pos: Vector2i, dir: int = 0) -> Building:
 			return Mill.make(pos)
 		Type.CHEST:
 			return Chest.make(pos)
+		Type.PIPE:
+			return Pipe.make(pos)
+		Type.PUMP:
+			return Pump.make(pos)
+		Type.MIXER:
+			return Mixer.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -119,6 +152,9 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Processor.tick(b, world)
 		Type.CHEST:
 			Chest.tick(b, world)
+		Type.MIXER:
+			Processor.tick(b, world)
+		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
 	match b.type:
@@ -137,6 +173,12 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Mill.draw(b, canvas, world_pos, tile_size)
 		Type.CHEST:
 			Chest.draw(b, canvas, world_pos, tile_size)
+		Type.PIPE:
+			Pipe.draw(b, canvas, world_pos, tile_size)
+		Type.PUMP:
+			Pump.draw(b, canvas, world_pos, tile_size)
+		Type.MIXER:
+			Mixer.draw(b, canvas, world_pos, tile_size)
 
 ## Drain a player-drainable building into the player's inventory.
 ## Returns count moved. Returns 0 if `b` is not drainable.
@@ -152,7 +194,11 @@ static func drain_into_player(b: Building, dest: Inventory) -> int:
 ## building. Each building file optionally defines `static func info_lines(b)`;
 ## this dispatches by type. Generic fallback introspects `b.state` keys so
 ## even un-customized buildings are debuggable.
-static func info_lines_for(b: Building) -> Array:
+##
+## `world` is forwarded to building types that need it (currently: Processor
+## subtypes — Mill and Mixer — to consult the fluid network when reporting
+## "what's missing"). Other types ignore it.
+static func info_lines_for(b: Building, world = null) -> Array:
 	if b == null:
 		return []
 	match b.type:
@@ -163,9 +209,15 @@ static func info_lines_for(b: Building) -> Array:
 		Type.BELT:
 			return Belt.info_lines(b)
 		Type.MILL:
-			return Processor.info_lines(b)
+			return Processor.info_lines(b, world)
 		Type.CHEST:
 			return Chest.info_lines(b)
+		Type.PIPE:
+			return Pipe.info_lines(b)
+		Type.PUMP:
+			return Pump.info_lines(b)
+		Type.MIXER:
+			return Processor.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

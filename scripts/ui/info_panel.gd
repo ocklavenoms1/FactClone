@@ -64,7 +64,7 @@ func _draw() -> void:
 	if b == null:
 		return
 
-	var lines: Array = Buildings.info_lines_for(b)
+	var lines: Array = Buildings.info_lines_for(b, world)
 	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * lines.size() + 2
 	offset_bottom = offset_top + height
 

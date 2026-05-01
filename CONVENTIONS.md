@@ -77,6 +77,22 @@ Building state is a `Dictionary` round-tripped through JSON via `Building.to_dic
 - **Never** store an `Inventory`, `Building`, `Node`, or other RefCounted/Object — it silently degrades to a plain Dictionary on load. Use `[[type, count], ...]` arrays for inventory-like data inside building state. Rehydrate to `Inventory` only when slot semantics matter (currently: player inventory only).
 - Don't reassign `b.state["key"]` to a new array if other code holds a reference — mutate in place.
 
+### JSON canonicalizes numeric types to float on save
+
+Godot's `JSON.stringify` / `parse_string` has only one number type (float). All ints round-trip as floats: `42` saved → `42.0` loaded. Therefore:
+
+- **Reads with integer semantics MUST use `int(...)`** — e.g. `int(b.state.get("progress", 0))`, not `b.state["progress"]`.
+- **Test comparisons must be semantic, not `str()`-based.** `str({"x": 0})` and `str({"x": 0.0})` differ; values are equal. Use a deep-equals helper that coerces numerics.
+- Same applies to floats inside arrays/dicts read out of save data.
+
+This is enforced in practice via the existing pattern of `int(b.state.get(...))` reads. Don't break it.
+
+### Forward compatibility within a save version
+
+When adding a new field to an existing building's state, **always read with `.get(key, default)`** so saves predating the field still load cleanly. Direct `b.state["key"]` reads are acceptable only for fields that the building's `make()` always writes — never for fields that may not exist in older saves of the same version.
+
+If you find yourself mixing direct reads and `.get()` reads on the same dict, lean toward `.get()` everywhere — the cost is one extra word; the upside is no surprise crashes when an older save lacks a field your new code expects.
+
 ## Save schema
 
 `SAVE_VERSION` is bumped in lockstep with any change to the data shape that load can't decode. Old saves hard-fail with `OS.alert` — no migration code. Document the bump in the comment block at the top of `save_system.gd`.
