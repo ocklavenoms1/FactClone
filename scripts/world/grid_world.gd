@@ -9,14 +9,23 @@ extends Node2D
 const TILE_SIZE: int = 32
 const GRID_COLOR: Color = Color(0.25, 0.35, 0.25, 0.6)
 const VIEW_PADDING_TILES: int = 4
-const DEFAULT_TERRAIN: int = Terrain.Type.GRASS
+
+# Default-world lake bounds — exposed so tests and Session B's Pump
+# placement logic can reference these coordinates directly.
+const DEFAULT_LAKE_X_RANGE: Array = [8, 12]   # [start, end_exclusive]
+const DEFAULT_LAKE_Y_RANGE: Array = [4, 6]    # [start, end_exclusive] -> 4×2 = 8 tiles
 
 var tiles: Dictionary = {}            # Vector2i -> Tile
 var buildings: Dictionary = {}        # Vector2i (anchor) -> Building
-var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor) — fast collision
+var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor)
 
 var hover_tile: Vector2i = Vector2i.ZERO
 var show_hover: bool = false
+
+## Failure reasons set by set_overlay / clear_tile when they return false.
+## main.gd reads these to surface a user-friendly toast.
+var last_place_error: String = ""
+var last_remove_error: String = ""
 
 @export var camera: Camera2D
 
@@ -32,29 +41,79 @@ func tile_to_world_origin(tile: Vector2i) -> Vector2:
 func tile_to_world_center(tile: Vector2i) -> Vector2:
 	return Vector2(tile.x * TILE_SIZE + TILE_SIZE * 0.5, tile.y * TILE_SIZE + TILE_SIZE * 0.5)
 
-# ---------- terrain ----------
+# ---------- tile accessors ----------
 
-func set_terrain(pos: Vector2i, terrain_type: int) -> void:
+## Read base at pos (default GRASS for tiles not in the dict).
+func base_at(pos: Vector2i) -> int:
+	if tiles.has(pos):
+		return tiles[pos].base
+	return Terrain.DEFAULT_BASE
+
+## Read overlay at pos (default NONE for tiles not in the dict).
+func overlay_at(pos: Vector2i) -> int:
+	if tiles.has(pos):
+		return tiles[pos].overlay
+	return Terrain.DEFAULT_OVERLAY
+
+## Convenience: is this a water tile?
+func is_water_at(pos: Vector2i) -> bool:
+	return base_at(pos) == Terrain.Base.WATER
+
+# ---------- placement / removal ----------
+
+## Paint an overlay at pos. Returns true on success.
+## Sets last_place_error on failure.
+func set_overlay(pos: Vector2i, overlay: int) -> bool:
+	last_place_error = ""
 	if has_building_at(pos):
-		return  # don't change terrain under a building
-	if terrain_type == DEFAULT_TERRAIN:
-		tiles.erase(pos)
-		return
+		last_place_error = "Can't paint terrain under a building"
+		return false
+	var base: int = base_at(pos)
+	var current_overlay: int = overlay_at(pos)
+	if not Terrain.can_place_overlay(overlay, base, current_overlay):
+		last_place_error = "Can't place %s on %s" % [
+			Terrain.overlay_name(overlay),
+			Terrain.effective_name(base, current_overlay),
+		]
+		return false
+	if current_overlay == overlay:
+		return true  # idempotent
+	# Mutate or insert.
 	if tiles.has(pos):
-		tiles[pos].terrain = terrain_type
+		tiles[pos].overlay = overlay
 	else:
-		tiles[pos] = Tile.new(terrain_type)
+		tiles[pos] = Tile.new(Terrain.DEFAULT_BASE, overlay)
+	return true
 
-func get_terrain(pos: Vector2i) -> int:
-	if tiles.has(pos):
-		return tiles[pos].terrain
-	return DEFAULT_TERRAIN
-
-func clear_tile(pos: Vector2i) -> void:
+## RMB action. Returns true on success (or harmless no-op).
+##   - building present: remove building (always allowed)
+##   - overlay present:  clear overlay back to NONE (always allowed; player placed it)
+##   - bare base (grass or water): silent no-op (nothing to remove)
+func clear_tile(pos: Vector2i) -> bool:
+	last_remove_error = ""
 	if has_building_at(pos):
 		remove_building_at(pos)
-	else:
-		tiles.erase(pos)
+		return true
+	if not tiles.has(pos):
+		return true  # implicit grass — nothing here
+	var t: Tile = tiles[pos]
+	if t.has_overlay():
+		t.overlay = Terrain.Overlay.NONE
+		# If the entry collapses to pure default, drop it.
+		if t.base == Terrain.DEFAULT_BASE:
+			tiles.erase(pos)
+		return true
+	# Bare base tile (water, or an explicit grass entry — though we don't keep those).
+	return true
+
+## Seed a fresh world with natural features. Called by main.gd ONLY when
+## no save file exists. Currently: a fixed 4×2 water lake at tile coords
+## (8..11, 4..5) — 8 tiles total, 6+ tiles east of player spawn (2, 2).
+## Coordinates exposed via DEFAULT_LAKE_X_RANGE / Y_RANGE for tests.
+func generate_default_world() -> void:
+	for x in range(DEFAULT_LAKE_X_RANGE[0], DEFAULT_LAKE_X_RANGE[1]):
+		for y in range(DEFAULT_LAKE_Y_RANGE[0], DEFAULT_LAKE_Y_RANGE[1]):
+			tiles[Vector2i(x, y)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 
 # ---------- buildings ----------
 
@@ -76,13 +135,14 @@ func _footprint_cells(t: int, pos: Vector2i) -> Array:
 	return cells
 
 ## Can a building of `type` be placed with anchor at `pos`?
-## Checks footprint vacancy + terrain compatibility.
+## Checks footprint vacancy + overlay compatibility (buildings sit on
+## overlays, never directly on water/grass).
 func can_place_building(t: int, pos: Vector2i) -> bool:
-	var allowed_terrains: Array = Buildings.requires_terrain(t)
+	var allowed_overlays: Array = Buildings.requires_overlay(t)
 	for cell in _footprint_cells(t, pos):
 		if has_building_at(cell):
 			return false
-		if not (get_terrain(cell) in allowed_terrains):
+		if not (overlay_at(cell) in allowed_overlays):
 			return false
 	return true
 
@@ -151,15 +211,21 @@ func _draw() -> void:
 	var min_tile: Vector2i = world_to_tile(view_min) - Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 	var max_tile: Vector2i = world_to_tile(view_max) + Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 
-	# Terrain tiles.
+	# Terrain tiles — base first, overlay on top.
 	for tile_key in tiles:
 		var tp: Vector2i = tile_key
 		if tp.x < min_tile.x or tp.x > max_tile.x:
 			continue
 		if tp.y < min_tile.y or tp.y > max_tile.y:
 			continue
+		var t: Tile = tiles[tp]
 		var rect: Rect2 = Rect2(tp.x * TILE_SIZE, tp.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-		draw_rect(rect, Terrain.color_of(tiles[tp].terrain), true)
+		# Base layer: only draw if non-default (default grass is the canvas background).
+		if t.base != Terrain.DEFAULT_BASE:
+			draw_rect(rect, Terrain.base_color(t.base), true)
+		# Overlay layer: draw if present.
+		if t.overlay != Terrain.Overlay.NONE:
+			draw_rect(rect, Terrain.overlay_color(t.overlay), true)
 
 	# Grid lines.
 	for x in range(min_tile.x, max_tile.x + 1):

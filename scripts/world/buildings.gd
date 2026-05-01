@@ -36,7 +36,7 @@ const DATA: Dictionary = {
 		"name": "Planter",
 		"swatch_color": Color(0.4, 0.6, 0.3),
 		"footprint": Vector2i(1, 1),
-		"requires_terrain": [Terrain.Type.SOIL_TILLED],
+		"requires_overlay": [Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": false,
 	},
@@ -44,7 +44,7 @@ const DATA: Dictionary = {
 		"name": "Harvester",
 		"swatch_color": Color(0.55, 0.55, 0.60),
 		"footprint": Vector2i(1, 1),
-		"requires_terrain": [Terrain.Type.STONE, Terrain.Type.PATH, Terrain.Type.SOIL_TILLED],
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": true,
 	},
@@ -52,7 +52,7 @@ const DATA: Dictionary = {
 		"name": "Belt",
 		"swatch_color": Color(0.30, 0.30, 0.32),
 		"footprint": Vector2i(1, 1),
-		"requires_terrain": [Terrain.Type.STONE, Terrain.Type.PATH, Terrain.Type.SOIL_TILLED],
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": true,
 		"player_drainable": false,
 	},
@@ -60,7 +60,7 @@ const DATA: Dictionary = {
 		"name": "Mill",
 		"swatch_color": Color(0.60, 0.55, 0.50),
 		"footprint": Vector2i(1, 1),
-		"requires_terrain": [Terrain.Type.STONE, Terrain.Type.PATH],
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": false,
 		"player_drainable": false,
 	},
@@ -68,7 +68,7 @@ const DATA: Dictionary = {
 		"name": "Chest",
 		"swatch_color": Color(0.50, 0.34, 0.20),
 		"footprint": Vector2i(1, 1),
-		"requires_terrain": [Terrain.Type.STONE, Terrain.Type.PATH, Terrain.Type.SOIL_TILLED],
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": true,
 	},
@@ -83,8 +83,8 @@ static func swatch_color_of(t: int) -> Color:
 static func footprint_of(t: int) -> Vector2i:
 	return DATA[t]["footprint"]
 
-static func requires_terrain(t: int) -> Array:
-	return DATA[t]["requires_terrain"]
+static func requires_overlay(t: int) -> Array:
+	return DATA[t]["requires_overlay"]
 
 static func supports_direction(t: int) -> bool:
 	return DATA[t].get("supports_direction", false)

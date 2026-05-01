@@ -29,7 +29,8 @@ func _ready() -> void:
 		else:
 			_show_toast(SaveSystem.last_load_error if SaveSystem.last_load_error != "" else "Save file present but failed to load")
 	else:
-		_show_toast("1-9 build · R rotate · E drain · Q inspect · F5/F9 save/load")
+		grid_world.generate_default_world()
+		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · F5/F9 save/load")
 
 func _process(delta: float) -> void:
 	var mouse_world: Vector2 = get_global_mouse_position()
@@ -45,7 +46,7 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("place_tile"):
 		_try_place(hover_tile)
 	if Input.is_action_pressed("remove_tile"):
-		grid_world.clear_tile(hover_tile)
+		_try_remove(hover_tile)
 
 	if Input.is_action_just_pressed("interact"):
 		_try_interact(player_tile)
@@ -82,16 +83,27 @@ func _process(delta: float) -> void:
 func _try_place(pos: Vector2i) -> void:
 	match hotbar.current_kind():
 		"terrain":
-			grid_world.set_terrain(pos, hotbar.current_value())
+			if not grid_world.set_overlay(pos, hotbar.current_value()):
+				_rate_limited_fail_toast(grid_world.last_place_error)
 		"building":
 			var t: int = hotbar.current_value()
 			if grid_world.has_building_at(pos):
 				return
 			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
 			if not grid_world.place_building(t, pos, dir):
-				if TickSystem.current_tick - _last_failed_place_tick > 10:
-					_show_toast("%s needs: %s" % [Buildings.name_of(t), _terrain_list_str(Buildings.requires_terrain(t))])
-					_last_failed_place_tick = TickSystem.current_tick
+				_rate_limited_fail_toast("%s needs: %s" % [Buildings.name_of(t), _overlay_list_str(Buildings.requires_overlay(t))])
+
+func _try_remove(pos: Vector2i) -> void:
+	if not grid_world.clear_tile(pos):
+		_rate_limited_fail_toast(grid_world.last_remove_error)
+
+## Rate-limit toasts during drag-place / drag-remove so they don't spam per tick.
+func _rate_limited_fail_toast(msg: String) -> void:
+	if msg == "":
+		return
+	if TickSystem.current_tick - _last_failed_place_tick > 10:
+		_show_toast(msg)
+		_last_failed_place_tick = TickSystem.current_tick
 
 func _try_inspect(hover_tile: Vector2i) -> void:
 	if grid_world.has_building_at(hover_tile):
@@ -110,10 +122,10 @@ func _try_interact(player_tile: Vector2i) -> void:
 	else:
 		_show_toast("%s is empty" % Buildings.name_of(b.type))
 
-func _terrain_list_str(terrains: Array) -> String:
+func _overlay_list_str(overlays: Array) -> String:
 	var parts: Array = []
-	for t in terrains:
-		parts.append(Terrain.name_of(t))
+	for o in overlays:
+		parts.append(Terrain.overlay_name(o))
 	return ", ".join(parts)
 
 func _show_toast(msg: String) -> void:

@@ -5,9 +5,15 @@ extends RefCounted
 ##   v4 → v5: Mill became Processor; state shape changed from
 ##            { in_count, out_count, progress } to
 ##            { recipe_id, state, progress, in_buffer, out_buffer }.
+##   v5 → v6: Chest migrated from Inventory to bag format.
+##            { inv: Array (Inventory.to_array()) } → { bag: Array of [type, count] }.
+##            TOTAL_CAPACITY = 2400 (equivalent to old 24 slots × 100 max_stack).
+##   v6 → v7: Tile model split into base + overlay. Tile entry shape
+##            [x, y, terrain] → [x, y, base, overlay]. Player paints
+##            overlays on grass; water is a base, not paintable.
 ##            No migration code — old saves hard-fail with OS.alert.
 
-const SAVE_VERSION: int = 5
+const SAVE_VERSION: int = 7
 const SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Set by load_game on failure. main.gd reads this to surface a toast.
@@ -18,7 +24,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	for tile_key in grid_world.tiles:
 		var pos: Vector2i = tile_key
 		var t: Tile = grid_world.tiles[pos]
-		tiles_data.append([pos.x, pos.y, t.terrain])
+		tiles_data.append([pos.x, pos.y, t.base, t.overlay])
 
 	var buildings_data: Array = []
 	for anchor_key in grid_world.buildings:
@@ -79,7 +85,7 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 	for entry in data.get("tiles", []):
 		var pos := Vector2i(int(entry[0]), int(entry[1]))
-		grid_world.tiles[pos] = Tile.new(int(entry[2]))
+		grid_world.tiles[pos] = Tile.new(int(entry[2]), int(entry[3]))
 
 	for bdict in data.get("buildings", []):
 		var b: Building = Building.from_dict(bdict)
