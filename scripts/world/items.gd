@@ -20,6 +20,10 @@ enum Type {
 	BREAD,
 	LOAF_PACK,
 	FUEL_BRIQUETTE,
+	FLAX,
+	FIBER,
+	CLOTH,
+	BAG,
 }
 
 const DATA: Dictionary = {
@@ -35,6 +39,10 @@ const DATA: Dictionary = {
 	Type.BREAD:          { "name": "Bread",          "color": Color(0.78, 0.55, 0.30), "max_stack":  50 },
 	Type.LOAF_PACK:      { "name": "Loaf Pack",      "color": Color(0.55, 0.40, 0.25), "max_stack":  50 },
 	Type.FUEL_BRIQUETTE: { "name": "Fuel Briquette", "color": Color(0.30, 0.22, 0.18), "max_stack": 100 },
+	Type.FLAX:           { "name": "Flax",           "color": Color(0.55, 0.72, 0.78), "max_stack": 100 },
+	Type.FIBER:          { "name": "Fiber",          "color": Color(0.86, 0.84, 0.76), "max_stack": 100 },
+	Type.CLOTH:          { "name": "Cloth",          "color": Color(0.92, 0.80, 0.62), "max_stack": 100 },
+	Type.BAG:            { "name": "Bag",            "color": Color(0.55, 0.30, 0.18), "max_stack": 100 },
 }
 
 static func name_of(t: int) -> String:
