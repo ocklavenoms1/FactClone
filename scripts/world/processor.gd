@@ -144,9 +144,20 @@ static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) ->
 			if not world.has_building_at(npos):
 				continue
 			var neighbor: Building = world.building_at(npos)
-			if neighbor == null or neighbor.type != Buildings.Type.BELT:
+			if neighbor == null:
 				continue
-			if Belt.try_insert(neighbor, item_type):
+			# Accept either a belt (insert at slot 0) or a chest (direct
+			# insert into the chest's bag — useful as a sink for byproduct
+			# outputs the player doesn't yet have a use for, e.g. fuel
+			# briquettes before an Oven downstream exists).
+			var pushed: bool = false
+			if neighbor.type == Buildings.Type.BELT:
+				pushed = Belt.try_insert(neighbor, item_type)
+			elif neighbor.type == Buildings.Type.CHEST:
+				pushed = Chest.try_insert(neighbor, item_type, 1)
+			elif neighbor.type == Buildings.Type.VOID:
+				pushed = Void.try_insert(neighbor, item_type, 1)
+			if pushed:
 				_buffer_remove(b.state["out_buffer"], item_type, 1)
 				return  # one push per tick
 
@@ -208,7 +219,8 @@ static func info_lines(b: Building, world = null) -> Array:
 
 ## Compute a human-readable list of what's blocking recipe-start. Solid
 ## inputs show "Item (have/need)"; fluid inputs show "Fluid (no network)";
-## output backpressure shows as "output buffer space".
+## output backpressure names the specific output(s) that are full so the
+## player can see at a glance which downstream sink to add.
 static func _missing_for_start(b: Building, recipe: Dictionary, world) -> Array:
 	var missing: Array = []
 	for pair in recipe.get("inputs_solid", []):
@@ -222,8 +234,14 @@ static func _missing_for_start(b: Building, recipe: Dictionary, world) -> Array:
 			var fluid_type: int = int(pair[0])
 			if not world.fluid_available_at(b.anchor, fluid_type):
 				missing.append("%s (no pipe→pump)" % Fluids.name_of(fluid_type))
-	if not _has_room_for_outputs(b, recipe):
-		missing.append("output buffer space")
+	# Per-output backpressure — name which output is jammed.
+	var capacity: int = int(recipe.get("output_capacity", 0))
+	for pair in recipe.get("outputs_solid", []):
+		var item_type: int = int(pair[0])
+		var add: int = int(pair[1])
+		var have: int = _buffer_count(b.state.get("out_buffer", []), item_type)
+		if have + add > capacity:
+			missing.append("%s output full (%d/%d) — needs a sink" % [Items.name_of(item_type), have, capacity])
 	return missing
 
 static func _fmt_buffer(buf: Array) -> String:

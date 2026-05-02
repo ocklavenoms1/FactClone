@@ -39,6 +39,11 @@ func _process(delta: float) -> void:
 
 	grid_world.hover_tile = hover_tile
 	grid_world.show_hover = true
+	# Direction preview for directional building placements.
+	if hotbar.current_kind() == "building" and Buildings.supports_direction(hotbar.current_value()):
+		grid_world.hover_arrow_dir = placement_direction
+	else:
+		grid_world.hover_arrow_dir = -1
 
 	if Input.is_action_just_pressed("rotate_placement"):
 		placement_direction = (placement_direction + 1) % 4
@@ -56,11 +61,12 @@ func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("close_info_panel"):
 		info_panel.clear_target()
 
-	# Debug: F12 spawns yeast in player inventory. Removed once a Yeast Culture
-	# building lands (Session C) and yeast can be produced normally.
-	if Input.is_action_just_pressed("debug_spawn_yeast"):
-		var added: int = player_inventory.add(Items.Type.YEAST, 10)
-		_show_toast("[debug] +%d Yeast" % added)
+	# Debug: F11 spawns a complete working wheat→flour chain east of the
+	# player, including a Briquetter+Void byproduct sink. Useful for
+	# demoing the chain without manual layout. Removed when the bread
+	# chain has a natural early-game placement tutorial.
+	if Input.is_action_just_pressed("debug_spawn_demo"):
+		_spawn_demo_chain(player_tile)
 
 	if Input.is_action_just_pressed("quick_save"):
 		if SaveSystem.save_game(grid_world, player, player_inventory):
@@ -98,7 +104,8 @@ func _try_place(pos: Vector2i) -> void:
 			if grid_world.has_building_at(pos):
 				return
 			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
-			if not grid_world.place_building(t, pos, dir):
+			var extra = hotbar.current_extra()
+			if not grid_world.place_building(t, pos, dir, extra):
 				_rate_limited_fail_toast(grid_world.last_building_place_error)
 
 func _try_remove(pos: Vector2i) -> void:
@@ -129,6 +136,44 @@ func _try_interact(player_tile: Vector2i) -> void:
 		_show_toast("Drained %s (+%d items)" % [Buildings.name_of(b.type), moved])
 	else:
 		_show_toast("%s is empty" % Buildings.name_of(b.type))
+
+## Debug-only: spawns a working wheat → flour chain east of the player.
+## Layout is vertical; a Briquetter+Void pair sits west of the thresher-
+## output belt to drain straw so the chain runs continuously.
+func _spawn_demo_chain(player_tile: Vector2i) -> void:
+	# Origin is 3 tiles east of player so it doesn't overlap walking space.
+	var o: Vector2i = player_tile + Vector2i(3, 0)
+	# (offset_from_origin, overlay, building_type, extra_payload)
+	var plan: Array = [
+		[Vector2i(0, 0),  Terrain.Overlay.SOIL_TILLED, Buildings.Type.PLANTER,    Items.Type.WHEAT],
+		[Vector2i(0, 1),  Terrain.Overlay.STONE,       Buildings.Type.HARVESTER,  null],
+		[Vector2i(0, 2),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
+		[Vector2i(0, 3),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
+		[Vector2i(0, 4),  Terrain.Overlay.STONE,       Buildings.Type.THRESHER,   null],
+		[Vector2i(0, 5),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
+		[Vector2i(-1, 5), Terrain.Overlay.STONE,       Buildings.Type.BRIQUETTER, null],
+		[Vector2i(-2, 5), Terrain.Overlay.STONE,       Buildings.Type.VOID,       null],
+		[Vector2i(0, 6),  Terrain.Overlay.STONE,       Buildings.Type.MILL,       null],
+		[Vector2i(0, 7),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
+		[Vector2i(0, 8),  Terrain.Overlay.STONE,       Buildings.Type.CHEST,      null],
+	]
+	var placed: int = 0
+	var skipped: int = 0
+	for entry in plan:
+		var pos: Vector2i = o + entry[0]
+		var overlay: int = entry[1]
+		var btype: int = entry[2]
+		var extra = entry[3]
+		grid_world.set_overlay(pos, overlay)
+		if grid_world.has_building_at(pos):
+			skipped += 1
+			continue
+		var dir: int = Belt.DIR_S if btype == Buildings.Type.BELT else 0
+		if grid_world.place_building(btype, pos, dir, extra):
+			placed += 1
+		else:
+			skipped += 1
+	_show_toast("[debug] Demo chain: %d placed, %d skipped" % [placed, skipped])
 
 func _overlay_list_str(overlays: Array) -> String:
 	var parts: Array = []

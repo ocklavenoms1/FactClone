@@ -17,6 +17,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_wheat_to_flour.gd"),
 	preload("res://scripts/tests/test_fluid_network.gd"),
 	preload("res://scripts/tests/test_mixer_dough.gd"),
+	preload("res://scripts/tests/test_thresher_multioutput.gd"),
 ]
 
 func _ready() -> void:

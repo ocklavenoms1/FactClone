@@ -71,6 +71,15 @@ static func _bag_remove(bag: Array, item_type: int, count: int) -> int:
 static func free_capacity(b: Building) -> int:
 	return max(0, TOTAL_CAPACITY - _bag_total(_bag(b)))
 
+## Direct insertion API used by upstream machines (Processor, Harvester) that
+## want to push output into an adjacent chest, bypassing the belt step.
+## Returns true if `count` items were accepted (atomic; partial inserts return false).
+static func try_insert(b: Building, item_type: int, count: int = 1) -> bool:
+	if free_capacity(b) < count:
+		return false
+	_bag_add(_bag(b), item_type, count)
+	return true
+
 # ---------- tick ----------
 
 static func tick(b: Building, world: Node2D) -> void:

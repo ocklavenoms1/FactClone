@@ -21,6 +21,9 @@ var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2
 
 var hover_tile: Vector2i = Vector2i.ZERO
 var show_hover: bool = false
+## When the hotbar selection is a directional building, main.gd sets this
+## to the placement direction (Belt.DIR_E etc). -1 = no direction preview.
+var hover_arrow_dir: int = -1
 
 ## Failure reasons set by set_overlay / clear_tile / can_place_building.
 ## main.gd reads these to surface a user-friendly toast.
@@ -168,10 +171,12 @@ func can_place_building(t: int, pos: Vector2i) -> bool:
 		return false
 	return true
 
-func place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
+## `extra` is forwarded to Buildings.make for type-specific payload
+## (currently only PLANTER uses it — for crop_type).
+func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 	if not can_place_building(t, pos):
 		return false
-	var b: Building = Buildings.make(t, pos, dir)
+	var b: Building = Buildings.make(t, pos, dir, extra)
 	if b == null:
 		return false
 	buildings[pos] = b
@@ -349,3 +354,15 @@ func _draw() -> void:
 		var blocked: bool = tiles.has(hover_tile) or has_building_at(hover_tile)
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
 		draw_rect(hover_rect, hover_color, false, 2.0)
+		# Direction preview arrow for directional placements (belts, future inserters).
+		if hover_arrow_dir >= 0 and hover_arrow_dir < Belt.DIR_VECS.size():
+			var center: Vector2 = Vector2(hover_tile.x * TILE_SIZE + TILE_SIZE * 0.5, hover_tile.y * TILE_SIZE + TILE_SIZE * 0.5)
+			var dir_vec: Vector2 = Vector2(Belt.DIR_VECS[hover_arrow_dir])
+			var perp: Vector2 = Vector2(-dir_vec.y, dir_vec.x)
+			var tip: Vector2 = center + dir_vec * (TILE_SIZE * 0.32)
+			var base_l: Vector2 = center + perp * (TILE_SIZE * 0.16) - dir_vec * (TILE_SIZE * 0.05)
+			var base_r: Vector2 = center - perp * (TILE_SIZE * 0.16) - dir_vec * (TILE_SIZE * 0.05)
+			var arrow_color: Color = Color(1.0, 0.92, 0.4, 0.95)
+			draw_line(base_l, tip, arrow_color, 2.5)
+			draw_line(base_r, tip, arrow_color, 2.5)
+			draw_line(center - dir_vec * (TILE_SIZE * 0.30), center + dir_vec * (TILE_SIZE * 0.20), arrow_color, 2.0)

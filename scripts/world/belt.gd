@@ -111,22 +111,36 @@ static func slot_facing_external(belt: Building, target_pos: Vector2i) -> int:
 		return SLOTS_PER_TILE - 1
 	return 0
 
-## External consumer (mill / chest / processor at `consumer_pos`) tries to pull
-## one item from the slot of `belt` that faces it. Pulls only if the slot's
-## item_type appears in `accept` (an Array[int]). Pass an empty `accept` to
-## accept any item.
+## External consumer (mill / chest / processor at `consumer_pos`) tries to
+## pull one item from `belt`. Scans ALL slots, preferring the slot facing
+## the consumer (visual: machines look like they grab from the nearest
+## position). Falls back to other slots so unwanted items at the front of
+## the belt don't deadlock the chain — e.g. when a thresher outputs both
+## grain and straw onto a single belt and the mill only wants grain, the
+## mill can grab grain from a middle slot instead of being blocked by
+## straw at the front.
+##
+## Pulls only if the slot's item_type appears in `accept` (an Array[int]).
+## Pass an empty `accept` to accept any item (chest does this).
 ##
 ## Returns the item_type pulled (>=0) or -1 if nothing was pulled.
 static func try_pull_matching(belt: Building, consumer_pos: Vector2i, accept: Array) -> int:
-	var slot_idx: int = slot_facing_external(belt, consumer_pos)
 	var slots: Array = belt.state["slots"]
-	var item_type: int = int(slots[slot_idx])
-	if item_type < 0:
-		return -1
-	if not accept.is_empty() and not (item_type in accept):
-		return -1
-	slots[slot_idx] = -1
-	return item_type
+	var preferred: int = slot_facing_external(belt, consumer_pos)
+	# Try the preferred slot first, then the rest in order.
+	var order: Array = [preferred]
+	for i in SLOTS_PER_TILE:
+		if i != preferred:
+			order.append(i)
+	for slot_idx in order:
+		var item_type: int = int(slots[slot_idx])
+		if item_type < 0:
+			continue
+		if not accept.is_empty() and not (item_type in accept):
+			continue
+		slots[slot_idx] = -1
+		return item_type
+	return -1
 
 static func info_lines(b: Building) -> Array:
 	var dir: int = int(b.state.get("dir", 0))

@@ -59,7 +59,9 @@ static func tick(b: Building, world: Node2D) -> void:
 				_add_to_buffer(b, item, 1)
 				return  # one per scan
 
-## Push one buffered item onto the first adjacent belt with an open back slot.
+## Push one buffered item onto an adjacent belt or chest. Belts are tried
+## first (typical chain), chests as a fallback for harvester→chest direct
+## hookup with no belt in between.
 static func _try_feed_belt(b: Building, world: Node2D) -> void:
 	if buffer_total(b) <= 0:
 		return
@@ -68,14 +70,20 @@ static func _try_feed_belt(b: Building, world: Node2D) -> void:
 		if not world.has_building_at(npos):
 			continue
 		var neighbor: Building = world.building_at(npos)
-		if neighbor == null or neighbor.type != Buildings.Type.BELT:
+		if neighbor == null:
 			continue
-		# Take the first item type in the buffer.
 		var buf: Array = b.state.get("buffer", [])
 		if buf.is_empty():
 			return
 		var item_type: int = int(buf[0][0])
-		if Belt.try_insert(neighbor, item_type):
+		var pushed: bool = false
+		if neighbor.type == Buildings.Type.BELT:
+			pushed = Belt.try_insert(neighbor, item_type)
+		elif neighbor.type == Buildings.Type.CHEST:
+			pushed = Chest.try_insert(neighbor, item_type, 1)
+		elif neighbor.type == Buildings.Type.VOID:
+			pushed = Void.try_insert(neighbor, item_type, 1)
+		if pushed:
 			_remove_from_buffer(b, item_type, 1)
 			return
 

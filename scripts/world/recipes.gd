@@ -12,22 +12,34 @@ extends RefCounted
 ##   inputs_solid:  Array[[item_type, count]]
 ##   inputs_fluid:  Array[[fluid_type, count]]   (count is reserved for future flow sim;
 ##                                                connectivity-only model treats it as "yes/no")
-##   outputs_solid: Array[[item_type, count]]
+##   outputs_solid: Array[[item_type, count]]   (multiple entries = multi-output recipe)
 ##   time_ticks: int
 ##   input_capacity / output_capacity: max items the Processor will buffer (per item type)
 ##   display_name: String
 
 const DATA: Dictionary = {
-	"mill_wheat_to_flour": {
-		"id": "mill_wheat_to_flour",
-		"building_type": Buildings.Type.MILL,
+	# --- bread chain ---
+	"thresher_wheat": {
+		"id": "thresher_wheat",
+		"building_type": Buildings.Type.THRESHER,
 		"inputs_solid":  [[Items.Type.WHEAT, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.GRAIN, 1], [Items.Type.STRAW, 1]],   # multi-output
+		"time_ticks": 60,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Wheat → Grain + Straw",
+	},
+	"mill_grain_to_flour": {
+		"id": "mill_grain_to_flour",
+		"building_type": Buildings.Type.MILL,
+		"inputs_solid":  [[Items.Type.GRAIN, 1]],
 		"inputs_fluid":  [],
 		"outputs_solid": [[Items.Type.FLOUR, 1]],
 		"time_ticks": 80,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Wheat → Flour",
+		"display_name": "Grain → Flour",
 	},
 	"mixer_dough": {
 		"id": "mixer_dough",
@@ -40,13 +52,85 @@ const DATA: Dictionary = {
 		"output_capacity": 8,
 		"display_name": "Flour + Yeast + Water → Dough",
 	},
+	"proofer_rise": {
+		"id": "proofer_rise",
+		"building_type": Buildings.Type.PROOFER,
+		"inputs_solid":  [[Items.Type.DOUGH, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.RISEN_DOUGH, 1]],
+		"time_ticks": 400,    # 20s — slow rise
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Dough → Risen Dough",
+	},
+	"oven_bread": {
+		"id": "oven_bread",
+		"building_type": Buildings.Type.OVEN,
+		"inputs_solid":  [[Items.Type.RISEN_DOUGH, 1], [Items.Type.FUEL_BRIQUETTE, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.BREAD, 1]],
+		"time_ticks": 120,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Risen Dough + Fuel → Bread",
+	},
+	"packager_loaves": {
+		"id": "packager_loaves",
+		"building_type": Buildings.Type.PACKAGER,
+		"inputs_solid":  [[Items.Type.BREAD, 4]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.LOAF_PACK, 1]],
+		"time_ticks": 80,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "4× Bread → Loaf Pack",
+	},
+	"briquetter_fuel": {
+		"id": "briquetter_fuel",
+		"building_type": Buildings.Type.BRIQUETTER,
+		"inputs_solid":  [[Items.Type.STRAW, 3]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.FUEL_BRIQUETTE, 1]],
+		"time_ticks": 100,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "3× Straw → Fuel Briquette",
+	},
+	"yeast_culture": {
+		"id": "yeast_culture",
+		"building_type": Buildings.Type.YEAST_CULTURE,
+		"inputs_solid":  [[Items.Type.SUGAR, 1]],
+		"inputs_fluid":  [[Fluids.Type.WATER, 1]],
+		"outputs_solid": [[Items.Type.YEAST, 2]],
+		"time_ticks": 200,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Sugar + Water → 2× Yeast",
+	},
+	"press_sugar": {
+		"id": "press_sugar",
+		"building_type": Buildings.Type.SUGAR_PRESS,
+		"inputs_solid":  [[Items.Type.SUGAR_BEET, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.SUGAR, 1]],
+		"time_ticks": 100,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Sugar Beet → Sugar",
+	},
 }
 
 ## Look up a recipe by id. Returns {} (empty dict) if not found.
-## Named `get_recipe` (not `get`) to avoid clashing with Object.get.
+##
+## Logs a warning ONCE per unknown id (cached) — avoids per-tick spam if
+## a save references a recipe ID that's been renamed/removed.
+static var _warned_unknown: Dictionary = {}
+
 static func get_recipe(id: String) -> Dictionary:
 	if not DATA.has(id):
-		push_error("Recipes.get_recipe: unknown recipe id '%s'" % id)
+		if not _warned_unknown.has(id):
+			push_warning("Recipes.get_recipe: unknown recipe id '%s' (warning shown once)" % id)
+			_warned_unknown[id] = true
 		return {}
 	return DATA[id]
 

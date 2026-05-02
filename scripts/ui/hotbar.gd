@@ -8,11 +8,15 @@ extends Control
 ##   Tab cycles to next category, Shift+Tab to previous.
 ##   Each category remembers its own last selection.
 ##
-## Each slot is a dict { "kind": String, "value": int }:
+## Each slot is a dict { "kind": String, "value": int, optional "extra": Variant, optional "label": String }:
 ##   kind = "terrain"  -> value is a Terrain.Overlay (player paints overlays)
 ##   kind = "building" -> value is a Buildings.Type
+##                        extra (optional) is forwarded to Buildings.make
+##                        — used today for Planter crop variants (Wheat / Sugar Beet)
+##                        label (optional) overrides the default name shown
+##                        below the slot (e.g. "Wheat Planter" instead of "Planter").
 
-const SLOT_SIZE: int = 56
+const SLOT_SIZE: int = 64
 const SLOT_GAP: int = 6
 const SLOTS_PER_CATEGORY_MAX: int = 9
 const SLOT_BG: Color = Color(0.10, 0.10, 0.10, 0.85)
@@ -22,7 +26,9 @@ const HEADER_BG: Color = Color(0.10, 0.10, 0.10, 0.85)
 const HEADER_TEXT: Color = Color(1.00, 0.92, 0.55)
 const HEADER_DIM: Color = Color(0.55, 0.55, 0.55)
 const HEADER_HEIGHT: int = 22
-const LABEL_HEIGHT: int = 16
+const LABEL_FONT_SIZE: int = 11
+const LABEL_LINE_HEIGHT: int = 13
+const LABEL_AREA_HEIGHT: int = 32   # space below slots for up to two label lines
 
 signal selection_changed(kind: String, value: int)
 
@@ -54,11 +60,27 @@ func _build_categories() -> void:
 	categories.append({
 		"name": "Production",
 		"slots": [
-			{ "kind": "building", "value": Buildings.Type.PLANTER },
+			# Planter variants — same building type, different crop_type via `extra`.
+			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.WHEAT,      "label": "Wheat Planter" },
+			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.SUGAR_BEET, "label": "Sugar Planter" },
 			{ "kind": "building", "value": Buildings.Type.HARVESTER },
+			{ "kind": "building", "value": Buildings.Type.PUMP },
+		],
+		"selected": 0,
+	})
+
+	categories.append({
+		"name": "Refining",
+		"slots": [
+			{ "kind": "building", "value": Buildings.Type.THRESHER },
 			{ "kind": "building", "value": Buildings.Type.MILL },
 			{ "kind": "building", "value": Buildings.Type.MIXER },
-			{ "kind": "building", "value": Buildings.Type.PUMP },
+			{ "kind": "building", "value": Buildings.Type.PROOFER },
+			{ "kind": "building", "value": Buildings.Type.OVEN },
+			{ "kind": "building", "value": Buildings.Type.PACKAGER },
+			{ "kind": "building", "value": Buildings.Type.BRIQUETTER },
+			{ "kind": "building", "value": Buildings.Type.YEAST_CULTURE },
+			{ "kind": "building", "value": Buildings.Type.SUGAR_PRESS },
 		],
 		"selected": 0,
 	})
@@ -67,20 +89,22 @@ func _build_categories() -> void:
 		"name": "Storage",
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.CHEST },
+			{ "kind": "building", "value": Buildings.Type.VOID },
 		],
 		"selected": 0,
 	})
 
 func _apply_layout() -> void:
 	var w: int = _max_row_width()
-	custom_minimum_size = Vector2(w, HEADER_HEIGHT + SLOT_SIZE + LABEL_HEIGHT + 8)
+	var h: int = HEADER_HEIGHT + SLOT_SIZE + LABEL_AREA_HEIGHT + 8
+	custom_minimum_size = Vector2(w, h)
 	anchor_left = 0.5
 	anchor_right = 0.5
 	anchor_top = 1.0
 	anchor_bottom = 1.0
 	offset_left = -w * 0.5
 	offset_right = w * 0.5
-	offset_top = -(HEADER_HEIGHT + SLOT_SIZE + LABEL_HEIGHT + 8) - 12
+	offset_top = -h - 12
 	offset_bottom = -12
 
 func _max_row_width() -> int:
@@ -135,9 +159,12 @@ func current_kind() -> String:
 func current_value() -> int:
 	return current_slot()["value"]
 
+## Per-slot free-form payload, forwarded to Buildings.make. null when absent.
+func current_extra():
+	return current_slot().get("extra", null)
+
 func current_label() -> String:
-	var s = current_slot()
-	return Terrain.overlay_name(s["value"]) if s["kind"] == "terrain" else Buildings.name_of(s["value"])
+	return _label_for(current_slot())
 
 # ---------- visual ----------
 
@@ -145,6 +172,9 @@ func _color_for(slot: Dictionary) -> Color:
 	return Terrain.overlay_color(slot["value"]) if slot["kind"] == "terrain" else Buildings.swatch_color_of(slot["value"])
 
 func _label_for(slot: Dictionary) -> String:
+	# Explicit per-slot label wins (e.g. "Wheat Planter" instead of "Planter").
+	if slot.has("label"):
+		return slot["label"]
 	return Terrain.overlay_name(slot["value"]) if slot["kind"] == "terrain" else Buildings.name_of(slot["value"])
 
 func _draw() -> void:
@@ -180,5 +210,25 @@ func _draw() -> void:
 
 		# Slot number.
 		draw_string(font, Vector2(x + 6, row_y + SLOT_SIZE - 6), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
-		# Item label below the slot.
-		draw_string(font, Vector2(x, row_y + SLOT_SIZE + LABEL_HEIGHT), _label_for(slots[i]), HORIZONTAL_ALIGNMENT_LEFT, SLOT_SIZE, 12, Color(0.9, 0.9, 0.85))
+		# Centered, optionally two-line label below the slot.
+		_draw_label_below(canvas_font_or(font), Vector2(x, row_y + SLOT_SIZE + 4), _label_for(slots[i]))
+
+## Helper: render a label centered below the slot, wrapping to a second line
+## at the first space if the label has multiple words. Keeps long names like
+## "Wheat Planter" / "Yeast Culture" aligned without overflow.
+func _draw_label_below(font: Font, top_left: Vector2, label: String) -> void:
+	var color: Color = Color(0.9, 0.9, 0.85)
+	# Find first space to split on.
+	var space_idx: int = label.find(" ")
+	if space_idx < 0:
+		# Single-word label — one centered line.
+		draw_string(font, Vector2(top_left.x, top_left.y + LABEL_LINE_HEIGHT), label, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE, LABEL_FONT_SIZE, color)
+		return
+	var line1: String = label.substr(0, space_idx)
+	var line2: String = label.substr(space_idx + 1)
+	draw_string(font, Vector2(top_left.x, top_left.y + LABEL_LINE_HEIGHT), line1, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE, LABEL_FONT_SIZE, color)
+	draw_string(font, Vector2(top_left.x, top_left.y + LABEL_LINE_HEIGHT * 2), line2, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE, LABEL_FONT_SIZE, color)
+
+func canvas_font_or(default_font: Font) -> Font:
+	# Indirection so future themed fonts can plug in here without rewriting callers.
+	return default_font

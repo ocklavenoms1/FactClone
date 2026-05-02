@@ -11,7 +11,7 @@ extends RefCounted
 ## the same pattern: a thin shim with their own `make` and `draw`, sharing
 ## Processor.tick.
 
-const DEFAULT_RECIPE_ID: String = "mill_wheat_to_flour"
+const DEFAULT_RECIPE_ID: String = "mill_grain_to_flour"
 
 # Visual
 const STONE_DARK: Color = Color(0.32, 0.30, 0.28)

@@ -59,13 +59,14 @@ static func run(parent: Node) -> Dictionary:
 		return _fail(world_a, orig_path, "could not place chest")
 
 	# Mutate building state so we have non-default values to round-trip:
-	#   - planter mid-growth
+	#   - planter mid-growth, with non-default crop_type (sugar beet)
 	#   - harvester with one wheat in buffer
 	#   - belt with an item in slot 1
 	#   - mill mid-running
 	#   - chest with mixed contents
 	var planter_a: Building = world_a.building_at(Vector2i(0, 0))
 	planter_a.state["growth"] = 137
+	planter_a.state["crop_type"] = Items.Type.SUGAR_BEET
 
 	var harvester_a: Building = world_a.building_at(Vector2i(2, 0))
 	harvester_a.state["buffer"] = [[Items.Type.WHEAT, 3]]

@@ -32,6 +32,14 @@ enum Type {
 	PIPE,
 	PUMP,
 	MIXER,
+	THRESHER,
+	PROOFER,
+	OVEN,
+	PACKAGER,
+	BRIQUETTER,
+	YEAST_CULTURE,
+	SUGAR_PRESS,
+	VOID,
 }
 
 const DATA: Dictionary = {
@@ -99,6 +107,70 @@ const DATA: Dictionary = {
 		"supports_direction": false,
 		"player_drainable": false,
 	},
+	Type.THRESHER: {
+		"name": "Thresher",
+		"swatch_color": Color(0.65, 0.55, 0.40),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.PROOFER: {
+		"name": "Proofer",
+		"swatch_color": Color(0.78, 0.66, 0.50),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.OVEN: {
+		"name": "Oven",
+		"swatch_color": Color(0.65, 0.32, 0.20),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.PACKAGER: {
+		"name": "Packager",
+		"swatch_color": Color(0.55, 0.50, 0.45),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.BRIQUETTER: {
+		"name": "Briquetter",
+		"swatch_color": Color(0.40, 0.35, 0.32),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.YEAST_CULTURE: {
+		"name": "Yeast Culture",
+		"swatch_color": Color(0.85, 0.75, 0.55),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.SUGAR_PRESS: {
+		"name": "Sugar Press",
+		"swatch_color": Color(0.65, 0.45, 0.45),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.VOID: {
+		"name": "Void",
+		"swatch_color": Color(0.30, 0.20, 0.40),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -119,10 +191,12 @@ static func supports_direction(t: int) -> bool:
 static func is_player_drainable(t: int) -> bool:
 	return DATA[t].get("player_drainable", false)
 
-static func make(t: int, pos: Vector2i, dir: int = 0) -> Building:
+## `extra` is a per-type free-form payload. For PLANTER it's the crop_type
+## (Items.Type) the new planter should grow. Other types ignore it.
+static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 	match t:
 		Type.PLANTER:
-			return Planter.make(pos)
+			return Planter.make(pos, int(extra) if extra != null else Planter.DEFAULT_CROP)
 		Type.HARVESTER:
 			return Harvester.make(pos)
 		Type.BELT:
@@ -137,6 +211,22 @@ static func make(t: int, pos: Vector2i, dir: int = 0) -> Building:
 			return Pump.make(pos)
 		Type.MIXER:
 			return Mixer.make(pos)
+		Type.THRESHER:
+			return Thresher.make(pos)
+		Type.PROOFER:
+			return Proofer.make(pos)
+		Type.OVEN:
+			return Oven.make(pos)
+		Type.PACKAGER:
+			return Packager.make(pos)
+		Type.BRIQUETTER:
+			return Briquetter.make(pos)
+		Type.YEAST_CULTURE:
+			return YeastCulture.make(pos)
+		Type.SUGAR_PRESS:
+			return SugarPress.make(pos)
+		Type.VOID:
+			return Void.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -148,11 +238,13 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Harvester.tick(b, world)
 		Type.BELT:
 			Belt.tick(b, world)
-		Type.MILL:
-			Processor.tick(b, world)
 		Type.CHEST:
 			Chest.tick(b, world)
-		Type.MIXER:
+		Type.VOID:
+			Void.tick(b, world)
+		# All recipe-driven processors share Processor.tick:
+		Type.MILL, Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, \
+		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:
 			Processor.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
@@ -179,6 +271,22 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Pump.draw(b, canvas, world_pos, tile_size)
 		Type.MIXER:
 			Mixer.draw(b, canvas, world_pos, tile_size)
+		Type.THRESHER:
+			Thresher.draw(b, canvas, world_pos, tile_size)
+		Type.PROOFER:
+			Proofer.draw(b, canvas, world_pos, tile_size)
+		Type.OVEN:
+			Oven.draw(b, canvas, world_pos, tile_size)
+		Type.PACKAGER:
+			Packager.draw(b, canvas, world_pos, tile_size)
+		Type.BRIQUETTER:
+			Briquetter.draw(b, canvas, world_pos, tile_size)
+		Type.YEAST_CULTURE:
+			YeastCulture.draw(b, canvas, world_pos, tile_size)
+		Type.SUGAR_PRESS:
+			SugarPress.draw(b, canvas, world_pos, tile_size)
+		Type.VOID:
+			Void.draw(b, canvas, world_pos, tile_size)
 
 ## Drain a player-drainable building into the player's inventory.
 ## Returns count moved. Returns 0 if `b` is not drainable.
@@ -216,7 +324,11 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Pipe.info_lines(b)
 		Type.PUMP:
 			return Pump.info_lines(b)
-		Type.MIXER:
+		Type.VOID:
+			return Void.info_lines(b)
+		# All recipe-driven processors use Processor.info_lines:
+		Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, Type.PACKAGER, \
+		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:
 			return Processor.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
