@@ -39,6 +39,12 @@ enum Type {
 	BRIQUETTER,
 	YEAST_CULTURE,
 	SUGAR_PRESS,
+	# Cloth chain — enum slots reserved by Session E groundwork.
+	# DATA + make()/tick_one()/draw_one() dispatch land when the buildings
+	# themselves ship. Recipes already reference these enum values.
+	RETTER,
+	LOOM,
+	TAILOR,
 }
 
 const DATA: Dictionary = {

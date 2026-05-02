@@ -132,6 +132,42 @@ const DATA: Dictionary = {
 		"output_capacity": 8,
 		"display_name": "Sugar Beet → Sugar",
 	},
+	# --- cloth chain (Session E groundwork; buildings ship with the
+	# Session E proper commit. Recipes are inert until then because no
+	# Building of these types can be placed yet — DATA entries don't exist).
+	"retter_fiber": {
+		"id": "retter_fiber",
+		"building_type": Buildings.Type.RETTER,
+		"inputs_solid":  [[Items.Type.FLAX, 1]],
+		"inputs_fluid":  [[Fluids.Type.WATER, 1]],
+		"outputs_solid": [[Items.Type.FIBER, 1]],
+		"time_ticks": 160,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Flax + Water → Fiber",
+	},
+	"loom_cloth": {
+		"id": "loom_cloth",
+		"building_type": Buildings.Type.LOOM,
+		"inputs_solid":  [[Items.Type.FIBER, 3]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.CLOTH, 1]],
+		"time_ticks": 120,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "3× Fiber → Cloth",
+	},
+	"tailor_bag": {
+		"id": "tailor_bag",
+		"building_type": Buildings.Type.TAILOR,
+		"inputs_solid":  [[Items.Type.CLOTH, 4]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.BAG, 1]],
+		"time_ticks": 160,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "4× Cloth → Bag",
+	},
 }
 
 ## Look up a recipe by id. Returns {} (empty dict) if not found.
