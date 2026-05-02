@@ -59,12 +59,18 @@ static func tick(b: Building, world: Node2D) -> void:
 				_add_to_buffer(b, item, 1)
 				return  # one per scan
 
-## Push one buffered item onto an adjacent belt or chest. Belts are tried
-## first (typical chain), chests as a fallback for harvester→chest direct
-## hookup with no belt in between.
+## Push one buffered item onto an adjacent destination. Two-pass priority:
+##   Pass 1 — non-belt sinks (Chest, Void). Adjacency to these signals
+##            "drain output here", overriding belt routing.
+##   Pass 2 — belts. The standard downstream path.
 static func _try_feed_belt(b: Building, world: Node2D) -> void:
 	if buffer_total(b) <= 0:
 		return
+	var buf: Array = b.state.get("buffer", [])
+	if buf.is_empty():
+		return
+	var item_type: int = int(buf[0][0])
+	# Pass 1: non-belt sinks first.
 	for dir in 4:
 		var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
 		if not world.has_building_at(npos):
@@ -72,18 +78,21 @@ static func _try_feed_belt(b: Building, world: Node2D) -> void:
 		var neighbor: Building = world.building_at(npos)
 		if neighbor == null:
 			continue
-		var buf: Array = b.state.get("buffer", [])
-		if buf.is_empty():
-			return
-		var item_type: int = int(buf[0][0])
 		var pushed: bool = false
-		if neighbor.type == Buildings.Type.BELT:
-			pushed = Belt.try_insert(neighbor, item_type)
-		elif neighbor.type == Buildings.Type.CHEST:
+		if neighbor.type == Buildings.Type.CHEST:
 			pushed = Chest.try_insert(neighbor, item_type, 1)
-		elif neighbor.type == Buildings.Type.VOID:
-			pushed = Void.try_insert(neighbor, item_type, 1)
 		if pushed:
+			_remove_from_buffer(b, item_type, 1)
+			return
+	# Pass 2: belts.
+	for dir in 4:
+		var npos2: Vector2i = b.anchor + Belt.DIR_VECS[dir]
+		if not world.has_building_at(npos2):
+			continue
+		var neighbor2: Building = world.building_at(npos2)
+		if neighbor2 == null or neighbor2.type != Buildings.Type.BELT:
+			continue
+		if Belt.try_insert(neighbor2, item_type):
 			_remove_from_buffer(b, item_type, 1)
 			return
 

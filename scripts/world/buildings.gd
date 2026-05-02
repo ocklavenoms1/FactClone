@@ -39,7 +39,6 @@ enum Type {
 	BRIQUETTER,
 	YEAST_CULTURE,
 	SUGAR_PRESS,
-	VOID,
 }
 
 const DATA: Dictionary = {
@@ -163,14 +162,6 @@ const DATA: Dictionary = {
 		"supports_direction": false,
 		"player_drainable": false,
 	},
-	Type.VOID: {
-		"name": "Void",
-		"swatch_color": Color(0.30, 0.20, 0.40),
-		"footprint": Vector2i(1, 1),
-		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
-		"supports_direction": false,
-		"player_drainable": false,
-	},
 }
 
 static func name_of(t: int) -> String:
@@ -225,8 +216,6 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return YeastCulture.make(pos)
 		Type.SUGAR_PRESS:
 			return SugarPress.make(pos)
-		Type.VOID:
-			return Void.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -240,8 +229,6 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Belt.tick(b, world)
 		Type.CHEST:
 			Chest.tick(b, world)
-		Type.VOID:
-			Void.tick(b, world)
 		# All recipe-driven processors share Processor.tick:
 		Type.MILL, Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, \
 		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:
@@ -285,8 +272,6 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			YeastCulture.draw(b, canvas, world_pos, tile_size)
 		Type.SUGAR_PRESS:
 			SugarPress.draw(b, canvas, world_pos, tile_size)
-		Type.VOID:
-			Void.draw(b, canvas, world_pos, tile_size)
 
 ## Drain a player-drainable building into the player's inventory.
 ## Returns count moved. Returns 0 if `b` is not drainable.
@@ -324,8 +309,6 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Pipe.info_lines(b)
 		Type.PUMP:
 			return Pump.info_lines(b)
-		Type.VOID:
-			return Void.info_lines(b)
 		# All recipe-driven processors use Processor.info_lines:
 		Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, Type.PACKAGER, \
 		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:

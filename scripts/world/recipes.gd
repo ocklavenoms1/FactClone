@@ -24,11 +24,17 @@ const DATA: Dictionary = {
 		"building_type": Buildings.Type.THRESHER,
 		"inputs_solid":  [[Items.Type.WHEAT, 1]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.GRAIN, 1], [Items.Type.STRAW, 1]],   # multi-output
+		# Multi-output with dedicated output ports: grain → east, straw → west.
+		# Player must place a belt (or chest) at each port; otherwise that
+		# output stays buffered until the port is built.
+		"outputs_solid": [
+			[Items.Type.GRAIN, 1, Belt.DIR_E],
+			[Items.Type.STRAW, 1, Belt.DIR_W],
+		],
 		"time_ticks": 60,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Wheat → Grain + Straw",
+		"display_name": "Wheat → Grain (E) + Straw (W)",
 	},
 	"mill_grain_to_flour": {
 		"id": "mill_grain_to_flour",

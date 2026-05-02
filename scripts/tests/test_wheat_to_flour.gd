@@ -1,28 +1,27 @@
 extends RefCounted
 
-## Wheat → Flour smoke chain (post-Session-C).
+## Wheat → Flour smoke chain (prefer_dir routing).
 ##
-## Mill no longer accepts raw wheat — it needs grain. So the chain now
-## includes a Thresher between the harvester and mill:
+## Thresher emits grain → east port and straw → west port. The two outputs
+## go to dedicated branches:
 ##
-##   (0,0) tilled soil + Wheat Planter
-##   (1,0) stone       + Harvester
-##   (2,0) stone       + Belt-E   (wheat)
-##   (3,0) stone       + Thresher (wheat → grain + straw)
-##   (4,0) stone       + Belt-E   (grain)
-##   (5,0) stone       + Mill     (grain → flour)
-##   (6,0) stone       + Belt-E   (flour)
-##   (7,0) stone       + Chest    (sinks flour)
+##                  Wheat Planter
+##                       ↓
+##                   Harvester
+##                       ↓
+##                  belt south (wheat)
+##                       ↓
+##   Straw Chest ← belt west ← Thresher → belt east → Mill → Flour Chest
+##                          (-1,3)  (-2,3)            (1,3)        (2,3)        (3,3)
 ##
-## After ~1500 ticks, asserts the chest has at least 1 flour. Straw piles
-## up in the thresher's out_buffer (no second consumer); after ~8 cycles
-## the thresher BLOCKED_OUTPUTs and stops. By then enough grain has flowed
-## through that flour reaches the chest.
+## After 5000 ticks (~4 minutes simulated) the chain should be in steady
+## state: flour chest accumulating, straw chest accumulating, both
+## thresher and mill alternating between Idle and Running, neither stuck.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
 static func test_name() -> String:
-	return "wheat → flour chain (with Thresher)"
+	return "wheat → flour chain (prefer_dir routing)"
 
 static func run(parent: Node) -> Dictionary:
 	var world = GridWorldScript.new()
@@ -30,58 +29,74 @@ static func run(parent: Node) -> Dictionary:
 
 	# Terrain.
 	world.set_overlay(Vector2i(0, 0), Terrain.Overlay.SOIL_TILLED)
-	for x in range(1, 8):
-		world.set_overlay(Vector2i(x, 0), Terrain.Overlay.STONE)
+	for offset in [Vector2i(0, 1), Vector2i(0, 2), Vector2i(0, 3),
+				   Vector2i(1, 3), Vector2i(2, 3), Vector2i(3, 3),
+				   Vector2i(-1, 3), Vector2i(-2, 3)]:
+		world.set_overlay(offset, Terrain.Overlay.STONE)
 
 	# Buildings.
 	if not world.place_building(Buildings.Type.PLANTER, Vector2i(0, 0), 0, Items.Type.WHEAT):
-		return _fail(world, "could not place wheat planter")
-	if not world.place_building(Buildings.Type.HARVESTER, Vector2i(1, 0)):
-		return _fail(world, "could not place harvester")
-	if not world.place_building(Buildings.Type.BELT, Vector2i(2, 0), Belt.DIR_E):
-		return _fail(world, "could not place belt #1")
-	if not world.place_building(Buildings.Type.THRESHER, Vector2i(3, 0)):
-		return _fail(world, "could not place thresher")
-	if not world.place_building(Buildings.Type.BELT, Vector2i(4, 0), Belt.DIR_E):
-		return _fail(world, "could not place belt #2")
-	if not world.place_building(Buildings.Type.MILL, Vector2i(5, 0)):
-		return _fail(world, "could not place mill")
-	if not world.place_building(Buildings.Type.BELT, Vector2i(6, 0), Belt.DIR_E):
-		return _fail(world, "could not place belt #3")
-	if not world.place_building(Buildings.Type.CHEST, Vector2i(7, 0)):
-		return _fail(world, "could not place chest")
+		return _fail(world, "wheat planter placement failed")
+	if not world.place_building(Buildings.Type.HARVESTER, Vector2i(0, 1)):
+		return _fail(world, "harvester placement failed")
+	if not world.place_building(Buildings.Type.BELT, Vector2i(0, 2), Belt.DIR_S):
+		return _fail(world, "wheat belt placement failed")
+	if not world.place_building(Buildings.Type.THRESHER, Vector2i(0, 3)):
+		return _fail(world, "thresher placement failed")
+	# East branch (grain → mill → flour chest).
+	if not world.place_building(Buildings.Type.BELT, Vector2i(1, 3), Belt.DIR_E):
+		return _fail(world, "grain belt placement failed")
+	if not world.place_building(Buildings.Type.MILL, Vector2i(2, 3)):
+		return _fail(world, "mill placement failed")
+	if not world.place_building(Buildings.Type.CHEST, Vector2i(3, 3)):
+		return _fail(world, "flour chest placement failed")
+	# West branch (straw → straw chest).
+	if not world.place_building(Buildings.Type.BELT, Vector2i(-1, 3), Belt.DIR_W):
+		return _fail(world, "straw belt placement failed")
+	if not world.place_building(Buildings.Type.CHEST, Vector2i(-2, 3)):
+		return _fail(world, "straw chest placement failed")
 
-	# Tick budget: planter cycle is the bottleneck at 600 ticks. 3000 ticks
-	# = 5 planter cycles, so ~5 wheat → grain → flour pipeline. Threshold
-	# is set to ≥3 so we catch the "deadlock after first cycle" regression
-	# (where straw clogs the front of the belt and mill goes IDLE forever)
-	# while staying tolerant of pipeline latency.
-	for _i in 3000:
+	# Tick budget: 5000 ticks ≈ 4 minutes simulated. With wheat planter
+	# 600 ticks/wheat and a self-sustaining loop, we should see ~7-8 flour
+	# and ~7-8 straw by then. Threshold ≥5 of each leaves comfortable
+	# margin while still proving sustained operation.
+	for _i in 5000:
 		TickSystem.current_tick += 1
 		TickSystem.tick.emit(TickSystem.current_tick)
 
-	var chest: Building = world.building_at(Vector2i(7, 0))
-	if chest == null:
-		return _fail(world, "chest disappeared from world")
-	var flour_in_chest: int = _bag_count(chest.state.get("bag", []), Items.Type.FLOUR)
-	if flour_in_chest < 3:
-		var planter: Building = world.building_at(Vector2i(0, 0))
-		var thresher: Building = world.building_at(Vector2i(3, 0))
-		var mill: Building = world.building_at(Vector2i(5, 0))
-		var diag: String = "tick=%d, planter.growth=%d, thresher.in=%s, thresher.out=%s, mill.in=%s, mill.out=%s, chest.bag=%s" % [
+	var flour_chest: Building = world.building_at(Vector2i(3, 3))
+	var straw_chest: Building = world.building_at(Vector2i(-2, 3))
+	if flour_chest == null or straw_chest == null:
+		return _fail(world, "chests vanished mid-test")
+
+	var flour: int = _bag_count(flour_chest.state.get("bag", []), Items.Type.FLOUR)
+	var straw: int = _bag_count(straw_chest.state.get("bag", []), Items.Type.STRAW)
+
+	var failures: Array = []
+	if flour < 5:
+		failures.append("expected ≥5 flour in chest, got %d" % flour)
+	if straw < 5:
+		failures.append("expected ≥5 straw in chest, got %d" % straw)
+
+	if not failures.is_empty():
+		# Diagnostic dump.
+		var thresher: Building = world.building_at(Vector2i(0, 3))
+		var mill: Building = world.building_at(Vector2i(2, 3))
+		var diag: String = ("tick=%d, thresher.state=%d, thresher.in=%s, thresher.out=%s, " +
+				"mill.state=%d, mill.in=%s, mill.out=%s") % [
 			TickSystem.current_tick,
-			int(planter.state.get("growth", 0)) if planter else -1,
+			int(thresher.state.get("state", -1)) if thresher else -1,
 			str(thresher.state.get("in_buffer", [])) if thresher else "?",
 			str(thresher.state.get("out_buffer", [])) if thresher else "?",
+			int(mill.state.get("state", -1)) if mill else -1,
 			str(mill.state.get("in_buffer", [])) if mill else "?",
 			str(mill.state.get("out_buffer", [])) if mill else "?",
-			str(chest.state.get("bag", [])),
 		]
 		_cleanup(world)
-		return { "ok": false, "message": "expected ≥3 flour in chest after 3000 ticks, got %d. Diagnostics: %s" % [flour_in_chest, diag] }
+		return { "ok": false, "message": "%s. Diagnostics: %s" % ["; ".join(failures), diag] }
 
 	_cleanup(world)
-	return { "ok": true, "message": "chest has %d flour after 3000 ticks (chain incl. Thresher)" % flour_in_chest }
+	return { "ok": true, "message": "chain ran continuously: flour=%d, straw=%d after 5000 ticks" % [flour, straw] }
 
 # ---------- helpers ----------
 

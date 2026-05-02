@@ -137,38 +137,85 @@ func _try_interact(player_tile: Vector2i) -> void:
 	else:
 		_show_toast("%s is empty" % Buildings.name_of(b.type))
 
-## Debug-only: spawns a working wheat → flour chain east of the player.
-## Layout is vertical; a Briquetter+Void pair sits west of the thresher-
-## output belt to drain straw so the chain runs continuously.
+## Debug-only: spawns two minimal chains east of the player.
+##
+## Wheat chain (origin = player + (3, 0)):
+##   Planter → Harvester → belt → Thresher
+##                                ↓ east port → Belt → Mill → Flour Chest
+##                                ↑ west port → Belt → Straw Chest
+##
+## Sugar chain (origin = player + (10, 0)):
+##   Planter → Harvester → belt → Sugar Press → belt → Yeast Culture → Yeast Chest
+##                                                    ↑
+##                                                    pipe ← Pump ← Water tile
+##
+## Each chain is independently verifiable. Full bread chain (combining
+## flour + yeast + water → dough → bread) lands when each piece passes.
 func _spawn_demo_chain(player_tile: Vector2i) -> void:
-	# Origin is 3 tiles east of player so it doesn't overlap walking space.
-	var o: Vector2i = player_tile + Vector2i(3, 0)
-	# (offset_from_origin, overlay, building_type, extra_payload)
-	var plan: Array = [
-		[Vector2i(0, 0),  Terrain.Overlay.SOIL_TILLED, Buildings.Type.PLANTER,    Items.Type.WHEAT],
-		[Vector2i(0, 1),  Terrain.Overlay.STONE,       Buildings.Type.HARVESTER,  null],
-		[Vector2i(0, 2),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
-		[Vector2i(0, 3),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
-		[Vector2i(0, 4),  Terrain.Overlay.STONE,       Buildings.Type.THRESHER,   null],
-		[Vector2i(0, 5),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
-		[Vector2i(-1, 5), Terrain.Overlay.STONE,       Buildings.Type.BRIQUETTER, null],
-		[Vector2i(-2, 5), Terrain.Overlay.STONE,       Buildings.Type.VOID,       null],
-		[Vector2i(0, 6),  Terrain.Overlay.STONE,       Buildings.Type.MILL,       null],
-		[Vector2i(0, 7),  Terrain.Overlay.STONE,       Buildings.Type.BELT,       null],
-		[Vector2i(0, 8),  Terrain.Overlay.STONE,       Buildings.Type.CHEST,      null],
+	var GRASS: int = -1
+	var BLT_E: int = Belt.DIR_E
+	var BLT_S: int = Belt.DIR_S
+	var BLT_W: int = Belt.DIR_W
+
+	# Wheat chain
+	var wheat_o: Vector2i = player_tile + Vector2i(3, 0)
+	var wheat_plan: Array = [
+		[Vector2i(0, 0),  Terrain.Overlay.SOIL_TILLED, GRASS, Buildings.Type.PLANTER,    Items.Type.WHEAT, 0],
+		[Vector2i(0, 1),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.HARVESTER,  null,             0],
+		[Vector2i(0, 2),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,       null,             BLT_S],
+		[Vector2i(0, 3),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.THRESHER,   null,             0],
+		[Vector2i(1, 3),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,       null,             BLT_E],
+		[Vector2i(2, 3),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.MILL,       null,             0],
+		[Vector2i(3, 3),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.CHEST,      null,             0],
+		[Vector2i(-1, 3), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,       null,             BLT_W],
+		[Vector2i(-2, 3), Terrain.Overlay.STONE,       GRASS, Buildings.Type.CHEST,      null,             0],
 	]
+
+	# Sugar / yeast chain. Includes a small water tile + pump + pipe so
+	# the Yeast Culture has fluid input. Pump is east of YC, water east
+	# of pump, pipe between YC and pump.
+	var sugar_o: Vector2i = player_tile + Vector2i(10, 0)
+	var sugar_plan: Array = [
+		[Vector2i(0, 0),  Terrain.Overlay.SOIL_TILLED, GRASS, Buildings.Type.PLANTER,      Items.Type.SUGAR_BEET, 0],
+		[Vector2i(0, 1),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.HARVESTER,    null,                  0],
+		[Vector2i(0, 2),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,         null,                  BLT_S],
+		[Vector2i(0, 3),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.SUGAR_PRESS,  null,                  0],
+		[Vector2i(0, 4),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,         null,                  BLT_S],
+		[Vector2i(0, 5),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.YEAST_CULTURE, null,                 0],
+		[Vector2i(0, 6),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.CHEST,        null,                  0],
+		# Water network east of YC.
+		[Vector2i(1, 5),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.PIPE,         null,                  0],
+		[Vector2i(2, 5),  Terrain.Overlay.STONE,       GRASS, Buildings.Type.PUMP,         null,                  0],
+		[Vector2i(3, 5),  -1,                          Terrain.Base.WATER, -1,             null,                  0],
+	]
+
+	var plan: Array = []
+	for entry in wheat_plan:
+		plan.append([wheat_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
+	for entry in sugar_plan:
+		plan.append([sugar_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
 	var placed: int = 0
 	var skipped: int = 0
 	for entry in plan:
-		var pos: Vector2i = o + entry[0]
+		var pos: Vector2i = entry[0]   # already absolute (offset baked in above)
 		var overlay: int = entry[1]
-		var btype: int = entry[2]
-		var extra = entry[3]
-		grid_world.set_overlay(pos, overlay)
+		var base: int = entry[2]
+		var btype: int = entry[3]
+		var extra = entry[4]
+		var dir: int = entry[5]
+		# Set base if requested.
+		if base != -1:
+			grid_world.tiles[pos] = Tile.new(base, Terrain.Overlay.NONE)
+		# Set overlay if requested.
+		if overlay != -1:
+			grid_world.set_overlay(pos, overlay)
+		# Place building if requested.
+		if btype == -1:
+			placed += 1
+			continue
 		if grid_world.has_building_at(pos):
 			skipped += 1
 			continue
-		var dir: int = Belt.DIR_S if btype == Buildings.Type.BELT else 0
 		if grid_world.place_building(btype, pos, dir, extra):
 			placed += 1
 		else:

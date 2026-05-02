@@ -134,32 +134,83 @@ static func _emit_outputs(b: Building, recipe: Dictionary) -> void:
 	for pair in recipe["outputs_solid"]:
 		_buffer_add(b.state["out_buffer"], int(pair[0]), int(pair[1]))
 
+## Push outputs to adjacent buildings.
+##
+## STRICT MODE (when output declares prefer_dir): only that direction is
+## tried. If the neighbor at prefer_dir doesn't accept this tick, the item
+## stays in the buffer until the port clears. This is the "dedicated
+## output port" semantic — multi-output recipes (e.g. Thresher) declare
+## "grain east, straw west" and items always go to their designated belt.
+##
+## DEFAULT (no prefer_dir, single-output recipes): try all 4 dirs.
+## Chests preferred over belts (player intent: chest = sink).
+##
+## Outputs are processed in array order; first item that can push wins
+## the tick. Two outputs preferring the same dir = first listed wins; the
+## other waits.
 static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) -> void:
 	for pair in recipe["outputs_solid"]:
 		var item_type: int = int(pair[0])
 		if _buffer_count(b.state["out_buffer"], item_type) <= 0:
 			continue
-		for dir in 4:
-			var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
-			if not world.has_building_at(npos):
-				continue
-			var neighbor: Building = world.building_at(npos)
-			if neighbor == null:
-				continue
-			# Accept either a belt (insert at slot 0) or a chest (direct
-			# insert into the chest's bag — useful as a sink for byproduct
-			# outputs the player doesn't yet have a use for, e.g. fuel
-			# briquettes before an Oven downstream exists).
-			var pushed: bool = false
-			if neighbor.type == Buildings.Type.BELT:
-				pushed = Belt.try_insert(neighbor, item_type)
-			elif neighbor.type == Buildings.Type.CHEST:
-				pushed = Chest.try_insert(neighbor, item_type, 1)
-			elif neighbor.type == Buildings.Type.VOID:
-				pushed = Void.try_insert(neighbor, item_type, 1)
-			if pushed:
-				_buffer_remove(b.state["out_buffer"], item_type, 1)
-				return  # one push per tick
+		# A 3rd element on the entry = preferred output direction (Belt.DIR_*).
+		var prefer_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+
+		if prefer_dir >= 0:
+			# Strict: try only the preferred direction.
+			if _try_push_to_dir(b, world, item_type, prefer_dir):
+				return
+			# Push failed — item waits in buffer until preferred port clears.
+		else:
+			# No preference: try all 4 dirs, chests first then belts.
+			for dir in 4:
+				if _try_push_chest_to_dir(b, world, item_type, dir):
+					return
+			for dir in 4:
+				if _try_push_belt_to_dir(b, world, item_type, dir):
+					return
+
+## Try to push one `item_type` to the building at `dir`. Accepts either
+## a chest (direct insert) or a belt (try_insert). Returns true on success.
+static func _try_push_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
+	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
+	if not world.has_building_at(npos):
+		return false
+	var neighbor: Building = world.building_at(npos)
+	if neighbor == null:
+		return false
+	var pushed: bool = false
+	if neighbor.type == Buildings.Type.CHEST:
+		pushed = Chest.try_insert(neighbor, item_type, 1)
+	elif neighbor.type == Buildings.Type.BELT:
+		pushed = Belt.try_insert(neighbor, item_type)
+	if pushed:
+		_buffer_remove(b.state["out_buffer"], item_type, 1)
+	return pushed
+
+static func _try_push_chest_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
+	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
+	if not world.has_building_at(npos):
+		return false
+	var neighbor: Building = world.building_at(npos)
+	if neighbor == null or neighbor.type != Buildings.Type.CHEST:
+		return false
+	if Chest.try_insert(neighbor, item_type, 1):
+		_buffer_remove(b.state["out_buffer"], item_type, 1)
+		return true
+	return false
+
+static func _try_push_belt_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
+	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
+	if not world.has_building_at(npos):
+		return false
+	var neighbor: Building = world.building_at(npos)
+	if neighbor == null or neighbor.type != Buildings.Type.BELT:
+		return false
+	if Belt.try_insert(neighbor, item_type):
+		_buffer_remove(b.state["out_buffer"], item_type, 1)
+		return true
+	return false
 
 # ---------- buffer (Array of [type, count]) helpers ----------
 
@@ -210,6 +261,15 @@ static func info_lines(b: Building, world = null) -> Array:
 			for pair in fluids:
 				parts.append(Fluids.name_of(int(pair[0])))
 			lines.append("Fluid in: %s (via adjacent pipe network)" % ", ".join(parts))
+		# Output port assignments — visible so player knows where to place belts.
+		var ports: Array = []
+		for output_pair in recipe.get("outputs_solid", []):
+			if output_pair.size() >= 3:
+				var port_dir: int = int(output_pair[2])
+				if port_dir >= 0:
+					ports.append("%s → %s" % [Items.name_of(int(output_pair[0])), Belt.DIR_NAMES[port_dir]])
+		if not ports.is_empty():
+			lines.append("Output ports: %s" % ", ".join(ports))
 		# Diagnostic: when stalled, name what's missing.
 		if s == IDLE or s == BLOCKED_OUTPUT:
 			var missing: Array = _missing_for_start(b, recipe, world)

@@ -89,7 +89,6 @@ func _build_categories() -> void:
 		"name": "Storage",
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.CHEST },
-			{ "kind": "building", "value": Buildings.Type.VOID },
 		],
 		"selected": 0,
 	})
