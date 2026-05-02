@@ -6,69 +6,67 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Tooling: godot-mcp (install in progress, awaiting verification)
+## Tooling: godot-mcp (installed, capability honestly documented)
 
-**Status as of commit installing this:** server registered + addon installed + plugin enabled, but **verification has NOT yet completed**. Verification requires a Claude Code restart so the new MCP tool schemas load. Restart, then run the four-check protocol below.
+- **Repo:** [satelliteoflove/godot-mcp](https://github.com/satelliteoflove/godot-mcp), addon version **2.17.0**.
+- **Status:** installed and connected. Capabilities and limitations characterized via direct verification. **Smaller win than the original install plan claimed; documentation below is the truthful version.**
 
-### What was installed
+### What MCP **CAN** do (confirmed by verification)
 
-- **Repo:** [satelliteoflove/godot-mcp](https://github.com/satelliteoflove/godot-mcp)
-- **Addon version installed:** 2.17.0 (latest published to npm at install time; npm distro may lag the GitHub HEAD which was 2.18.0)
-- **Why this one over Coding-Solo's:** Coding-Solo's MCP only reads stdout/stderr, not live game state. satelliteoflove's MCP installs an in-project addon (`MCPGameBridge` autoload + WebSocket server) that exposes runtime introspection — query node properties, scene tree, etc., from the running game.
+| Capability | Tool / action | Notes |
+|---|---|---|
+| Capture a screenshot of the running game | `editor screenshot_game` | **The only confirmed live-state path.** Returns a real PNG of the running Godot window — visible HUD, real-time tick count, current player position, building visuals. Solves the original "I can't see the screen" debugging problem at the visual level. |
+| Run / stop the project | `editor run`, `editor stop` | Launches the game from the editor and reports `is_playing` via `editor get_state`. |
+| Read the editor's loaded scene tree | `node find`, `node get_properties` | Returns built-in Godot properties (position, scale, modulate, etc.) and `@export`-annotated script vars **at their authored scene-file default values** — see caveat below. |
+| Look up Godot API documentation | `godot_docs` | Search/lookup against the engine's docs; useful for "how does Camera2D.zoom work" type queries. |
+| Control the editor's 2D viewport | `editor set_viewport_2d` | Pan/zoom the editor view (not the running game). |
+| Editor-side selection / scene editing | `node create / update / delete / reparent`, `scene open / save / create` | Authoring tools — useful for tooling/automation, irrelevant to live-state debugging. |
 
-### Install steps (executed)
+### What MCP **CANNOT** do (confirmed by failed verification attempts)
 
-1. **Register MCP server in Claude Code (project-local):**
-   ```
-   claude mcp add godot-mcp -- npx @satelliteoflove/godot-mcp
-   ```
-   Modifies `~/.claude.json` (project-scoped block).
+| Capability we wanted | Tool that should have worked | What actually happened |
+|---|---|---|
+| Read live game state (variables in the running game process) | `node get_properties` on `/root/Main` etc. | **Returns the editor's static scene tree, not the running game's runtime state.** Player.position read as `(64, 64)` (scene-file default) while the live game had the player at world `(64, 416)`. |
+| Read custom GDScript `var` declarations | `node get_properties` | Plain `var` is invisible. Only `@export`-annotated vars surface — and even then, only their **scene-file default values**, not live runtime values. |
+| Read Dictionary-typed game state | n/a | `GridWorld.buildings` (the master dict of Building instances by anchor) is a custom var holding RefCounted instances. Not readable through any MCP tool. |
+| Capture game stdout | `editor get_log_messages` (with `source=game`) | Returned `No log messages` even when game was running. Stdout-print-then-read fallback is unreliable. |
+| Inject input into the running game | `input sequence` | The tool reports "executed" but the action does not reach the running game process — `_demo_origin` and `_demo_spawned` did not change after `debug_spawn_demo` injection while the game was running. Action injection appears to target the editor's input map, not the live game. |
 
-2. **Install in-project addon:**
-   ```
-   npx -y @satelliteoflove/godot-mcp --install-addon "C:/Users/elham/facvtorio"
-   ```
-   Creates `addons/godot_mcp/` (command_router.gd, commands/, core/, game_bridge/, plugin.cfg, plugin.gd, ui/, websocket_server.gd).
+### Critical caveat — read this before assuming MCP can debug your game
 
-3. **Enable plugin in `project.godot`:** added `[editor_plugins] enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")`.
+**MCP reads the editor's static scene tree, NOT the running game process.** When `editor.run` launches the game, it forks a separate process; the editor's scene tree continues to reflect the **authored `.tscn` file content** — built-in property defaults, exported var defaults, the static layout. Anything that changes at runtime (player movement, F11 demo state, Building dict contents, tick count) is invisible to `node get_properties`.
 
-4. **Plugin auto-edits on first import:** when Godot first imported the project after the plugin was enabled, the plugin auto-added an `MCPGameBridge` autoload entry plus a `[godot_mcp]` config section (defaults: bind_mode=0, port_override_enabled=false, port_override=6550). These edits are intentional and should not be reverted.
+Adding `@export` to a script var **does NOT make its live runtime value readable**. It only makes the var visible to the inspector / scene serializer. MCP reads the scene-file default, not the running value. We tested this directly: `@export var _demo_origin` returned `(0, 0)` (its initial default) regardless of F11 state in the live game.
 
-### Dependencies
+**The single confirmed live-state path is `editor screenshot_game`.** Everything else is editor-scene introspection at the authored level.
 
-- Node.js ≥20 (verified: v24.14.1 installed)
-- Godot ≥4.5 (verified: 4.6.2 installed)
-- No API keys, no auth tokens.
+### Verification scope (revised after honest characterization)
 
-### Verification protocol (run AFTER Claude Code restart)
+The original four-check protocol assumed MCP could read live game state. It cannot. Use this **two-check** smoke test instead when re-verifying a fresh install:
 
-**The first Claude turn after restart should follow these re-orientation steps before doing anything else** (per user-specified protocol):
+1. **`editor get_state` reports `is_playing: true` after `editor run`.** Confirms editor↔game launch control works.
+2. **`editor screenshot_game` returns a valid PNG of the running game window.** Confirms the live-state path. Visual content (player position, building counts, HUD text) reads correctly from the screenshot.
 
-1. Read `SESSION_E_PLAN.md`, `PROJECT_LOG.md`, `NOTES.md` (this file).
-2. Run `git status` to check for uncommitted state.
-3. **Summarize back to user where things stand before acting.** This prevents fresh-Claude starting the wrong task.
+That's the verifiable scope. Everything beyond that — reading state programmatically, injecting input, capturing stdout — is **either limited to editor-scene defaults or doesn't work at all** in the current install.
 
-**Then run the four-check verification** (per user-locked spec):
+### Workarounds and future work
 
-1. Have the user press F11 in a running Godot session, spawning the demo.
-2. Use `mcp__godot-mcp__*` tools to read live state:
-   - **(a) Where is the Flax Planter?** Should be a Building node at `cloth_o + (0, 0)` where `cloth_o = player_tile + (10, 8)` at F11 press time. Confirm via MCP node lookup.
-   - **(b) What is the Retter's `Waiting for:` line?** Read the Retter Building's `state` dict, specifically `state.in_buffer` and `state.recipe_id`. Compare against the recipe's required inputs to construct the Waiting-for message that `Processor._missing_for_start()` would produce.
-   - **(c) What is the player's current tile?** Read `Player.global_position`, divide by `GridWorld.TILE_SIZE` (=32), report `Vector2i`.
-   - **(d) What is `_demo_origin`?** Read the value of `main.gd`'s `_demo_origin: Vector2i`. **This is the proof that today's coordinate-confusion problem is solved** — if MCP can read the F11 spawn origin without the user describing the screen, the install solved the actual problem.
+- **Reading live state when needed:** use `editor screenshot_game` and read the HUD strip visually. The HUD already shows player tile, hover tile, building count, current tick, holding-item — most of what's needed for "where am I in the world."
+- **Reading per-Building state (in_buffer, out_buffer, etc.):** **manual Q-inspect with eyes on screen.** No MCP path. Don't build a workflow that assumes MCP can answer this.
+- **Future Option (deferred indefinitely): debug-bridge autoload.** The addon already adds an `MCPGameBridge` autoload that runs in the game. In principle a custom bridge layer could expose live state as JSON via a new MCP command. **Real work, not free.** Defer until the screenshot-only path proves insufficient at least 3 times — and even then, weigh against simpler answers like "instrument the game with on-screen debug overlays" or "write programmatic E2E tests via PlayGodot from the Randroids-Dojo skill pack."
 
-If all four pass: install verified, document the working tool names + commands in this section, commit `[mcp] verification passed: 4/4 checks`. If any fail: document specifically which capability is missing, commit a partial-install note, decide whether to abandon or remediate.
+### Install footprint
 
-### Known gotchas (so far, expand on verification)
+- `claude mcp add godot-mcp -- npx @satelliteoflove/godot-mcp` registers the server (modifies `~/.claude.json` project block).
+- `addons/godot_mcp/` directory in the project root (the addon files).
+- `project.godot` has `[editor_plugins] enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")`, an `MCPGameBridge` autoload entry, and a `[godot_mcp]` config section (port 6550, bind_mode=0). These were auto-added when the plugin first loaded; not corruption, not to be reverted.
+- 8 tests pass post-install. Plugin GDScript is well-isolated.
 
-- **Plugin auto-edits `project.godot` on first headless import.** Don't be surprised when `[autoload]`, `[editor_plugins]`, and `[godot_mcp]` sections gain content you didn't manually write. Those edits are intentional plugin behavior, not corruption.
-- **Headless import logs `[godot-mcp] Plugin disabled` at shutdown.** This is a graceful shutdown message, not an error. The plugin is enabled in normal runs; it disables itself when the editor closes.
-- **8 tests pass post-install.** Plugin's GDScript is well-isolated; doesn't conflict with the test suite or autoloads (`TickSystem` is unaffected; `MCPGameBridge` is a new autoload added below it, runs alongside).
+### Known gotchas (verified)
 
-### Out of scope (next session: actually use it for game work)
-
-- This session's goal is "is the install working?" — verification only. Real usage of MCP tools to debug/inspect Stewardship landed in the next session.
-- PlayGodot integration tests (from Randroids-Dojo skill pack) — also next session or later.
+- **Plugin only binds the WebSocket when the *editor* is running, not the game.** Launching with just `Godot --path X` opens the game (not the editor); the WebSocket server stays unbound. Use `Godot --editor --path X` to launch the editor; `_enter_tree()` in `plugin.gd` runs only in editor context.
+- **Stale game processes block MCP connection.** During verification, an orphan game process from an earlier run held the editor's earlier WebSocket connection in a stuck state; killing the orphan unblocked MCP. If `editor get_state` returns "Not connected" but `netstat` shows port 6550 LISTENING, check for stale Godot processes via `tasklist` and kill them.
+- **Headless import logs `[godot-mcp] Plugin disabled` at shutdown** — graceful shutdown message, not an error.
 
 ---
 
