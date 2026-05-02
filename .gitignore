@@ -24,3 +24,17 @@ desktop.ini
 
 # Claude Code per-project local settings (permissions, tool toggles).
 .claude/settings.local.json
+
+# Build / export outputs. Godot exports to wherever you point Project →
+# Export, but if you ever export INTO the repo (e.g. ./build/), this
+# keeps binaries out of git. Adjust paths if you settle on a different
+# build folder convention.
+build/
+exports/
+*.exe
+*.pck
+*.so
+*.dylib
+*.dll
+*.dmg
+*.zip

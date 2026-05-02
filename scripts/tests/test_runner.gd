@@ -18,6 +18,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_fluid_network.gd"),
 	preload("res://scripts/tests/test_mixer_dough.gd"),
 	preload("res://scripts/tests/test_thresher_multioutput.gd"),
+	preload("res://scripts/tests/test_thresher_prefer_dir.gd"),
 ]
 
 func _ready() -> void:

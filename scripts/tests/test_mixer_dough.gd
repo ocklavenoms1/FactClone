@@ -1,13 +1,13 @@
 extends RefCounted
 
-## Mixer end-to-end test.
+## Mixer end-to-end test — sustained run + fluid-gating.
 ##
-## Builds a Mixer with flour + yeast pre-loaded into its input buffer and
-## a working pipe network feeding it water. Ticks for one process cycle
-## (100 ticks) and asserts the mixer produced 1 dough.
+## Phase 1: pre-load 5 cycles' worth of inputs (10 flour, 5 yeast) into the
+## mixer with a working pump+pipe network, tick 1500, assert ≥5 dough
+## produced and inputs fully consumed. Catches "single cycle works, multi
+## cycle hangs" regressions.
 ##
-## We pre-load the buffer manually instead of routing belts to keep the
-## test focused on the fluid-input + recipe execution path.
+## Phase 2: remove the pump, reload inputs, tick — recipe must not start.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
@@ -20,11 +20,7 @@ static func run(parent: Node) -> Dictionary:
 	var world = GridWorldScript.new()
 	parent.add_child(world)
 
-	# Layout:
-	#   (0,0) WATER
-	#   (1,0) stone + Pump (adjacent to water)
-	#   (2,0) stone + Pipe
-	#   (3,0) stone + Mixer (adjacent to pipe)
+	# Layout: water at (0,0), pump at (1,0), pipe at (2,0), mixer at (3,0).
 	world.tiles[Vector2i(0, 0)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 	for x in range(1, 4):
 		world.set_overlay(Vector2i(x, 0), Terrain.Overlay.STONE)
@@ -36,37 +32,37 @@ static func run(parent: Node) -> Dictionary:
 	if not world.place_building(Buildings.Type.MIXER, Vector2i(3, 0)):
 		return _fail(world, "mixer placement failed")
 
-	# Sanity: water available at mixer position.
 	_check(failures, world.fluid_available_at(Vector2i(3, 0)), "mixer should see water available adjacent")
 
-	# Pre-load mixer input buffer with flour×2 and yeast×1 (one full recipe).
+	# --- Phase 1: sustained 5-cycle run ---
+	# Pre-load 5 cycles' worth: 10 flour + 5 yeast (recipe consumes 2 flour
+	# and 1 yeast per cycle).
 	var mixer: Building = world.building_at(Vector2i(3, 0))
-	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 2], [Items.Type.YEAST, 1]]
-
-	# Tick for 200 ticks — recipe is 100, plus margin to ensure cycle completes
-	# and inputs are consumed.
-	for _i in 200:
-		TickSystem.current_tick += 1
-		TickSystem.tick.emit(TickSystem.current_tick)
-
-	# Assertions: dough produced, inputs consumed, mixer back to IDLE
-	# (since output is in buffer; nothing to push to since no belt).
-	var out_dough: int = _bag_count(mixer.state.get("out_buffer", []), Items.Type.DOUGH)
-	_check(failures, out_dough >= 1, "expected ≥1 dough in mixer output, got %d. State: %s" % [out_dough, str(mixer.state)])
-
-	var in_flour: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.FLOUR)
-	var in_yeast: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.YEAST)
-	_check(failures, in_flour == 0, "expected 0 flour after consume, got %d" % in_flour)
-	_check(failures, in_yeast == 0, "expected 0 yeast after consume, got %d" % in_yeast)
-
-	# Now verify the fluid-blocked path: remove the pump, reload mixer with
-	# fresh inputs, tick — recipe should NOT start because no water.
-	world.remove_building_at(Vector2i(1, 0))
-	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 2], [Items.Type.YEAST, 1]]
+	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 10], [Items.Type.YEAST, 5]]
 	mixer.state["out_buffer"] = []
 	mixer.state["state"] = Processor.IDLE
 	mixer.state["progress"] = 0
-	for _i in 200:
+
+	# 5 cycles × 100 ticks/cycle = 500 ticks; 1500 gives generous margin.
+	for _i in 1500:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+
+	var out_dough: int = _bag_count(mixer.state.get("out_buffer", []), Items.Type.DOUGH)
+	_check(failures, out_dough >= 5, "expected ≥5 dough from sustained run, got %d. State: %s" % [out_dough, str(mixer.state)])
+
+	var in_flour: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.FLOUR)
+	var in_yeast: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.YEAST)
+	_check(failures, in_flour == 0, "expected 0 flour after 5 cycles, got %d" % in_flour)
+	_check(failures, in_yeast == 0, "expected 0 yeast after 5 cycles, got %d" % in_yeast)
+
+	# --- Phase 2: fluid-gating (no pump → no cycles) ---
+	world.remove_building_at(Vector2i(1, 0))
+	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 10], [Items.Type.YEAST, 5]]
+	mixer.state["out_buffer"] = []
+	mixer.state["state"] = Processor.IDLE
+	mixer.state["progress"] = 0
+	for _i in 500:
 		TickSystem.current_tick += 1
 		TickSystem.tick.emit(TickSystem.current_tick)
 	var out_dough_no_water: int = _bag_count(mixer.state.get("out_buffer", []), Items.Type.DOUGH)
@@ -79,7 +75,7 @@ static func run(parent: Node) -> Dictionary:
 	world.queue_free()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "mixer produces dough with water, refuses without" }
+		return { "ok": true, "message": "mixer ran 5 sustained cycles with water; refused all cycles without" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures)] }
 
 # ---------- helpers ----------
