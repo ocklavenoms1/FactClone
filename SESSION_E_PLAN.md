@@ -50,3 +50,28 @@ Starting brief saved at the close of Session D. Loaded by the next session to re
 ## After Session E
 
 Session F brings the premium feedback loop (Trough, Coop, optional Egg Collector, premium bread, configurable Oven via info panel, score/value system). Re-confirm score system before implementing — spec recommended deferring to F unless playtest demand emerges sooner.
+
+---
+
+## Adjacent feature requests (not part of Session E)
+
+### Camera zoom
+
+**Goal:** mouse-wheel zoom for surveying large factories without losing the close-in detail of single-tile inspection.
+
+**Spec:**
+- Mouse wheel scrolls to zoom in/out.
+- Min zoom shows roughly **5×5 tiles** (close-in detail; matches today's view at default).
+- Max zoom shows roughly **40×40 tiles** (factory overview).
+- Smooth interpolation between zoom levels — not snap-to-step.
+- **Render-layer requirement:** hover indicators, port dots, footprint borders, and item sprites must remain readable at max zoom. If anything renders too small to see at 40×40 zoom, treat it as a render-layer problem to flag during implementation, not a deferred polish task — overview that doesn't surface state is useless.
+
+**Implementation hint (not a decision):** GridWorld already takes `@export var camera: Camera2D` — zoom is just `camera.zoom = Vector2(z, z)`. The hard part will be making port dots / borders visible at low zoom (they're computed at fixed pixel sizes today, e.g. `_PORT_RADIUS = 4.0` in `buildings.gd`). Likely fix: scale dot/border sizes inversely with `camera.zoom` so they stay visible-but-not-overwhelming.
+
+**Out of scope for this note (open questions for the zoom session):**
+- **Pinch-zoom on touch.** Mouse-wheel only for now; touch is a separate input layer.
+- **Zoom-to-cursor vs zoom-to-center.** Both are reasonable; pick during implementation. Factorio uses zoom-to-cursor; some RTSes use zoom-to-center. Try one, see how it feels.
+- **Zoom level persistence in saves.** Probably yes (it's player-comfort state, like cursor position would be), but not a save-shape change worth bumping the schema for. Could go in a separate "ui prefs" file.
+- **Mouse-wheel-while-pressed conflicts.** If shift+wheel or alt+wheel ever bind to other actions, plain wheel needs to stay zoom. Verify the InputMap doesn't already use wheel.
+
+**Sizing as a session:** small standalone session. Probably ~2-3 hours including the render-scaling fixes for indicators. Could land as a Session E sub-slice if Session E proper finishes early; otherwise its own session before F.
