@@ -6,6 +6,18 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## ⚠ Active git stash: zoom feature (WIP)
+
+**There is an uncommitted-but-stashed zoom implementation.** Don't forget about it.
+
+- **Stash:** `stash@{0}` — message `WIP: zoom feature, displacement bug unresolved, return to fresh later`.
+- **What it touches:** `scripts/main.gd` (wheel input + smooth-lerp zoom toward target), `scripts/world/grid_world.gd` (added `screen_px()` helper, scaled grid lines / hover preview / arrow widths), `scripts/world/buildings.gd` (scaled multi-tile border + port indicators).
+- **Why stashed:** at low zoom, the user reported a "squares are displaced" visual bug. The repro was unclear (screenshot showed grid only, no visible buildings/player). Investigation paused; we pivoted to other work.
+- **When returning:** restore with `git stash pop` (or `git stash apply` if you want to keep the entry), launch, place a recognizable building (e.g. Mill on stone), zoom out to the displacement state, screenshot it, and debug from there. Likely culprits: sub-pixel rounding in `screen_px()`-scaled draw widths, or camera position not snapped to integer pixels at low zoom.
+- **Spec reference:** the camera-zoom spec section in `SESSION_E_PLAN.md` (current at the time the stash was made — may have moved by the time you read this).
+
+---
+
 ## Resource mining: stone / ore / wood become world-gen consumables
 
 **Goal:** stop letting the player paint stone for free. Stone (and eventually ore, wood) become finite resources mined from world-gen deposits, processed into raw materials, and then placed.
