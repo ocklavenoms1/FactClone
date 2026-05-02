@@ -6,6 +6,72 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Tooling: godot-mcp (install in progress, awaiting verification)
+
+**Status as of commit installing this:** server registered + addon installed + plugin enabled, but **verification has NOT yet completed**. Verification requires a Claude Code restart so the new MCP tool schemas load. Restart, then run the four-check protocol below.
+
+### What was installed
+
+- **Repo:** [satelliteoflove/godot-mcp](https://github.com/satelliteoflove/godot-mcp)
+- **Addon version installed:** 2.17.0 (latest published to npm at install time; npm distro may lag the GitHub HEAD which was 2.18.0)
+- **Why this one over Coding-Solo's:** Coding-Solo's MCP only reads stdout/stderr, not live game state. satelliteoflove's MCP installs an in-project addon (`MCPGameBridge` autoload + WebSocket server) that exposes runtime introspection — query node properties, scene tree, etc., from the running game.
+
+### Install steps (executed)
+
+1. **Register MCP server in Claude Code (project-local):**
+   ```
+   claude mcp add godot-mcp -- npx @satelliteoflove/godot-mcp
+   ```
+   Modifies `~/.claude.json` (project-scoped block).
+
+2. **Install in-project addon:**
+   ```
+   npx -y @satelliteoflove/godot-mcp --install-addon "C:/Users/elham/facvtorio"
+   ```
+   Creates `addons/godot_mcp/` (command_router.gd, commands/, core/, game_bridge/, plugin.cfg, plugin.gd, ui/, websocket_server.gd).
+
+3. **Enable plugin in `project.godot`:** added `[editor_plugins] enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")`.
+
+4. **Plugin auto-edits on first import:** when Godot first imported the project after the plugin was enabled, the plugin auto-added an `MCPGameBridge` autoload entry plus a `[godot_mcp]` config section (defaults: bind_mode=0, port_override_enabled=false, port_override=6550). These edits are intentional and should not be reverted.
+
+### Dependencies
+
+- Node.js ≥20 (verified: v24.14.1 installed)
+- Godot ≥4.5 (verified: 4.6.2 installed)
+- No API keys, no auth tokens.
+
+### Verification protocol (run AFTER Claude Code restart)
+
+**The first Claude turn after restart should follow these re-orientation steps before doing anything else** (per user-specified protocol):
+
+1. Read `SESSION_E_PLAN.md`, `PROJECT_LOG.md`, `NOTES.md` (this file).
+2. Run `git status` to check for uncommitted state.
+3. **Summarize back to user where things stand before acting.** This prevents fresh-Claude starting the wrong task.
+
+**Then run the four-check verification** (per user-locked spec):
+
+1. Have the user press F11 in a running Godot session, spawning the demo.
+2. Use `mcp__godot-mcp__*` tools to read live state:
+   - **(a) Where is the Flax Planter?** Should be a Building node at `cloth_o + (0, 0)` where `cloth_o = player_tile + (10, 8)` at F11 press time. Confirm via MCP node lookup.
+   - **(b) What is the Retter's `Waiting for:` line?** Read the Retter Building's `state` dict, specifically `state.in_buffer` and `state.recipe_id`. Compare against the recipe's required inputs to construct the Waiting-for message that `Processor._missing_for_start()` would produce.
+   - **(c) What is the player's current tile?** Read `Player.global_position`, divide by `GridWorld.TILE_SIZE` (=32), report `Vector2i`.
+   - **(d) What is `_demo_origin`?** Read the value of `main.gd`'s `_demo_origin: Vector2i`. **This is the proof that today's coordinate-confusion problem is solved** — if MCP can read the F11 spawn origin without the user describing the screen, the install solved the actual problem.
+
+If all four pass: install verified, document the working tool names + commands in this section, commit `[mcp] verification passed: 4/4 checks`. If any fail: document specifically which capability is missing, commit a partial-install note, decide whether to abandon or remediate.
+
+### Known gotchas (so far, expand on verification)
+
+- **Plugin auto-edits `project.godot` on first headless import.** Don't be surprised when `[autoload]`, `[editor_plugins]`, and `[godot_mcp]` sections gain content you didn't manually write. Those edits are intentional plugin behavior, not corruption.
+- **Headless import logs `[godot-mcp] Plugin disabled` at shutdown.** This is a graceful shutdown message, not an error. The plugin is enabled in normal runs; it disables itself when the editor closes.
+- **8 tests pass post-install.** Plugin's GDScript is well-isolated; doesn't conflict with the test suite or autoloads (`TickSystem` is unaffected; `MCPGameBridge` is a new autoload added below it, runs alongside).
+
+### Out of scope (next session: actually use it for game work)
+
+- This session's goal is "is the install working?" — verification only. Real usage of MCP tools to debug/inspect Stewardship landed in the next session.
+- PlayGodot integration tests (from Randroids-Dojo skill pack) — also next session or later.
+
+---
+
 ## ⚠ Active git stash: zoom feature (WIP)
 
 **There is an uncommitted-but-stashed zoom implementation.** Don't forget about it.
