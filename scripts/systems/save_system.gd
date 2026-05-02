@@ -25,8 +25,15 @@ extends RefCounted
 ##            `dir` in their state so prefer_dir ports rotate with the
 ##            building. v8 saves where these buildings were 1×1 / non-
 ##            directional cannot be safely upgraded — hard-fail.
+##   v9 → v10: Player gains bag-cap progression. New top-level field
+##            `player_progression: Dictionary` with `bags_consumed: int`
+##            (0..5) tracking lifetime bag consumption. Inventory capacity
+##            persists implicitly via load_array's resize logic; the
+##            progression dict is the explicit counter and the future home
+##            for additional progression state (score/value, achievements,
+##            etc.). v9 saves don't have this field — hard-fail.
 
-const SAVE_VERSION: int = 9
+const SAVE_VERSION: int = 10
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -34,10 +41,11 @@ const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 ## DEFAULT_SAVE_PATH after the test.
 static var save_path: String = DEFAULT_SAVE_PATH
 
-## Set by load_game on failure. main.gd reads this to surface a toast.
-static var last_load_error: String = ""
-
-static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory) -> bool:
+## `player_progression` is a free-form Dictionary tracked by main.gd.
+## Default-empty so existing tests / call sites that don't yet pass
+## progression don't break the signature; the caller stays in charge of
+## defaulting missing keys on the load side.
+static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory, player_progression: Dictionary = {}) -> bool:
 	var tiles_data: Array = []
 	for tile_key in grid_world.tiles:
 		var pos: Vector2i = tile_key
@@ -56,6 +64,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"tiles": tiles_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
+		"player_progression": player_progression,
 	}
 
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
@@ -66,23 +75,29 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	file.close()
 	return true
 
-static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory) -> bool:
-	last_load_error = ""
+## Returns a LoadResult. Convention:
+## - result.success == false, error_message == "" → no save file (silent).
+## - result.success == false, error_message != "" → load failed; caller surfaces error.
+## - result.success == true → grid_world / player / player_inventory mutated;
+##   result.player_progression carries any progression state the caller needs to apply.
+static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory) -> LoadResult:
+	var result := LoadResult.new()
 	if not FileAccess.file_exists(save_path):
-		return false
+		return result   # silent failure; treat as "fresh start"
+
 	var file := FileAccess.open(save_path, FileAccess.READ)
 	if file == null:
-		last_load_error = "Could not open save file for reading."
-		push_error(last_load_error)
-		return false
+		result.error_message = "Could not open save file for reading."
+		push_error(result.error_message)
+		return result
 	var text: String = file.get_as_text()
 	file.close()
 
 	var parsed = JSON.parse_string(text)
 	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
-		last_load_error = "Save file is corrupt or unreadable."
-		push_error(last_load_error)
-		return false
+		result.error_message = "Save file is corrupt or unreadable."
+		push_error(result.error_message)
+		return result
 
 	var data: Dictionary = parsed
 	var version: int = int(data.get("version", 0))
@@ -94,10 +109,10 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		if OS.get_name() == "Windows":
 			native_path = native_path.replace("/", "\\")
 		var msg: String = "Save file is v%d; current version is v%d.\n\nOld saves are not compatible. Delete the file to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
-		last_load_error = "Save incompatible (v%d vs v%d) — see dialog." % [version, SAVE_VERSION]
+		result.error_message = "Save incompatible (v%d vs v%d) — see dialog." % [version, SAVE_VERSION]
 		push_error(msg)
 		OS.alert(msg, "Save incompatible")
-		return false
+		return result
 
 	var player_pos: Array = data.get("player", [0, 0])
 	player.global_position = Vector2(float(player_pos[0]), float(player_pos[1]))
@@ -125,7 +140,9 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	if data.has("player_inventory"):
 		player_inventory.load_array(data["player_inventory"])
 
-	return true
+	result.player_progression = data.get("player_progression", {})
+	result.success = true
+	return result
 
 static func save_exists() -> bool:
 	return FileAccess.file_exists(save_path)

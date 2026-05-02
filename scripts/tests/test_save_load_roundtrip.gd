@@ -1,20 +1,21 @@
 extends RefCounted
 
-## Save/load round-trip test — locks the v9 schema.
+## Save/load round-trip test — locks the v10 schema.
 ##
 ## Builds a world with diverse content (water, every overlay type, every
-## building type, items in inventory, mid-tick mill state), saves to a
-## scratch path, loads into a blank world, and asserts every observable
-## piece of state matches.
+## building type, items in inventory, mid-tick mill state, NON-EMPTY
+## player progression), saves to a scratch path, loads into a blank
+## world, and asserts every observable piece of state matches.
 ##
 ## Catches: tile shape regressions (base/overlay schema), building state
-## losses, inventory shape drifts, footprint occupancy desyncs.
+## losses, inventory shape drifts, footprint occupancy desyncs, progression
+## field drops.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
 
 static func test_name() -> String:
-	return "save/load round-trip (v9)"
+	return "save/load round-trip (v10)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -96,8 +97,12 @@ static func run(parent: Node) -> Dictionary:
 	# Tick counter.
 	TickSystem.current_tick = 4242
 
+	# Player progression — non-empty, exercising the v10 round-trip.
+	# bags_consumed = 3 means the player has consumed 3 bags lifetime.
+	var progression_a: Dictionary = { "bags_consumed": 3 }
+
 	# --- Save ---
-	if not SaveSystem.save_game(world_a, player_a, inv_a):
+	if not SaveSystem.save_game(world_a, player_a, inv_a, progression_a):
 		return _fail(world_a, orig_path, "save_game returned false")
 	if not FileAccess.file_exists(TEST_SAVE_PATH):
 		return _fail(world_a, orig_path, "save file does not exist after save_game")
@@ -109,8 +114,9 @@ static func run(parent: Node) -> Dictionary:
 	parent.add_child(player_b)
 	var inv_b: Inventory = Inventory.new(16)
 
-	if not SaveSystem.load_game(world_b, player_b, inv_b):
-		return _fail(world_a, orig_path, "load_game returned false: %s" % SaveSystem.last_load_error)
+	var result: LoadResult = SaveSystem.load_game(world_b, player_b, inv_b)
+	if not result.success:
+		return _fail(world_a, orig_path, "load_game returned !success: %s" % result.error_message)
 
 	# --- Assertions ---
 	# Tick counter restored.
@@ -159,6 +165,9 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, inv_b.total_of(Items.Type.FLOUR) == 17, "inventory flour count: expected 17, got %d" % inv_b.total_of(Items.Type.FLOUR))
 	_check(failures, inv_b.total_of(Items.Type.WHEAT) == 5, "inventory wheat count: expected 5, got %d" % inv_b.total_of(Items.Type.WHEAT))
 
+	# Player progression round-trips.
+	_check(failures, int(result.player_progression.get("bags_consumed", -1)) == 3, "progression.bags_consumed: expected 3, got %s" % str(result.player_progression.get("bags_consumed", "MISSING")))
+
 	# --- Cleanup ---
 	for w in [world_a, world_b]:
 		if TickSystem.tick.is_connected(w._on_tick):
@@ -171,7 +180,7 @@ static func run(parent: Node) -> Dictionary:
 	SaveSystem.save_path = orig_path
 
 	if failures.is_empty():
-		return { "ok": true, "message": "v7 round-trip preserves tiles, buildings, state, inventory, tick" }
+		return { "ok": true, "message": "v10 round-trip preserves tiles, buildings, state, inventory, tick, progression" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures)] }
 
 # ---------- helpers ----------

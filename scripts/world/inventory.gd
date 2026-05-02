@@ -107,6 +107,19 @@ func aggregate() -> Dictionary:
 		agg[s.item_type] = agg.get(s.item_type, 0) + s.count
 	return agg
 
+## Grow capacity by `n` empty slots. Existing items are unaffected.
+## Generic primitive — used by the bag-cap mechanic and any future
+## inventory-upgrade source (quest rewards, NPC trade, etc.).
+##
+## No-op if `n <= 0`. Slots are appended (not prepended), so existing
+## stack indices remain stable for any code that holds slot references.
+func expand(n: int) -> void:
+	if n <= 0:
+		return
+	capacity += n
+	for i in n:
+		slots.append(ItemStack.new())
+
 func to_array() -> Array:
 	var out: Array = []
 	for s in slots:

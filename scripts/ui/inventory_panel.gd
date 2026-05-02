@@ -15,6 +15,12 @@ const BORDER_COLOR: Color = Color(0.6, 0.6, 0.6, 0.9)
 const TEXT_COLOR: Color = Color(0.95, 0.95, 0.85)
 
 var inventory: Inventory = null
+## Set by main.gd. Read by reference each redraw to display "Bags: X/5
+## consumed" — Dictionary is shared, so updates from the bag-consume flow
+## are reflected automatically without a setter call. Empty-or-null means
+## "don't draw the bags row" (keeps the panel clean for tests / non-game
+## screens that don't have progression state).
+var player_progression: Dictionary = {}
 
 func _ready() -> void:
 	anchor_left = 1.0
@@ -33,9 +39,14 @@ func _draw() -> void:
 	if inventory == null:
 		return
 	var agg: Dictionary = inventory.aggregate()
+	# Bags header is its own row above the items. Always shown when
+	# progression dict is set, even at 0/5 — gives the player a visible
+	# anchor for what they're working toward.
+	var has_bags_row: bool = not player_progression.is_empty()
 	# Always reserve at least one row's height so the panel is visible even when empty.
-	var rows: int = max(1, agg.size())
-	var height: float = PADDING * 2 + ROW_HEIGHT * rows + 22
+	var item_rows: int = max(1, agg.size())
+	var bags_row_h: int = ROW_HEIGHT if has_bags_row else 0
+	var height: float = PADDING * 2 + ROW_HEIGHT * item_rows + 22 + bags_row_h
 	var rect: Rect2 = Rect2(0, 0, PANEL_WIDTH, height)
 	offset_bottom = offset_top + height
 	draw_rect(rect, BG_COLOR, true)
@@ -45,6 +56,11 @@ func _draw() -> void:
 	draw_string(font, Vector2(PADDING, PADDING + 12), "Inventory", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, TEXT_COLOR)
 
 	var y: float = PADDING + 22
+	if has_bags_row:
+		var n: int = int(player_progression.get("bags_consumed", 0))
+		var bags_label: String = "Bags: %d / 5 consumed" % n
+		draw_string(font, Vector2(PADDING, y + 16), bags_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.7, 0.5))
+		y += ROW_HEIGHT
 	if agg.is_empty():
 		draw_string(font, Vector2(PADDING, y + 12), "(empty)", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.7, 0.65))
 		return

@@ -3,6 +3,13 @@ extends Node2D
 const TOAST_DURATION: float = 2.0
 const PLAYER_INVENTORY_CAPACITY: int = 16
 
+# Bag-cap mechanic (Session E final). Bags are consumed by the player to
+# permanently expand inventory. SLOTS_PER_BAG slots per bag, capped at
+# BAG_CAP total bags consumed (lifetime, persists across save/load).
+const SLOTS_PER_BAG: int = 4
+const BAG_CAP: int = 5
+const BAG_CONFIRM_WINDOW: float = 3.0   # seconds; "press B again to confirm"
+
 @onready var player: CharacterBody2D = $Player
 @onready var camera: Camera2D = $Player/Camera
 @onready var grid_world: Node2D = $GridWorld
@@ -26,19 +33,49 @@ var placement_direction: int = Belt.DIR_E   # 0=E, 1=S, 2=W, 3=N
 var _demo_spawned: bool = false
 var _demo_origin: Vector2i = Vector2i.ZERO
 
+# Player progression — single dict so future progression state (score,
+# achievements, etc.) lives in one persistent container instead of
+# accumulating as parallel vars on main.gd.
+#
+# Today's only key is `bags_consumed: int` (0..BAG_CAP), set by the bag-
+# consume flow and read by inventory_panel + the cap-check on B presses.
+# Persists via SaveSystem; load returns it on LoadResult.player_progression.
+var player_progression: Dictionary = {
+	"bags_consumed": 0,
+}
+
+# Two-press confirm state for bag consumption. First B press shows a
+# prompt and arms the confirm window; second press within the window
+# consumes the bag. Window expires silently. See _process loop for the
+# decay-before-input ordering.
+var _bag_confirm_pending: bool = false
+var _bag_confirm_expires_at: float = 0.0
+
 func _ready() -> void:
 	player_inventory = Inventory.new(PLAYER_INVENTORY_CAPACITY)
 	grid_world.camera = camera
 	inventory_panel.inventory = player_inventory
+	# Inventory panel reads progression by reference — Dictionary is shared,
+	# panel re-reads on every redraw to display "Bags: X/5 consumed".
+	inventory_panel.player_progression = player_progression
 
 	if SaveSystem.save_exists():
-		if SaveSystem.load_game(grid_world, player, player_inventory):
+		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
+		if result.success:
+			_apply_loaded_progression(result.player_progression)
 			_show_toast("World loaded from save")
 		else:
-			_show_toast(SaveSystem.last_load_error if SaveSystem.last_load_error != "" else "Save file present but failed to load")
+			_show_toast(result.error_message if result.error_message != "" else "Save file present but failed to load")
 	else:
 		grid_world.generate_default_world()
-		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · Esc close · F5/F9 save/load")
+		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · Esc close · F5/F9 save/load · B consume bag")
+
+## Apply a loaded progression dict to runtime state. Missing keys keep the
+## defaults that main.gd's `player_progression` was initialized with — this
+## is the forward-compat read pattern from CONVENTIONS.md.
+func _apply_loaded_progression(loaded: Dictionary) -> void:
+	for key in loaded.keys():
+		player_progression[key] = loaded[key]
 
 func _process(delta: float) -> void:
 	var mouse_world: Vector2 = get_global_mouse_position()
@@ -117,15 +154,30 @@ func _process(delta: float) -> void:
 			_demo_origin = player_tile
 
 	if Input.is_action_just_pressed("quick_save"):
-		if SaveSystem.save_game(grid_world, player, player_inventory):
+		if SaveSystem.save_game(grid_world, player, player_inventory, player_progression):
 			_show_toast("Saved")
 		else:
 			_show_toast("Save failed — see console")
 	if Input.is_action_just_pressed("quick_load"):
-		if SaveSystem.load_game(grid_world, player, player_inventory):
+		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
+		if result.success:
+			_apply_loaded_progression(result.player_progression)
 			_show_toast("Loaded")
 		else:
-			_show_toast(SaveSystem.last_load_error if SaveSystem.last_load_error != "" else "Nothing to load")
+			_show_toast(result.error_message if result.error_message != "" else "Nothing to load")
+
+	# Bag consume — two-press confirm. Decay BEFORE input check so an
+	# expiry-frame press always reads as a fresh first press, never a
+	# stale confirm. Time.get_ticks_msec is monotonic + pause-independent;
+	# if a future "pause game" feature freezes _process, the prompt would
+	# still expire by wall clock — which matches player perception.
+	if _bag_confirm_pending and Time.get_ticks_msec() / 1000.0 >= _bag_confirm_expires_at:
+		_bag_confirm_pending = false
+	if Input.is_action_just_pressed("consume_bag"):
+		if _bag_confirm_pending:
+			_confirm_bag_consume()
+		else:
+			_request_bag_consume()
 
 	if toast_timer > 0.0:
 		toast_timer -= delta
@@ -397,3 +449,37 @@ func _overlay_list_str(overlays: Array) -> String:
 func _show_toast(msg: String) -> void:
 	toast_label.text = msg
 	toast_timer = TOAST_DURATION
+
+# ---------- bag consume ----------
+
+## First-press path. Validates preconditions; only enters the pending-confirm
+## state on a valid request. Failure ordering: cap-reached takes priority
+## over no-bag (cap is the more permanent state — message helps the player
+## stop trying).
+func _request_bag_consume() -> void:
+	if int(player_progression.get("bags_consumed", 0)) >= BAG_CAP:
+		_show_toast("Inventory at maximum. Save bags for trade.")
+		return
+	if player_inventory.total_of(Items.Type.BAG) <= 0:
+		_show_toast("No bag to consume.")
+		return
+	_bag_confirm_pending = true
+	_bag_confirm_expires_at = Time.get_ticks_msec() / 1000.0 + BAG_CONFIRM_WINDOW
+	_show_toast("Consume bag for +%d slots? Press B again to confirm." % SLOTS_PER_BAG)
+
+## Second-press path. Defensive re-check of preconditions in case state
+## changed between prompt and confirm (no current code path mutates these
+## while a prompt is pending, but the check is cheap and future-proofs).
+func _confirm_bag_consume() -> void:
+	_bag_confirm_pending = false
+	if int(player_progression.get("bags_consumed", 0)) >= BAG_CAP:
+		_show_toast("Inventory at maximum. Save bags for trade.")
+		return
+	if player_inventory.total_of(Items.Type.BAG) <= 0:
+		_show_toast("No bag to consume.")
+		return
+	player_inventory.remove(Items.Type.BAG, 1)
+	player_inventory.expand(SLOTS_PER_BAG)
+	var n: int = int(player_progression.get("bags_consumed", 0)) + 1
+	player_progression["bags_consumed"] = n
+	_show_toast("Inventory expanded: %d/%d bags consumed, +%d slots" % [n, BAG_CAP, SLOTS_PER_BAG])

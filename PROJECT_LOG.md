@@ -9,6 +9,54 @@ Each entry has three sections:
 
 ---
 
+## Session E final — Bag-cap progression mechanic
+
+**Date:** 2026-05-02
+**Tag:** `session-e-final`
+
+The deferred Session E architectural piece. Bags are consumed by the player to permanently expand inventory, capped at 5 bags lifetime. Sets a `player_progression: Dictionary` pattern that future progression state (score, achievements) can extend.
+
+### What shipped
+
+- **`Inventory.expand(n: int)` primitive.** Generic "grow capacity by N empty slots" — used by bag-cap, but not coupled to it. Future inventory-upgrade mechanics (NPC quest rewards, world-gen chests) can use the same primitive.
+- **Bag-cap consume flow on key `B`** with two-press confirm:
+  - First press → toast `Consume bag for +4 slots? Press B again to confirm.` 3-second confirm window.
+  - Second press within window → consume bag, expand inventory by `SLOTS_PER_BAG` (4), increment `bags_consumed`. Toast `Inventory expanded: X/5 bags consumed, +4 slots`.
+  - Window expires silently. Press outside window = fresh first press, re-shows prompt.
+  - Decay-before-input ordering in `_process` ensures expiry-frame presses always read as fresh, never stale-confirm.
+- **Failure ordering locked in:** cap-reached takes priority over no-bag (cap is the more permanent state — `Inventory at maximum. Save bags for trade.` helps the player stop trying). Documented in code comment + asserted in `test_bag_cap.gd`.
+- **`player_progression: Dictionary` on `main.gd`** — single container keyed today by `bags_consumed`. Forward-extensible for score/achievements/research without further parallel `var`s on `main.gd`.
+- **Inventory panel header** shows `Bags: X / 5 consumed` — always visible when progression dict is set, gives the player a working anchor for the cap.
+- **Save schema v9 → v10.** New top-level field `player_progression: Dictionary`. v9 saves hard-fail with `OS.alert`. Inventory capacity persists implicitly via `Inventory.load_array`'s resize logic; progression dict is the explicit counter.
+- **`SaveSystem` refactor:** `load_game` now returns a `LoadResult` class (`success: bool`, `error_message: String`, `player_progression: Dictionary`) instead of `bool`. Eliminates `SaveSystem.last_load_error` static var. Three call sites updated (`main.gd::_ready`, `main.gd::_process` quick_load, `test_save_load_roundtrip.gd`).
+- **Tests:** 9 passing.
+  - New `test_bag_cap.gd` — three phases: `Inventory.expand` correctness, cap-of-5 lifecycle (5 successes + 6th rejection), failure ordering (cap-priority + no-bag-only).
+  - Extended `test_save_load_roundtrip.gd` — non-empty progression (`bags_consumed: 3`) round-trips via the new `LoadResult.player_progression` field. Renamed to "(v10)".
+
+### Decisions
+
+- **`player_progression: Dictionary` rather than flat `bags_consumed: int`.** YAGNI rejected because score/value system is already on Session F's roadmap. One container now sets the pattern; future fields go into the same dict instead of accumulating as parallel main.gd vars.
+- **Schema bump v9→v10 instead of deriving `bags_consumed` from inventory size.** Deriving assumes "the only slot source is bags forever." Future mechanics (quest rewards, etc.) could grant slots from non-bag sources, breaking the math. Explicit count matches the player-facing rule "5 bags consumed total."
+- **Key `B` + two-press toast confirm, no inventory UI rebuild.** `inventory_panel.gd` is currently `MOUSE_FILTER_IGNORE` and renders aggregated rows (one per item type), not slot-by-slot. Right-click on a bag isn't possible without rebuilding the panel as an interactive grid — out of scope. Two-press toast confirm is mild friction equivalent to a confirm dialog and matches the existing keyboard-driven UX (Q inspect, R rotate, F11 demo).
+- **`LoadResult` class instead of static `last_load_error` + `last_loaded_bags_consumed`.** With 3 call sites and a clear "future fields go here" pattern, the bounded refactor was worth doing. Migrated `last_load_error` → `error_message` along with adding `player_progression`. Static load-time state surface is now zero.
+- **Decay-check before input-check in `_process`.** Ordering matters: an expiry-frame press always reads as a fresh first press (re-shows prompt), never as a stale confirm. Documented in code so future-me doesn't reorder.
+
+### Lessons
+
+- **"Make a small home now" beats YAGNI when the next field is already on the roadmap.** The instinct was `var bags_consumed: int`. Pushback caught it: `player_progression: Dictionary` costs one line and one access pattern (`int(dict.get(key, 0))`) and saves a refactor when score/value lands. Default to the small home; defend YAGNI only when there's evidence the second field truly won't materialize.
+- **Failure ordering is a real design decision, not a coding detail.** With both cap-reached and no-bag failures possible at the same time, picking the priority message was a UX call. Documented + tested rather than left implicit.
+- **Smoke tests need a way to skip cold-start cost.** F11 demo + cloth chain takes ~5 minutes to produce a bag. For verification, that's intolerable. Solution: a temp F12 debug spawn that puts 5 bags in inventory directly. Added during smoke test, removed before commit. Convention captured: **debug-spawn keys are a smoke-test pattern, not a feature**; mark them clearly, remove them before the session ships.
+- **Save-state staleness causes false-positive bug reports.** During smoke test, the save loaded with `bags_consumed: 5` from earlier testing. Pressing B → "Inventory at maximum" looks like a bug; it was the cap test passing on stale state. Lesson: **clear save before claiming a smoke test pass on a fresh-start scenario**, or build the test to start from known state.
+- **`LoadResult` refactor was a bounded refactor with outsized payoff.** 3 call sites, ~30 lines changed. Static-state surface now zero; future progression fields slot in cleanly. The "bounded refactor" sweet spot is "if it's 2-3 call sites, do it"; 10+ would have been the static-var lesser-evil.
+
+### Known follow-ups (carried forward unchanged)
+
+- **Camera zoom (stashed):** `stash@{0}`, displacement bug unresolved. Pop-and-debug is its own session.
+- **Cloth chain ergonomic wart:** no `prefer_dir` on cloth recipes — fragile to "I added a chest and the chain stopped." Likely fix is per-recipe prefer_dir + rotation enable. Punt to a polish session.
+- **Future inventory UI rebuild:** if/when the panel becomes interactive (slot grid, hover, click), bag consumption can move from key+two-press to right-click + dialog. Mechanic stays the same; UX shell changes. No urgency.
+
+---
+
 ## Session E — Cloth chain + F11 demo extension
 
 **Date:** 2026-05-02
