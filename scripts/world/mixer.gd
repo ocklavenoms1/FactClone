@@ -22,20 +22,23 @@ const HOPPER_IN: Color = Color(0.95, 0.92, 0.85)         # flour-ish
 const HOPPER_OUT: Color = Color(0.92, 0.86, 0.70)
 const WATER_INLET: Color = Color(0.30, 0.55, 0.85)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.MIXER, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.MIXER, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 # ---------- visual ----------
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var w: float = float(tile_size * fp.x)
+	var h: float = float(tile_size * fp.y)
+	var rect: Rect2 = Rect2(world_pos, Vector2(w, h))
 	canvas.draw_rect(rect, SHELL_DARK, true)
 	canvas.draw_rect(rect.grow(-3), SHELL_MID, true)
 	canvas.draw_rect(rect, TRIM_COLOR, false, 2.0)
 
 	# Mixing bowl + paddle.
-	var center: Vector2 = world_pos + Vector2(tile_size * 0.5, tile_size * 0.5)
-	var bowl_radius: float = float(tile_size) * 0.30
+	var center: Vector2 = world_pos + Vector2(w * 0.5, h * 0.5)
+	var bowl_radius: float = min(w, h) * 0.30
 	canvas.draw_circle(center, bowl_radius, BOWL_COLOR)
 	canvas.draw_arc(center, bowl_radius, 0.0, TAU, 32, TRIM_COLOR, 1.5)
 
@@ -68,11 +71,11 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 		var out_total: int = _buffer_total(b.state.get("out_buffer", []))
 		var in_cap: int = int(recipe["input_capacity"])
 		var out_cap: int = int(recipe["output_capacity"])
-		var bar_w: float = float(tile_size) - 6.0
+		var bar_w: float = w - 6.0
 		canvas.draw_rect(Rect2(world_pos + Vector2(3, 2), Vector2(bar_w * clamp(float(in_total) / float(in_cap), 0.0, 1.0), 2)), HOPPER_IN, true)
-		canvas.draw_rect(Rect2(world_pos + Vector2(3, tile_size - 4), Vector2(bar_w * clamp(float(out_total) / float(out_cap), 0.0, 1.0), 2)), HOPPER_OUT, true)
+		canvas.draw_rect(Rect2(world_pos + Vector2(3, h - 4), Vector2(bar_w * clamp(float(out_total) / float(out_cap), 0.0, 1.0), 2)), HOPPER_OUT, true)
 		# Water inlet indicator (left edge).
-		canvas.draw_circle(world_pos + Vector2(3, tile_size * 0.5), 2.5, WATER_INLET)
+		canvas.draw_circle(world_pos + Vector2(3, h * 0.5), 2.5, WATER_INLET)
 
 static func _buffer_total(buf: Array) -> int:
 	var n: int = 0

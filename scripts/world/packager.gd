@@ -11,18 +11,21 @@ const TRIM: Color = Color(0.06, 0.05, 0.04)
 const BOX_COLOR: Color = Color(0.55, 0.40, 0.25)
 const BREAD_COLOR: Color = Color(0.78, 0.55, 0.30)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.PACKAGER, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.PACKAGER, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var w: float = float(tile_size * fp.x)
+	var h: float = float(tile_size * fp.y)
+	var rect: Rect2 = Rect2(world_pos, Vector2(w, h))
 	canvas.draw_rect(rect, FRAME, true)
 	canvas.draw_rect(rect.grow(-3), SHELL, true)
 	canvas.draw_rect(rect, TRIM, false, 2.0)
 
 	# Open box outline + 4 bread pellets that fill in over the cycle.
-	var center: Vector2 = world_pos + Vector2(tile_size * 0.5, tile_size * 0.5)
-	var box_size: Vector2 = Vector2(tile_size * 0.5, tile_size * 0.5)
+	var center: Vector2 = world_pos + Vector2(w * 0.5, h * 0.5)
+	var box_size: Vector2 = Vector2(w * 0.5, h * 0.5)
 	var box_rect: Rect2 = Rect2(center - box_size * 0.5, box_size)
 	canvas.draw_rect(box_rect, BOX_COLOR, true)
 	canvas.draw_rect(box_rect, TRIM, false, 1.5)

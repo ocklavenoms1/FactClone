@@ -39,14 +39,41 @@ func _process(delta: float) -> void:
 
 	grid_world.hover_tile = hover_tile
 	grid_world.show_hover = true
-	# Direction preview for directional building placements.
+	# Direction preview for directional building placements (Belt + every
+	# rotatable processor). For multi-tile rotatable buildings the arrow
+	# is centered on the footprint via the existing hover_arrow_dir path.
 	if hotbar.current_kind() == "building" and Buildings.supports_direction(hotbar.current_value()):
 		grid_world.hover_arrow_dir = placement_direction
 	else:
 		grid_world.hover_arrow_dir = -1
+	# Footprint preview for multi-tile buildings (Mixer/Oven/Proofer/Packager).
+	if hotbar.current_kind() == "building":
+		grid_world.hover_building_type = hotbar.current_value()
+	else:
+		grid_world.hover_building_type = -1
 
 	if Input.is_action_just_pressed("rotate_placement"):
-		placement_direction = (placement_direction + 1) % 4
+		# Three cases for R:
+		#   1. Holding a rotatable building → rotate placement direction.
+		#   2. Holding a non-rotatable building → toast (silent no-op feels
+		#      like a bug; tell the player why nothing happened).
+		#   3. Hand empty / non-building selection → rotate the placed
+		#      building under the cursor in-place if it's rotatable. Lets
+		#      the player adjust port orientations without rebuilding —
+		#      Factorio convention. Square footprint (1×1, 2×2) means
+		#      rotation only swaps port directions, no cell relocation.
+		var holding_building: bool = hotbar.current_kind() == "building"
+		if holding_building and Buildings.supports_direction(hotbar.current_value()):
+			placement_direction = (placement_direction + 1) % 4
+		elif holding_building:
+			_show_toast("%s has no directional ports" % Buildings.name_of(hotbar.current_value()))
+		elif grid_world.has_building_at(hover_tile):
+			var hovered: Building = grid_world.building_at(hover_tile)
+			if Buildings.supports_direction(hovered.type):
+				hovered.state["dir"] = (int(hovered.state.get("dir", 0)) + 1) % 4
+				_show_toast("%s rotated to %s" % [Buildings.name_of(hovered.type), Belt.DIR_NAMES[int(hovered.state["dir"])]])
+			else:
+				_show_toast("%s has no directional ports" % Buildings.name_of(hovered.type))
 
 	if Input.is_action_pressed("place_tile"):
 		_try_place(hover_tile)
@@ -137,7 +164,7 @@ func _try_interact(player_tile: Vector2i) -> void:
 	else:
 		_show_toast("%s is empty" % Buildings.name_of(b.type))
 
-## Debug-only: spawns two minimal chains east of the player.
+## Debug-only: spawns three minimal chains east of the player.
 ##
 ## Wheat chain (origin = player + (3, 0)):
 ##   Planter → Harvester → belt → Thresher
@@ -148,6 +175,15 @@ func _try_interact(player_tile: Vector2i) -> void:
 ##   Planter → Harvester → belt → Sugar Press → belt → Yeast Culture → Yeast Chest
 ##                                                    ↑
 ##                                                    pipe ← Pump ← Water tile
+##
+## Bread mini (origin = player + (3, 8)): integration check for rotation +
+## multi-tile. Mixer is 2×2 rotated DIR_S (90° CW). After rotation the
+## canonical "flour W / yeast N / dough E" ports become world N / E / S.
+##   Pre-loaded flour-chest above → flour belt south into mixer N edge
+##   Pre-loaded yeast-chest right → yeast belt west into mixer E edge
+##   Pump+pipe west of mixer       → water along W edge
+##   Mixer south edge              → dough belt south → dough chest
+## If dough accumulates, rotation+multi-tile is integrated correctly.
 ##
 ## Each chain is independently verifiable. Full bread chain (combining
 ## flour + yeast + water → dough → bread) lands when each piece passes.
@@ -189,11 +225,45 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 		[Vector2i(3, 5),  -1,                          Terrain.Base.WATER, -1,             null,                  0],
 	]
 
+	# Bread mini-chain: rotated 2×2 Mixer (dir=DIR_S → ports rotate 90° CW).
+	# Canonical flour-W → world N. Canonical yeast-N → world E. Canonical
+	# dough-E → world S. Mixer occupies (0,0)..(1,1) (anchor at 0,0).
+	var BLT_N: int = Belt.DIR_N
+	var bread_o: Vector2i = player_tile + Vector2i(3, 8)
+	var bread_plan: Array = [
+		# Mixer 2×2 at (0,0)..(1,1), facing south.
+		[Vector2i(0, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.MIXER, null, BLT_S],
+		# Stone for the rest of the mixer footprint (place_building handles
+		# the anchor's overlay check; expansion cells need overlay too).
+		[Vector2i(1, 0),  Terrain.Overlay.STONE, GRASS, -1,    null, 0],
+		[Vector2i(0, 1),  Terrain.Overlay.STONE, GRASS, -1,    null, 0],
+		[Vector2i(1, 1),  Terrain.Overlay.STONE, GRASS, -1,    null, 0],
+		# Flour source: chest pre-loaded with flour above the N edge,
+		# belt at (0,-1) pushes south into the mixer's N edge.
+		[Vector2i(0, -2), Terrain.Overlay.STONE, GRASS, Buildings.Type.CHEST, null, 0],
+		[Vector2i(0, -1), Terrain.Overlay.STONE, GRASS, Buildings.Type.BELT,  null, BLT_S],
+		# Yeast source: chest at (3,0) east of mixer, belt at (2,0)
+		# pushes west into the mixer's E edge.
+		[Vector2i(3, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.CHEST, null, 0],
+		[Vector2i(2, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.BELT,  null, BLT_W],
+		# Water: pump at (-1,2) on a stone tile west of the mixer S edge,
+		# water tile further west, pipe at (-1,0) connects pump to mixer.
+		[Vector2i(-1, 0), Terrain.Overlay.STONE, GRASS, Buildings.Type.PIPE, null, 0],
+		[Vector2i(-1, 1), Terrain.Overlay.STONE, GRASS, Buildings.Type.PIPE, null, 0],
+		[Vector2i(-1, 2), Terrain.Overlay.STONE, GRASS, Buildings.Type.PUMP, null, 0],
+		[Vector2i(-2, 2), -1, Terrain.Base.WATER, -1, null, 0],
+		# Dough sink: belt at (0,2) below the mixer S edge, chest catches.
+		[Vector2i(0, 2),  Terrain.Overlay.STONE, GRASS, Buildings.Type.BELT,  null, BLT_S],
+		[Vector2i(0, 3),  Terrain.Overlay.STONE, GRASS, Buildings.Type.CHEST, null, 0],
+	]
+
 	var plan: Array = []
 	for entry in wheat_plan:
 		plan.append([wheat_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
 	for entry in sugar_plan:
 		plan.append([sugar_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
+	for entry in bread_plan:
+		plan.append([bread_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
 	var placed: int = 0
 	var skipped: int = 0
 	for entry in plan:
@@ -220,6 +290,17 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 			placed += 1
 		else:
 			skipped += 1
+	# Pre-load the rotated mixer's input buffer so dough flows immediately.
+	# (Chests are passive — they don't push to belts. Sourcing items onto
+	# the belt would require a Harvester+crop or chaining to the wheat
+	# chain's mill output, both of which add geometry without strengthening
+	# the integration test. The unit tests already cover rotated PULL on
+	# multiple edges via the 4-direction thresher rotation test; this F11
+	# demo exists to verify rotated PUSH and visual placement of a 2×2.)
+	var bread_mixer_pos: Vector2i = bread_o + Vector2i(0, 0)
+	if grid_world.has_building_at(bread_mixer_pos):
+		var mixer: Building = grid_world.building_at(bread_mixer_pos)
+		mixer.state["in_buffer"] = [[Items.Type.FLOUR, 100], [Items.Type.YEAST, 50]]
 	_show_toast("[debug] Demo chain: %d placed, %d skipped" % [placed, skipped])
 
 func _overlay_list_str(overlays: Array) -> String:

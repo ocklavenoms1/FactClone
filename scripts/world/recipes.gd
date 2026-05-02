@@ -50,46 +50,54 @@ const DATA: Dictionary = {
 	"mixer_dough": {
 		"id": "mixer_dough",
 		"building_type": Buildings.Type.MIXER,
-		"inputs_solid":  [[Items.Type.FLOUR, 2], [Items.Type.YEAST, 1]],
+		# 2×2 footprint: flour pulls from W edge, yeast from N edge.
+		# Water comes from any adjacent pipe (any of the 8 perimeter cells).
+		"inputs_solid":  [[Items.Type.FLOUR, 2, Belt.DIR_W], [Items.Type.YEAST, 1, Belt.DIR_N]],
 		"inputs_fluid":  [[Fluids.Type.WATER, 1]],
-		"outputs_solid": [[Items.Type.DOUGH, 1]],
+		"outputs_solid": [[Items.Type.DOUGH, 1, Belt.DIR_E]],
 		"time_ticks": 100,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Flour + Yeast + Water → Dough",
+		"display_name": "Flour (W) + Yeast (N) + Water → Dough (E)",
 	},
 	"proofer_rise": {
 		"id": "proofer_rise",
 		"building_type": Buildings.Type.PROOFER,
-		"inputs_solid":  [[Items.Type.DOUGH, 1]],
+		# 2×2: dough in from W, risen dough out to E (canonical orientation;
+		# rotates with building.dir).
+		"inputs_solid":  [[Items.Type.DOUGH, 1, Belt.DIR_W]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.RISEN_DOUGH, 1]],
+		"outputs_solid": [[Items.Type.RISEN_DOUGH, 1, Belt.DIR_E]],
 		"time_ticks": 400,    # 20s — slow rise
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Dough → Risen Dough",
+		"display_name": "Dough (W) → Risen Dough (E)",
 	},
 	"oven_bread": {
 		"id": "oven_bread",
 		"building_type": Buildings.Type.OVEN,
-		"inputs_solid":  [[Items.Type.RISEN_DOUGH, 1], [Items.Type.FUEL_BRIQUETTE, 1]],
+		# 2×2: risen dough in from W (main feed), fuel briquette in from S
+		# (fuel branch can split off perpendicular to the main bread line).
+		# Bread out to E.
+		"inputs_solid":  [[Items.Type.RISEN_DOUGH, 1, Belt.DIR_W], [Items.Type.FUEL_BRIQUETTE, 1, Belt.DIR_S]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.BREAD, 1]],
+		"outputs_solid": [[Items.Type.BREAD, 1, Belt.DIR_E]],
 		"time_ticks": 120,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Risen Dough + Fuel → Bread",
+		"display_name": "Risen Dough (W) + Fuel (S) → Bread (E)",
 	},
 	"packager_loaves": {
 		"id": "packager_loaves",
 		"building_type": Buildings.Type.PACKAGER,
-		"inputs_solid":  [[Items.Type.BREAD, 4]],
+		# 2×2: bread in from W, loaf pack out to E.
+		"inputs_solid":  [[Items.Type.BREAD, 4, Belt.DIR_W]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.LOAF_PACK, 1]],
+		"outputs_solid": [[Items.Type.LOAF_PACK, 1, Belt.DIR_E]],
 		"time_ticks": 80,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "4× Bread → Loaf Pack",
+		"display_name": "4× Bread (W) → Loaf Pack (E)",
 	},
 	"briquetter_fuel": {
 		"id": "briquetter_fuel",

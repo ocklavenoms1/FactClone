@@ -29,13 +29,19 @@ const STATE_NAMES: Array = ["Idle", "Running", "Blocked: output full"]
 
 ## Construct the initial state dict for a freshly placed Processor.
 ## Call this from a building's make() function.
-static func make_state(recipe_id: String) -> Dictionary:
+##
+## `dir` is the building's orientation (Belt.DIR_E etc). Defaults to 0
+## (canonical) for buildings whose recipes don't declare prefer_dir ports;
+## rotatable processors thread their construction-time direction in here so
+## Buildings.world_dir() can rotate recipe ports at tick time.
+static func make_state(recipe_id: String, dir: int = 0) -> Dictionary:
 	return {
 		"recipe_id": recipe_id,
 		"state": IDLE,
 		"progress": 0,
 		"in_buffer":  [],
 		"out_buffer": [],
+		"dir": dir,
 	}
 
 # ---------- tick ----------
@@ -76,27 +82,64 @@ static func tick(b: Building, world: Node2D) -> void:
 
 # ---------- helpers: inputs ----------
 
+## Pull inputs from adjacent belts. Multi-tile aware: scans every cell
+## along the relevant edge of the building's footprint.
+##
+## STRICT MODE (when input declares prefer_dir): scan only the rotated
+## world-edge for that specific item. The recipe's prefer_dir is canonical
+## (declared as if the building faced east); Buildings.world_dir() rotates
+## it by the building's current orientation so a rotated processor pulls
+## from the rotated edge, not the world-absolute one.
+##
+## DEFAULT (no prefer_dir): scan all 4 edges, all cells, accepting any
+## of the recipe's input items.
 static func _try_pull_inputs(b: Building, world: Node2D, recipe: Dictionary) -> void:
 	var capacity: int = int(recipe["input_capacity"])
-	# Build accept list of input types we still want.
-	var accept: Array = []
+	# Group inputs by WORLD direction (after rotation). -1 = no preference.
+	# default_accept gathers items that should be pulled from any edge.
+	# per_dir_accept[world_dir] gathers items pinned to a specific edge.
+	var default_accept: Array = []
+	var per_dir_accept: Dictionary = {}
 	for pair in recipe["inputs_solid"]:
 		var item_type: int = int(pair[0])
-		if _buffer_count(b.state["in_buffer"], item_type) < capacity:
-			accept.append(item_type)
-	if accept.is_empty():
-		return
-	for dir in 4:
-		var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
-		if not world.has_building_at(npos):
-			continue
-		var neighbor: Building = world.building_at(npos)
-		if neighbor == null or neighbor.type != Buildings.Type.BELT:
-			continue
-		var pulled: int = Belt.try_pull_matching(neighbor, b.anchor, accept)
-		if pulled >= 0:
-			_buffer_add(b.state["in_buffer"], pulled, 1)
-			return  # one pull per tick
+		if _buffer_count(b.state["in_buffer"], item_type) >= capacity:
+			continue  # already at cap for this input
+		var canonical_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+		var world_dir: int = Buildings.world_dir(b, canonical_dir)
+		if world_dir < 0:
+			default_accept.append(item_type)
+		else:
+			if not per_dir_accept.has(world_dir):
+				per_dir_accept[world_dir] = []
+			per_dir_accept[world_dir].append(item_type)
+
+	# Pinned inputs first: scan their (rotated) declared edge only.
+	for world_dir in per_dir_accept.keys():
+		var accept: Array = per_dir_accept[world_dir]
+		for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+			if _try_pull_from_cell(b, world, cell, accept):
+				return  # one pull per tick
+
+	# Default-scan inputs: scan all 4 edges.
+	if not default_accept.is_empty():
+		for dir in 4:
+			for cell in Buildings.edge_cells(b.type, b.anchor, dir):
+				if _try_pull_from_cell(b, world, cell, default_accept):
+					return
+
+## Try to pull one item from a belt at `cell` matching `accept` list.
+## Returns true on successful pull.
+static func _try_pull_from_cell(b: Building, world: Node2D, cell: Vector2i, accept: Array) -> bool:
+	if not world.has_building_at(cell):
+		return false
+	var neighbor: Building = world.building_at(cell)
+	if neighbor == null or neighbor.type != Buildings.Type.BELT:
+		return false
+	var pulled: int = Belt.try_pull_matching(neighbor, b.anchor, accept)
+	if pulled >= 0:
+		_buffer_add(b.state["in_buffer"], pulled, 1)
+		return true
+	return false
 
 static func _has_all_inputs(b: Building, recipe: Dictionary) -> bool:
 	for pair in recipe["inputs_solid"]:
@@ -106,13 +149,28 @@ static func _has_all_inputs(b: Building, recipe: Dictionary) -> bool:
 			return false
 	return true
 
-## Check that every fluid input the recipe needs is available adjacent
-## to the building via the world's fluid network (pipe → pump). No buffer.
+## Check that every fluid input the recipe needs is available somewhere
+## adjacent to the building. Multi-tile aware.
+##
+## STRICT MODE (fluid input declares prefer_dir): the recipe's canonical
+## prefer_dir is rotated by the building's orientation, then only cells
+## along that world-edge are scanned for a pipe in a pump-bearing network.
+##
+## DEFAULT (no prefer_dir): scan all perimeter cells (4× chances on a 2×2).
+##
+## Today no recipe declares fluid prefer_dir; the strict path is forward-
+## compat for recipes that need a dedicated water inlet on a specific edge.
 static func _has_fluid_inputs(b: Building, recipe: Dictionary, world: Node2D) -> bool:
 	for pair in recipe.get("inputs_fluid", []):
 		var fluid_type: int = int(pair[0])
-		if not world.fluid_available_at(b.anchor, fluid_type):
-			return false
+		var canonical_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+		var world_dir: int = Buildings.world_dir(b, canonical_dir)
+		if world_dir >= 0:
+			if not world.fluid_available_for_building_edge(b, world_dir, fluid_type):
+				return false
+		else:
+			if not world.fluid_available_for_building(b, fluid_type):
+				return false
 	return true
 
 static func _consume_inputs(b: Building, recipe: Dictionary) -> void:
@@ -134,49 +192,49 @@ static func _emit_outputs(b: Building, recipe: Dictionary) -> void:
 	for pair in recipe["outputs_solid"]:
 		_buffer_add(b.state["out_buffer"], int(pair[0]), int(pair[1]))
 
-## Push outputs to adjacent buildings.
+## Push outputs to adjacent buildings. Multi-tile aware: iterates every
+## cell along the relevant edge of the footprint.
 ##
-## STRICT MODE (when output declares prefer_dir): only that direction is
-## tried. If the neighbor at prefer_dir doesn't accept this tick, the item
-## stays in the buffer until the port clears. This is the "dedicated
-## output port" semantic — multi-output recipes (e.g. Thresher) declare
-## "grain east, straw west" and items always go to their designated belt.
+## STRICT MODE (output declares prefer_dir): scan only the rotated world-edge.
+## Recipes declare prefer_dir in canonical orientation; Buildings.world_dir()
+## rotates by the building's current dir. If no neighbor on that edge
+## accepts, item waits.
 ##
-## DEFAULT (no prefer_dir, single-output recipes): try all 4 dirs.
-## Chests preferred over belts (player intent: chest = sink).
+## DEFAULT (no prefer_dir): scan all 4 edges, chests first then belts.
 ##
-## Outputs are processed in array order; first item that can push wins
-## the tick. Two outputs preferring the same dir = first listed wins; the
-## other waits.
+## Outputs processed in array order; first push that succeeds wins the
+## tick. Two outputs preferring the same edge = first listed wins.
 static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) -> void:
 	for pair in recipe["outputs_solid"]:
 		var item_type: int = int(pair[0])
 		if _buffer_count(b.state["out_buffer"], item_type) <= 0:
 			continue
-		# A 3rd element on the entry = preferred output direction (Belt.DIR_*).
-		var prefer_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+		var canonical_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+		var world_dir: int = Buildings.world_dir(b, canonical_dir)
 
-		if prefer_dir >= 0:
-			# Strict: try only the preferred direction.
-			if _try_push_to_dir(b, world, item_type, prefer_dir):
-				return
-			# Push failed — item waits in buffer until preferred port clears.
+		if world_dir >= 0:
+			# Strict: try only the (rotated) preferred edge's cells.
+			for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+				if _try_push_to_cell(b, world, item_type, cell):
+					return
+			# Push failed — item waits.
 		else:
-			# No preference: try all 4 dirs, chests first then belts.
+			# No preference: chests first across all edges, then belts.
 			for dir in 4:
-				if _try_push_chest_to_dir(b, world, item_type, dir):
-					return
+				for cell in Buildings.edge_cells(b.type, b.anchor, dir):
+					if _try_push_chest_to_cell(b, world, item_type, cell):
+						return
 			for dir in 4:
-				if _try_push_belt_to_dir(b, world, item_type, dir):
-					return
+				for cell in Buildings.edge_cells(b.type, b.anchor, dir):
+					if _try_push_belt_to_cell(b, world, item_type, cell):
+						return
 
-## Try to push one `item_type` to the building at `dir`. Accepts either
-## a chest (direct insert) or a belt (try_insert). Returns true on success.
-static func _try_push_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
-	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
-	if not world.has_building_at(npos):
+## Try to push one `item_type` to whatever building is at `cell`. Accepts
+## chests (direct insert) and belts (try_insert). Returns true on success.
+static func _try_push_to_cell(b: Building, world: Node2D, item_type: int, cell: Vector2i) -> bool:
+	if not world.has_building_at(cell):
 		return false
-	var neighbor: Building = world.building_at(npos)
+	var neighbor: Building = world.building_at(cell)
 	if neighbor == null:
 		return false
 	var pushed: bool = false
@@ -188,11 +246,10 @@ static func _try_push_to_dir(b: Building, world: Node2D, item_type: int, dir: in
 		_buffer_remove(b.state["out_buffer"], item_type, 1)
 	return pushed
 
-static func _try_push_chest_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
-	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
-	if not world.has_building_at(npos):
+static func _try_push_chest_to_cell(b: Building, world: Node2D, item_type: int, cell: Vector2i) -> bool:
+	if not world.has_building_at(cell):
 		return false
-	var neighbor: Building = world.building_at(npos)
+	var neighbor: Building = world.building_at(cell)
 	if neighbor == null or neighbor.type != Buildings.Type.CHEST:
 		return false
 	if Chest.try_insert(neighbor, item_type, 1):
@@ -200,11 +257,10 @@ static func _try_push_chest_to_dir(b: Building, world: Node2D, item_type: int, d
 		return true
 	return false
 
-static func _try_push_belt_to_dir(b: Building, world: Node2D, item_type: int, dir: int) -> bool:
-	var npos: Vector2i = b.anchor + Belt.DIR_VECS[dir]
-	if not world.has_building_at(npos):
+static func _try_push_belt_to_cell(b: Building, world: Node2D, item_type: int, cell: Vector2i) -> bool:
+	if not world.has_building_at(cell):
 		return false
-	var neighbor: Building = world.building_at(npos)
+	var neighbor: Building = world.building_at(cell)
 	if neighbor == null or neighbor.type != Buildings.Type.BELT:
 		return false
 	if Belt.try_insert(neighbor, item_type):
@@ -261,15 +317,31 @@ static func info_lines(b: Building, world = null) -> Array:
 			for pair in fluids:
 				parts.append(Fluids.name_of(int(pair[0])))
 			lines.append("Fluid in: %s (via adjacent pipe network)" % ", ".join(parts))
+		# Input port assignments — visible so player knows where to place belts.
+		# Show WORLD directions (after rotation), since that's where the player
+		# must put belts to feed this building right now.
+		var input_ports: Array = []
+		for input_pair in recipe.get("inputs_solid", []):
+			if input_pair.size() >= 3:
+				var canonical_in: int = int(input_pair[2])
+				var world_in: int = Buildings.world_dir(b, canonical_in)
+				if world_in >= 0:
+					input_ports.append("%s ← %s" % [Items.name_of(int(input_pair[0])), Belt.DIR_NAMES[world_in]])
+		if not input_ports.is_empty():
+			lines.append("Input ports: %s" % ", ".join(input_ports))
 		# Output port assignments — visible so player knows where to place belts.
 		var ports: Array = []
 		for output_pair in recipe.get("outputs_solid", []):
 			if output_pair.size() >= 3:
-				var port_dir: int = int(output_pair[2])
-				if port_dir >= 0:
-					ports.append("%s → %s" % [Items.name_of(int(output_pair[0])), Belt.DIR_NAMES[port_dir]])
+				var canonical_out: int = int(output_pair[2])
+				var world_out: int = Buildings.world_dir(b, canonical_out)
+				if world_out >= 0:
+					ports.append("%s → %s" % [Items.name_of(int(output_pair[0])), Belt.DIR_NAMES[world_out]])
 		if not ports.is_empty():
 			lines.append("Output ports: %s" % ", ".join(ports))
+		# Orientation, so player can correlate ports with what they see.
+		if Buildings.is_rotatable(b.type):
+			lines.append("Facing: %s (R to rotate before placing)" % Belt.DIR_NAMES[int(b.state.get("dir", 0))])
 		# Diagnostic: when stalled, name what's missing.
 		if s == IDLE or s == BLOCKED_OUTPUT:
 			var missing: Array = _missing_for_start(b, recipe, world)
@@ -292,7 +364,14 @@ static func _missing_for_start(b: Building, recipe: Dictionary, world) -> Array:
 	if world != null:
 		for pair in recipe.get("inputs_fluid", []):
 			var fluid_type: int = int(pair[0])
-			if not world.fluid_available_at(b.anchor, fluid_type):
+			var canonical_dir: int = int(pair[2]) if pair.size() >= 3 else -1
+			var world_dir: int = Buildings.world_dir(b, canonical_dir)
+			var available: bool
+			if world_dir >= 0:
+				available = world.fluid_available_for_building_edge(b, world_dir, fluid_type)
+			else:
+				available = world.fluid_available_for_building(b, fluid_type)
+			if not available:
 				missing.append("%s (no pipe→pump)" % Fluids.name_of(fluid_type))
 	# Per-output backpressure — name which output is jammed.
 	var capacity: int = int(recipe.get("output_capacity", 0))

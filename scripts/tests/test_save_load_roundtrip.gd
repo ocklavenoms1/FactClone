@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Save/load round-trip test — locks the v7 schema.
+## Save/load round-trip test — locks the v9 schema.
 ##
 ## Builds a world with diverse content (water, every overlay type, every
 ## building type, items in inventory, mid-tick mill state), saves to a
@@ -14,7 +14,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
 
 static func test_name() -> String:
-	return "save/load round-trip (v8)"
+	return "save/load round-trip (v9)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []

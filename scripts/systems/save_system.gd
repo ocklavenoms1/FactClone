@@ -17,8 +17,16 @@ extends RefCounted
 ##            No buildings consume resource_nodes yet; the bump just locks
 ##            the save format so we don't bump twice when mining lands.
 ##            No migration code — old saves hard-fail with OS.alert.
+##   v8 → v9: Multi-tile buildings + rotation. Mixer/Oven/Proofer/Packager
+##            footprint changed from 1×1 to 2×2 — v8 saves with these
+##            buildings would load with mismatched `occupied` cells (only
+##            the anchor mapped, not the 3 expansion cells). Rotatable
+##            processors (Mixer/Oven/Proofer/Packager/Thresher) now carry
+##            `dir` in their state so prefer_dir ports rotate with the
+##            building. v8 saves where these buildings were 1×1 / non-
+##            directional cannot be safely upgraded — hard-fail.
 
-const SAVE_VERSION: int = 8
+const SAVE_VERSION: int = 9
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this

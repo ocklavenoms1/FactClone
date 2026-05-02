@@ -9,6 +9,55 @@ Each entry has three sections:
 
 ---
 
+## Session D — Multi-tile buildings + rotation + visual upgrades
+
+**Date:** 2026-05-01
+**Tag:** `session-d-complete`
+
+### What shipped
+
+- **Mixer / Oven / Proofer / Packager promoted to 2×2.** Footprint changes are pure data — single-line edits in `Buildings.DATA[t].footprint`. No special-cased multi-tile branches; the existing `occupied: Dictionary` (which already mapped non-anchor cells to anchor) handles placement, removal, and ticks uniformly.
+- **`Buildings.edge_cells(t, anchor, dir)` and `all_edge_cells(t, anchor)` helpers.** Return the cells immediately outside a building's footprint along a given edge. 1×1 → 1 cell per edge; 2×2 → 2 cells per edge. Generalizes to any size.
+- **Multi-tile-aware `Processor` pull/push.** `_try_pull_inputs` and `_try_push_outputs` iterate all cells along the relevant edge instead of a single position. Rate-limited to one item/tick across the full edge.
+- **`fluid_available_for_building(b)` and `fluid_available_for_building_edge(b, dir)`.** Multi-tile fluid lookup — scans all 8 perimeter cells of a 2×2 (4× the chances vs 1×1) or restricts to a single edge when a recipe pins fluid input direction.
+- **Rotation, end-to-end.**
+  - Mixer / Oven / Proofer / Packager / Thresher all `supports_direction: true`.
+  - `Buildings.world_dir(b, recipe_dir) = (recipe_dir + b.state.dir) % 4` rotates a recipe's canonical port direction by the building's current orientation.
+  - Recipes declare ports in **canonical** orientation (as if facing east); rotation applies at tick time. Used uniformly for solid input, solid output, and fluid input prefer_dir.
+  - `Processor.make_state(recipe_id, dir)` threads orientation in at construction. Rotatable processor `make()` functions (Mixer/Oven/Proofer/Packager/Thresher) all accept `dir`.
+  - **Hover-rotate (Factorio convention):** R rotates a placed building under the cursor when hand is empty. With a rotatable building in hand, R rotates the placement direction. With a non-rotatable building in hand, toast: "X has no directional ports." Mill / Briquetter / Yeast Culture / Sugar Press deliberately stay non-rotatable since their recipes have no `prefer_dir` ports.
+- **Recipes for Mixer / Oven / Proofer / Packager gained prefer_dir on every solid I/O.** Canonical layout: inputs from W (and S for Oven fuel branch), outputs to E. Continuous east-going main flow with perpendicular fuel and waste branches.
+- **Save schema v8 → v9.** Locks out v8 saves whose Mixer/Oven/Proofer/Packager were 1×1 / non-directional — mismatched `occupied` cells would silently corrupt placement. Hard-fail with `OS.alert` naming the file path.
+- **Visual upgrades, all programmer-art:**
+  - **Multi-tile footprint border** (`Buildings._draw_multitile_border`): 2px near-black outline around any footprint > 1×1. Drawn after per-type render so it always sits on top. Auto-generalizes to future 3×3.
+  - **Connection point indicators** (`Buildings._draw_port_indicators`): yellow dots for solid item ports, blue for fluid. **Filled** when the port is currently usable (belt with right item / chest with room / pipe in pump-bearing component). **Hollow** when port exists but isn't functional (no neighbor or wrong content). Fluid-no-prefer_dir draws filled-only on actively-connected cells, skipping hollow to avoid 8-dot noise.
+  - **Pipe redesign**: continuous tubes with stubs to actual connectable neighbors only. Bright saturated blue when in a pump-bearing component, muted gray-blue when not. Removed the tile-background rect so tubes float over terrain. Connectivity is data-driven — any building whose recipe has `inputs_fluid` is auto-connectable.
+- **Hover preview shows full footprint.** White outline if all cells placeable, red if any cell blocked. Direction arrow centered on the footprint (not just anchor cell) for rotatable multi-tile buildings.
+- **Q-inspect rebuilt for rotation:** info panel shows "Input ports: Flour ← N, Yeast ← E", "Output ports: Dough → S", "Facing: S (R to rotate before placing)" — all in WORLD directions after rotation, so what the player reads matches what they see on the building.
+- **F11 demo extended** with a bread mini-chain: a Mixer rotated to face south, dough belt exiting south to a chest, water from a small pump+pipe on the west. Pre-loaded buffer so the integration test for rotated push fires immediately.
+- **Tests:** 8 passing. New `test_thresher_rotation.gd` covers all 4 orientations (E / S / W / N), asserting both correct world-dir routing AND that other-side chests stay empty. The 90° and 270° cases catch CW-vs-CCW confusion in the rotation math.
+
+### Decisions
+
+- **Recipes declare ports in canonical orientation, rotation applied at runtime.** Authoring port directions in the recipe (rather than per-instance) means each recipe has one "natural" layout; the player picks an orientation per machine. Eliminates a class of bugs where a recipe edit would break already-placed buildings.
+- **Non-port buildings stay non-rotatable.** Mill, Briquetter, Yeast Culture, Sugar Press have no `prefer_dir` on their recipes — rotation would be a no-op. Letting players rotate them visibly does nothing, which feels broken. R-key on these shows a toast naming the building. When/if a recipe gains `prefer_dir`, flip the flag in `DATA` — sizes and rotatability are both data, defer the choice until the building actually needs it.
+- **Square footprints only.** 1×1 and 2×2 — no asymmetric shapes yet. Rotation just swaps port directions; no cell relocation or footprint overlap re-validation needed. When 1×3 / 3×3 / asymmetric land, rotation will need a placement-revalidation step.
+- **Multi-tile model uses the existing `occupied: Dictionary`, no new tile-ref entries.** The plan called for `Tile` entries marking expansion cells. The `occupied` map already maps any footprint cell to its anchor — that's the same information without a parallel data structure or Tile-shape change.
+- **Pipe stub rendering tells the truth, not a "clean" version.** Originally considered hiding stubs to make the visual less busy; rejected. The invariant "stub = real connection, no stub = no connection" is the kind of debug aid that pays off for the lifetime of the project. Don't lie about state in the renderer.
+- **Fluid-no-prefer_dir gets filled indicators only on active connections, no hollow noise.** A 2×2 with no-prefer_dir would have 8 hollow blue dots otherwise. Only highlighting the cells where water actually flows in is enough — the absence of any blue dot is itself a signal that water isn't connected.
+- **Hover-rotate matches Factorio.** R with a building in hand rotates the placement; R with empty hand rotates whatever's under the cursor. Lowest-friction iteration on layouts.
+
+### Lessons
+
+- **Multi-tile is mostly free if the data structure was right.** The single biggest rewrite — `_try_pull_inputs` and `_try_push_outputs` — was about 30 lines. Everything else was footprint-aware draws and helper additions. Investing in `occupied: Dictionary` early (Session A?) paid off handsomely.
+- **Show the design before implementing.** The user's process gate — "design before code, then approve, then code" — caught two issues that would have been wrong otherwise: the multi-tile model that would have changed Tile shape unnecessarily, and the rotation feature that almost shipped without the four-direction test. Both saved a rewrite.
+- **The CW-vs-CCW concern was real.** Godot's Y-down system makes "visual CW" and "math CW" the same in this enum's case (E=0 → S=1 → W=2 → N=3 happens to be visual-CW), but only because `Belt.DIR_VECS` was laid out that way deliberately. The four-direction test is what verifies this stays true if anyone ever reorders the enum.
+- **Visual feedback is a separate axis from logic correctness.** All 8 tests passed multiple times before the visual upgrades shipped — but the visuals themselves had bugs (port indicators flickering, pipes still looking like belts) that no amount of unit testing would catch. Manual F11 verification + Q-inspect was the only path to confidence here.
+- **"Don't ship without showing design first" caught a real issue.** When the user asked for rotation, my first instinct was to just mark every processor `supports_direction: true`. The user's "non-port buildings shouldn't be rotatable" rule would have been a follow-up bug otherwise. The design pass caught it.
+- **Pipe drawing finally has world access.** A comment in the old `pipe.gd` literally said "we can't query world from a static draw method without it being passed in." The fix turned out to be trivial — `canvas` IS the GridWorld; GDScript's dynamic typing lets us call its methods directly. Deferred for too long.
+
+---
+
 ## Session C — Bread chain + prefer_dir output ports
 
 **Date:** 2026-05-01

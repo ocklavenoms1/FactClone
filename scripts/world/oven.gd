@@ -14,20 +14,23 @@ const FIRE_INNER: Color = Color(1.00, 0.85, 0.30)
 const FIRE_OUTER: Color = Color(0.95, 0.40, 0.10, 0.7)
 const COLD_HEARTH: Color = Color(0.20, 0.10, 0.06)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.OVEN, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.OVEN, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var w: float = float(tile_size * fp.x)
+	var h: float = float(tile_size * fp.y)
+	var rect: Rect2 = Rect2(world_pos, Vector2(w, h))
 	canvas.draw_rect(rect, BRICK_DARK, true)
 	canvas.draw_rect(rect.grow(-3), BRICK_MID, true)
 	# Mortar grid for brick texture.
-	canvas.draw_line(world_pos + Vector2(0, tile_size * 0.5), world_pos + Vector2(tile_size, tile_size * 0.5), MORTAR, 1.0)
+	canvas.draw_line(world_pos + Vector2(0, h * 0.5), world_pos + Vector2(w, h * 0.5), MORTAR, 1.0)
 	canvas.draw_rect(rect, TRIM, false, 2.0)
 
 	# Hearth opening with fire when running.
-	var center: Vector2 = world_pos + Vector2(tile_size * 0.5, tile_size * 0.5)
-	var hearth_size: Vector2 = Vector2(tile_size * 0.45, tile_size * 0.32)
+	var center: Vector2 = world_pos + Vector2(w * 0.5, h * 0.5)
+	var hearth_size: Vector2 = Vector2(w * 0.45, h * 0.32)
 	var hearth_rect: Rect2 = Rect2(center - hearth_size * 0.5, hearth_size)
 	canvas.draw_rect(hearth_rect, COLD_HEARTH, true)
 

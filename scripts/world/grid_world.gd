@@ -24,6 +24,9 @@ var show_hover: bool = false
 ## When the hotbar selection is a directional building, main.gd sets this
 ## to the placement direction (Belt.DIR_E etc). -1 = no direction preview.
 var hover_arrow_dir: int = -1
+## When the hotbar selection is a building, main.gd sets this so the hover
+## preview shows the full footprint (e.g. 2×2 for Mixer). -1 = single tile.
+var hover_building_type: int = -1
 
 ## Failure reasons set by set_overlay / clear_tile / can_place_building.
 ## main.gd reads these to surface a user-friendly toast.
@@ -228,6 +231,43 @@ func fluid_available_at(pos: Vector2i, _fluid_type: int = Fluids.Type.WATER) -> 
 			return true
 	return false
 
+## Multi-tile-aware variant: scans every cell along the building's full
+## footprint perimeter for an adjacent pipe in a pump-bearing component.
+## A 1×1 building's perimeter is 4 cells (identical to fluid_available_at);
+## a 2×2 has 8 perimeter cells, so 4× more chances to satisfy the input.
+func fluid_available_for_building(b: Building, _fluid_type: int = Fluids.Type.WATER) -> bool:
+	if _fluid_network_dirty:
+		_rebuild_fluid_network()
+	for cell in Buildings.all_edge_cells(b.type, b.anchor):
+		if _pipe_component.has(cell):
+			var comp_id: int = _pipe_component[cell]
+			if _component_has_pump.get(comp_id, false):
+				return true
+	return false
+
+## Direct query: is the pipe at `pos` part of a pump-bearing component?
+## Used by render code to color pipes by connectivity. Returns false for
+## non-pipe positions or pipes in disconnected components.
+func is_pipe_in_pump_component(pos: Vector2i) -> bool:
+	if _fluid_network_dirty:
+		_rebuild_fluid_network()
+	if not _pipe_component.has(pos):
+		return false
+	return _component_has_pump.get(_pipe_component[pos], false)
+
+## Per-edge variant for recipes that pin a fluid input to a specific edge.
+## `world_dir` is already-rotated (caller has applied Buildings.world_dir).
+## A 2×2 has 2 cells along that edge; a 1×1 has 1.
+func fluid_available_for_building_edge(b: Building, world_dir: int, _fluid_type: int = Fluids.Type.WATER) -> bool:
+	if _fluid_network_dirty:
+		_rebuild_fluid_network()
+	for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+		if _pipe_component.has(cell):
+			var comp_id: int = _pipe_component[cell]
+			if _component_has_pump.get(comp_id, false):
+				return true
+	return false
+
 ## Rebuild pipe → component map and mark each component with whether it
 ## contains an adjacent pump. BFS from each unvisited pipe; sort starting
 ## points to keep component IDs deterministic across runs.
@@ -350,13 +390,29 @@ func _draw() -> void:
 
 	# Hover indicator.
 	if show_hover:
-		var hover_rect: Rect2 = Rect2(hover_tile.x * TILE_SIZE, hover_tile.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-		var blocked: bool = tiles.has(hover_tile) or has_building_at(hover_tile)
+		# Footprint width/height: defaults to 1×1 tile, expanded if main.gd
+		# is previewing a multi-tile building placement.
+		var fp_size: Vector2i = Vector2i(1, 1)
+		if hover_building_type >= 0:
+			fp_size = Buildings.footprint_of(hover_building_type)
+		var hover_rect: Rect2 = Rect2(hover_tile.x * TILE_SIZE, hover_tile.y * TILE_SIZE, TILE_SIZE * fp_size.x, TILE_SIZE * fp_size.y)
+		# Blocked if any footprint cell is occupied.
+		var blocked: bool = false
+		for dx in fp_size.x:
+			for dy in fp_size.y:
+				var cell: Vector2i = Vector2i(hover_tile.x + dx, hover_tile.y + dy)
+				if tiles.has(cell) or has_building_at(cell):
+					blocked = true
+					break
+			if blocked:
+				break
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
 		draw_rect(hover_rect, hover_color, false, 2.0)
-		# Direction preview arrow for directional placements (belts, future inserters).
+		# Direction preview arrow for directional placements (belts and every
+		# rotatable processor). Centered on the footprint, not the anchor
+		# cell — for a 2×2 building this puts the arrow at the visual middle.
 		if hover_arrow_dir >= 0 and hover_arrow_dir < Belt.DIR_VECS.size():
-			var center: Vector2 = Vector2(hover_tile.x * TILE_SIZE + TILE_SIZE * 0.5, hover_tile.y * TILE_SIZE + TILE_SIZE * 0.5)
+			var center: Vector2 = Vector2(hover_tile.x * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.x, hover_tile.y * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.y)
 			var dir_vec: Vector2 = Vector2(Belt.DIR_VECS[hover_arrow_dir])
 			var perp: Vector2 = Vector2(-dir_vec.y, dir_vec.x)
 			var tip: Vector2 = center + dir_vec * (TILE_SIZE * 0.32)

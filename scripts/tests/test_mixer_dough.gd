@@ -20,10 +20,14 @@ static func run(parent: Node) -> Dictionary:
 	var world = GridWorldScript.new()
 	parent.add_child(world)
 
-	# Layout: water at (0,0), pump at (1,0), pipe at (2,0), mixer at (3,0).
+	# Layout: water at (0,0), pump at (1,0), pipe at (2,0), mixer 2×2 anchored
+	# at (3,0) — occupies (3,0), (4,0), (3,1), (4,1). Pipe at (2,0) is along
+	# the mixer's W edge, so fluid_available_for_building should resolve it.
 	world.tiles[Vector2i(0, 0)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
-	for x in range(1, 4):
+	for x in range(1, 5):
 		world.set_overlay(Vector2i(x, 0), Terrain.Overlay.STONE)
+	world.set_overlay(Vector2i(3, 1), Terrain.Overlay.STONE)
+	world.set_overlay(Vector2i(4, 1), Terrain.Overlay.STONE)
 
 	if not world.place_building(Buildings.Type.PUMP, Vector2i(1, 0)):
 		return _fail(world, "pump placement failed")
@@ -32,12 +36,12 @@ static func run(parent: Node) -> Dictionary:
 	if not world.place_building(Buildings.Type.MIXER, Vector2i(3, 0)):
 		return _fail(world, "mixer placement failed")
 
-	_check(failures, world.fluid_available_at(Vector2i(3, 0)), "mixer should see water available adjacent")
+	var mixer: Building = world.building_at(Vector2i(3, 0))
+	_check(failures, world.fluid_available_for_building(mixer), "mixer (2×2) should see water along its W edge")
 
 	# --- Phase 1: sustained 5-cycle run ---
 	# Pre-load 5 cycles' worth: 10 flour + 5 yeast (recipe consumes 2 flour
 	# and 1 yeast per cycle).
-	var mixer: Building = world.building_at(Vector2i(3, 0))
 	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 10], [Items.Type.YEAST, 5]]
 	mixer.state["out_buffer"] = []
 	mixer.state["state"] = Processor.IDLE

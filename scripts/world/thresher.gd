@@ -14,8 +14,8 @@ const BLADE: Color = Color(0.85, 0.82, 0.78)
 const GRAIN_COLOR: Color = Color(0.88, 0.72, 0.32)
 const STRAW_COLOR: Color = Color(0.85, 0.78, 0.40)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.THRESHER, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.THRESHER, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
