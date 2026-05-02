@@ -102,3 +102,13 @@ If you find yourself mixing direct reads and `.get()` reads on the same dict, le
 - Iterate `grid_world.buildings` directly when ticking — Dictionary iteration in Godot 4 is insertion-ordered, which is the determinism we rely on.
 - No unseeded randomness in simulation logic. If we need RNG later, seed it explicitly and store the seed in the save.
 - Two-pass tick (Belt) lives in `Buildings.tick_one` / `post_tick_one`. Don't add hidden cross-building reads inside Pass 1.
+
+## Session log discipline
+
+`PROJECT_LOG.md` is a high-level narrative of feature deliveries, one entry per session. Git is the audit trail; the log is a reading aid.
+
+**Scoped sub-sessions and groundwork commits roll up into the parent session's log entry when the parent session ships.** A scoped slice (e.g. "tighten test thresholds before Session E proper") gets its own commit and commit message — that's enough record. The PROJECT_LOG entry for Session E names the groundwork commit hash in its "What shipped" list when it's written, so future readers see the full arc.
+
+Reasoning: tiny per-commit log entries dilute the narrative. A reader scanning PROJECT_LOG should see the shape of each session's feature work, not a per-commit changelog. Solo project; the log is for me, not auditors.
+
+**When in doubt:** if the work is part of a planned session, roll it up. If the work is a one-off cleanup that won't be followed by a session entry, give it its own log entry.
