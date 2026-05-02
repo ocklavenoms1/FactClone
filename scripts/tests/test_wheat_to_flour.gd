@@ -58,8 +58,9 @@ static func run(parent: Node) -> Dictionary:
 
 	# Tick budget: 5000 ticks ≈ 4 minutes simulated. With wheat planter
 	# 600 ticks/wheat and a self-sustaining loop, we should see ~7-8 flour
-	# and ~7-8 straw by then. Threshold ≥5 of each leaves comfortable
-	# margin while still proving sustained operation.
+	# and ~7-8 straw by then. Threshold ≥7 of each (88% of expected) catches
+	# stalls within 1 cycle of full throughput; the original ≥5 silently
+	# passed even when the chain only produced 5 cycles before deadlocking.
 	for _i in 5000:
 		TickSystem.current_tick += 1
 		TickSystem.tick.emit(TickSystem.current_tick)
@@ -73,10 +74,10 @@ static func run(parent: Node) -> Dictionary:
 	var straw: int = _bag_count(straw_chest.state.get("bag", []), Items.Type.STRAW)
 
 	var failures: Array = []
-	if flour < 5:
-		failures.append("expected ≥5 flour in chest, got %d" % flour)
-	if straw < 5:
-		failures.append("expected ≥5 straw in chest, got %d" % straw)
+	if flour < 7:
+		failures.append("expected ≥7 flour in chest, got %d" % flour)
+	if straw < 7:
+		failures.append("expected ≥7 straw in chest, got %d" % straw)
 
 	if not failures.is_empty():
 		# Diagnostic dump.

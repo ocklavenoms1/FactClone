@@ -108,6 +108,13 @@ static func _run_case(parent: Node, case: Dictionary, failures: Array) -> void:
 	var expected_grain_dir: int = int(case["grain_dir"])
 	var expected_straw_dir: int = int(case["straw_dir"])
 
+	# Threshold ≥9 of 10 produced: 10 wheat pre-loaded, single-belt transit
+	# leaves at most 1 in flight at budget end. Diagnostic instrumentation
+	# during the Session E threshold audit confirmed all four rotations
+	# deliver an identical 10/10 — the rotation math is symmetric and the
+	# belt geometry is the same in every direction. If a future change
+	# breaks symmetry (e.g., direction-dependent push order), one rotation
+	# will fail this test before others, naming the case.
 	for dir in 4:
 		var v: Vector2i = Belt.DIR_VECS[dir]
 		var chest: Building = world.building_at(v * 2)
@@ -116,13 +123,13 @@ static func _run_case(parent: Node, case: Dictionary, failures: Array) -> void:
 		var straw_count: int = _bag_count(bag, Items.Type.STRAW)
 
 		if dir == expected_grain_dir:
-			if grain_count < 5:
-				failures.append("%s chest expected ≥5 grain, got %d" % [Belt.DIR_NAMES[dir], grain_count])
+			if grain_count < 9:
+				failures.append("%s chest expected ≥9 grain of 10, got %d" % [Belt.DIR_NAMES[dir], grain_count])
 			if straw_count != 0:
 				failures.append("%s chest got unexpected straw ×%d (should be grain-only)" % [Belt.DIR_NAMES[dir], straw_count])
 		elif dir == expected_straw_dir:
-			if straw_count < 5:
-				failures.append("%s chest expected ≥5 straw, got %d" % [Belt.DIR_NAMES[dir], straw_count])
+			if straw_count < 9:
+				failures.append("%s chest expected ≥9 straw of 10, got %d" % [Belt.DIR_NAMES[dir], straw_count])
 			if grain_count != 0:
 				failures.append("%s chest got unexpected grain ×%d (should be straw-only)" % [Belt.DIR_NAMES[dir], grain_count])
 		else:

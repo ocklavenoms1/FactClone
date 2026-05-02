@@ -67,12 +67,15 @@ static func run(parent: Node) -> Dictionary:
 	_assert_belt_only(failures, east_belt.state.get("slots", []), Items.Type.GRAIN, "east belt")
 	_assert_belt_only(failures, west_belt.state.get("slots", []), Items.Type.STRAW, "west belt")
 
-	# Sustained-throughput check: each chest should have non-trivial counts
-	# (the belts can hold up to 4 each, chests collect the rest).
+	# Throughput check: 10 wheat pre-loaded × 60-tick recipe = 10 cycles
+	# completing well within the 1500-tick budget. Both products travel
+	# through one belt (~16-tick transit) into a chest. ≥9 of 10 catches
+	# any case where the chain doesn't deliver to near-completion; allows
+	# 1 in flight at tick budget end without making the test brittle.
 	var grain_total: int = _bag_count(east_chest.state.get("bag", []), Items.Type.GRAIN)
 	var straw_total: int = _bag_count(west_chest.state.get("bag", []), Items.Type.STRAW)
-	_check(failures, grain_total >= 5, "east chest should have ≥5 grain (sustained run), got %d" % grain_total)
-	_check(failures, straw_total >= 5, "west chest should have ≥5 straw (sustained run), got %d" % straw_total)
+	_check(failures, grain_total >= 9, "east chest should have ≥9 grain of 10 produced, got %d" % grain_total)
+	_check(failures, straw_total >= 9, "west chest should have ≥9 straw of 10 produced, got %d" % straw_total)
 
 	# Cleanup.
 	if TickSystem.tick.is_connected(world._on_tick):

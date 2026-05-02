@@ -52,8 +52,12 @@ static func run(parent: Node) -> Dictionary:
 		TickSystem.current_tick += 1
 		TickSystem.tick.emit(TickSystem.current_tick)
 
+	# Closed system: 10 flour + 5 yeast pre-loaded = exactly 5 cycles' worth
+	# of inputs. Dough stays in out_buffer (no downstream sink). Anything
+	# other than exactly 5 means the recipe ran more or fewer cycles than
+	# the inputs allow — both real bugs.
 	var out_dough: int = _bag_count(mixer.state.get("out_buffer", []), Items.Type.DOUGH)
-	_check(failures, out_dough >= 5, "expected ≥5 dough from sustained run, got %d. State: %s" % [out_dough, str(mixer.state)])
+	_check(failures, out_dough == 5, "expected exactly 5 dough from sustained run (closed system), got %d. State: %s" % [out_dough, str(mixer.state)])
 
 	var in_flour: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.FLOUR)
 	var in_yeast: int = _bag_count(mixer.state.get("in_buffer", []), Items.Type.YEAST)
