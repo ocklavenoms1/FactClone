@@ -9,6 +9,57 @@ Each entry has three sections:
 
 ---
 
+## Session E — Cloth chain + F11 demo extension
+
+**Date:** 2026-05-02
+**Tag:** `session-e-complete`
+
+Shipped across multiple groundwork sub-slices and one main session:
+
+- `b3185ce` — Session E groundwork: tighten remaining test thresholds.
+- `552f4ce` — Session E groundwork: register cloth chain items (FLAX, FIBER, CLOTH, BAG).
+- `b25bc8a` — Session E groundwork: register cloth chain recipes (retter_fiber, loom_cloth, tailor_bag) + RETTER/LOOM/TAILOR enum slots.
+- `691c7e6` — Session E groundwork: register cloth chain buildings (Retter, Loom, Tailor at 1×1) + Production hotbar entries.
+- `01504c5` — note camera zoom feature in SESSION_E_PLAN (deferred to its own session).
+- `ec0a2eb` — note zoom-feature WIP stash in NOTES.md.
+- (this commit) — Flax Planter hotbar entry, F11 demo extension with shared water network, F11 ergonomics fixes.
+
+### What shipped
+
+- **Cloth chain end-to-end runnable:** Flax Planter (variant of existing Planter via `crop_type` extra) → Harvester → Retter (`flax + water → fiber`, 8s) → Loom (`3 fiber → cloth`, 6s) → Tailor (`4 cloth → bag`, 8s) → Bag Chest. Production rate gated by Flax Planter's 25-second growth cycle; ~5 minutes per bag in steady state.
+- **Flax Planter** added as a Production-category hotbar entry (slot 3, between Sugar Planter and Harvester). Reuses existing `Buildings.Type.PLANTER` with `extra: Items.Type.FLAX`. Growth time 500 ticks (25 s @ 20 tps), registered in `Planter.CROP_GROWTH_TICKS`.
+- **F11 demo extension:** added a fourth chain group (cloth) at `player + (10, 8)` and **moved bread mini from `player + (3, 8)` to `player + (15, 8)`**. The two consumers (cloth Retter at the cloth chain's row 3, bread Mixer at the bread mini's anchor) now share a single pump+water tile via a 5-pipe L-shape network — multi-consumer fluid-network integration test now real and verified.
+- **F11 ergonomics fixes:**
+  - Spawn toast now reports the origin: `[debug] Demo chain: NN placed, MM skipped at origin (X, Y)`. One missing string in that toast cost an hour of "where's my F11 demo" debugging during this session.
+  - F11 dedup: tracks `_demo_spawned: bool` + `_demo_origin: Vector2i` on `main.gd`. Subsequent F11 presses no-op with `[debug] Demo already exists at (X, Y). Shift+F11 to allow respawn.` Shift+F11 clears the flag but does NOT delete buildings — player cleans up manually before respawning if they want a fresh layout.
+- **Tests:** 8 passing throughout. No new tests added in main session (groundwork commit `b3185ce` had already tightened all four throughput-bearing assertions).
+- **Save schema unchanged at v9.** New items, recipes, buildings, and hotbar entries are all forward-compat additions; no shape change.
+
+### Decisions
+
+- **Dedup flag is in-memory, not save-persisted.** The flag resets on every Stewardship launch. Reasoning: the flag's job is to prevent accidental double-spawns within a single play session. Persisting it across save/load would mean "I saved with a demo, reloaded, can't respawn even after manually clearing." The session-scoped semantic matches the user's actual intent.
+- **Shift+F11 doesn't auto-clear buildings.** Auto-clearing demo buildings would be destructive and easy to misfire. Manual cleanup is verbose but safe; the flag clear is just permission to re-spawn.
+- **Bag-cap mechanic deferred** to its own session. The original Session E plan included it, but the F11 coordinate-confusion sidetrack ate the budget for architectural decisions (slots-per-bag, schema bump y/n, UX for consumption). Better to land cloth chain cleanly than half-ship bag-cap.
+- **Cloth chain processors stay 1×1, non-rotatable.** SESSION_E_PLAN.md sketched Retter/Loom as candidates for 2×2 (they're vats and big looms thematically). Holding off; rotation+multi-tile work for cloth was deferred since the chain ships fine at 1×1 and there's no current ergonomic reason. Note for future: if cloth chain layouts feel cramped, revisit.
+- **Cloth recipes have NO `prefer_dir` ports** (per spec). Discovered as a real ergonomic wart during smoke-test: "I added a chest near the Retter and now my chain stopped" because the chest got fiber instead of the south belt. Logged as a follow-up note for a later sub-session — likely the right answer is `prefer_dir` per recipe + rotation enabled, matching what bread chain has.
+
+### Lessons
+
+- **F11 spawned-at-press-time-player-position bit hard.** Today's hour of "where's the Flax Planter / why doesn't (12, 22) have anything" came from me reasoning about offsets relative to the player's CURRENT position when the demo was spawned at the player's PRESS-TIME position. The fix (origin in toast + dedup flag) is one extra string and one bool — should have been there from Session C. Lesson: **debug tools must surface their own context.** A toast that says "thing happened" without "where" is half a tool.
+- **"Manual verification" still needs the right scaffolding.** The F11 demo IS manually verifiable, but only if the spawn origin is visible. Without that toast addition, manual verification was effectively impossible without code-level recall. This is exactly the friction point that motivates the next session's MCP install.
+- **The user's "show me a screenshot" override saved the loop.** I was about to keep iterating on coord guesses; the user shifted to "drop a screenshot in chat" and that resolved it in one round trip. Lesson for future: when coord debugging stalls, escalate to visual.
+- **Stash discipline paid off.** The zoom WIP from Session D's tail was stashed cleanly (`stash@{0}`) before this session started. NOTES.md flagged its existence. Tree was clean for Session E work, no entanglement. Next session can pop the stash fresh.
+- **Groundwork commits + roll-up rule worked.** Five small groundwork commits (b3185ce / 552f4ce / b25bc8a / 691c7e6 / 01504c5 / ec0a2eb) shipped across late Session D and early Session E without a PROJECT_LOG entry per commit, exactly as the convention specified. This entry rolls them all up.
+
+### Known follow-ups (for future sessions)
+
+- **Camera zoom (stashed):** `stash@{0}` "WIP: zoom feature, displacement bug unresolved." Restore + debug visual displacement in its own session. Pop instructions in NOTES.md.
+- **Cloth chain ergonomic wart:** no `prefer_dir` on cloth recipes means the chain is fragile to "I added a chest near a processor." Likely fix is per-recipe prefer_dir + rotation enable. Punt to bag-cap session or a polish session.
+- **Bag-cap mechanic:** still on the roadmap. Per-bag slots, lifetime cap of 5, schema bump unknown. Architectural decisions deferred.
+- **Tooling: install godot-mcp.** Next session is dedicated tooling setup; satelliteoflove/godot-mcp identified as the candidate. Starts immediately after this session ships.
+
+---
+
 ## Session D — Multi-tile buildings + rotation + visual upgrades
 
 **Date:** 2026-05-01

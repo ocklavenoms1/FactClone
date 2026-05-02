@@ -63,6 +63,7 @@ func _build_categories() -> void:
 			# Planter variants — same building type, different crop_type via `extra`.
 			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.WHEAT,      "label": "Wheat Planter" },
 			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.SUGAR_BEET, "label": "Sugar Planter" },
+			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.FLAX,       "label": "Flax Planter" },
 			{ "kind": "building", "value": Buildings.Type.HARVESTER },
 			{ "kind": "building", "value": Buildings.Type.PUMP },
 			# Cloth chain processors — Refining is at 9/9, so these live here.

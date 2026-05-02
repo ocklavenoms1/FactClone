@@ -26,7 +26,7 @@ const DEFAULT_CROP: int = Items.Type.WHEAT  # used by old saves predating crop_t
 const CROP_GROWTH_TICKS: Dictionary = {
 	Items.Type.WHEAT:      600,   # 30s @ 20tps
 	Items.Type.SUGAR_BEET: 800,   # 40s
-	# Items.Type.FLAX: 500,       # Session E
+	Items.Type.FLAX:       500,   # 25s
 }
 
 # Visual constants

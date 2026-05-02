@@ -18,6 +18,14 @@ var _last_failed_place_tick: int = -1
 
 var placement_direction: int = Belt.DIR_E   # 0=E, 1=S, 2=W, 3=N
 
+# F11 demo state. Tracks whether a demo has been spawned this session, plus
+# the player tile it was spawned at. Subsequent F11 presses no-op with a
+# toast (saved an hour of "where did F11 spawn?" debugging once already).
+# Shift+F11 clears the flag for an explicit respawn — non-destructive; the
+# player manually cleans up old demo buildings if they want a fresh layout.
+var _demo_spawned: bool = false
+var _demo_origin: Vector2i = Vector2i.ZERO
+
 func _ready() -> void:
 	player_inventory = Inventory.new(PLAYER_INVENTORY_CAPACITY)
 	grid_world.camera = camera
@@ -92,8 +100,21 @@ func _process(delta: float) -> void:
 	# player, including a Briquetter+Void byproduct sink. Useful for
 	# demoing the chain without manual layout. Removed when the bread
 	# chain has a natural early-game placement tutorial.
+	#
+	# Dedup: the demo is offsets-from-player-at-press-time, so pressing F11
+	# at two different positions silently scatters two demo copies (with
+	# unrelated collisions skipped). Track a flag; subsequent presses toast
+	# instead of spawning. Shift+F11 clears the flag for an explicit respawn.
 	if Input.is_action_just_pressed("debug_spawn_demo"):
-		_spawn_demo_chain(player_tile)
+		if Input.is_key_pressed(KEY_SHIFT):
+			_demo_spawned = false
+			_show_toast("[debug] Demo flag cleared. Next F11 spawns fresh; clean up old demo manually.")
+		elif _demo_spawned:
+			_show_toast("[debug] Demo already exists at %s. Shift+F11 to allow respawn." % str(_demo_origin))
+		else:
+			_spawn_demo_chain(player_tile)
+			_demo_spawned = true
+			_demo_origin = player_tile
 
 	if Input.is_action_just_pressed("quick_save"):
 		if SaveSystem.save_game(grid_world, player, player_inventory):
@@ -164,7 +185,7 @@ func _try_interact(player_tile: Vector2i) -> void:
 	else:
 		_show_toast("%s is empty" % Buildings.name_of(b.type))
 
-## Debug-only: spawns three minimal chains east of the player.
+## Debug-only: spawns four minimal chains east of the player.
 ##
 ## Wheat chain (origin = player + (3, 0)):
 ##   Planter → Harvester → belt → Thresher
@@ -175,15 +196,29 @@ func _try_interact(player_tile: Vector2i) -> void:
 ##   Planter → Harvester → belt → Sugar Press → belt → Yeast Culture → Yeast Chest
 ##                                                    ↑
 ##                                                    pipe ← Pump ← Water tile
+##   (Sugar keeps its own pump+water; only bread+cloth share, see below.)
 ##
-## Bread mini (origin = player + (3, 8)): integration check for rotation +
+## Cloth chain (origin = player + (10, 8)):
+##   Flax Planter → Harvester → belt → Retter → belt → Loom → belt → Tailor → belt → Bag Chest
+##   Pre-loaded: planter at 80% growth, harvester with 2 flax, so first flax
+##   ripens in ~5s instead of 25s and the chain warmups quickly. NOT pre-
+##   loading downstream stages — full end-to-end production must run.
+##   Expected steady-state: ~1-2 bags in chest after 3 minutes. 0 bags = chain
+##   stuck upstream, investigate. 5+ bags = unexpectedly fast (tick-rate
+##   drift?), investigate. Calibration baseline.
+##
+## Bread mini (origin = player + (15, 8)): integration check for rotation +
 ## multi-tile. Mixer is 2×2 rotated DIR_S (90° CW). After rotation the
 ## canonical "flour W / yeast N / dough E" ports become world N / E / S.
 ##   Pre-loaded flour-chest above → flour belt south into mixer N edge
 ##   Pre-loaded yeast-chest right → yeast belt west into mixer E edge
-##   Pump+pipe west of mixer       → water along W edge
 ##   Mixer south edge              → dough belt south → dough chest
-## If dough accumulates, rotation+multi-tile is integrated correctly.
+##   Water comes from the SHARED network (Mixer W edge).
+##
+## Shared water network: ONE pump+water tile feeding both the Cloth chain's
+## Retter AND the Bread mini's Mixer. The integration test for multi-consumer
+## fluid networks. If both Retter and Mixer report water connected on F11
+## spawn, the shared network works. If either fails, a pipe coordinate is off.
 ##
 ## Each chain is independently verifiable. Full bread chain (combining
 ## flour + yeast + water → dough → bread) lands when each piece passes.
@@ -228,8 +263,10 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 	# Bread mini-chain: rotated 2×2 Mixer (dir=DIR_S → ports rotate 90° CW).
 	# Canonical flour-W → world N. Canonical yeast-N → world E. Canonical
 	# dough-E → world S. Mixer occupies (0,0)..(1,1) (anchor at 0,0).
+	# Water is supplied by the SHARED network defined further down — no
+	# standalone water/pump in this plan.
 	var BLT_N: int = Belt.DIR_N
-	var bread_o: Vector2i = player_tile + Vector2i(3, 8)
+	var bread_o: Vector2i = player_tile + Vector2i(15, 8)
 	var bread_plan: Array = [
 		# Mixer 2×2 at (0,0)..(1,1), facing south.
 		[Vector2i(0, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.MIXER, null, BLT_S],
@@ -246,15 +283,46 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 		# pushes west into the mixer's E edge.
 		[Vector2i(3, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.CHEST, null, 0],
 		[Vector2i(2, 0),  Terrain.Overlay.STONE, GRASS, Buildings.Type.BELT,  null, BLT_W],
-		# Water: pump at (-1,2) on a stone tile west of the mixer S edge,
-		# water tile further west, pipe at (-1,0) connects pump to mixer.
-		[Vector2i(-1, 0), Terrain.Overlay.STONE, GRASS, Buildings.Type.PIPE, null, 0],
-		[Vector2i(-1, 1), Terrain.Overlay.STONE, GRASS, Buildings.Type.PIPE, null, 0],
-		[Vector2i(-1, 2), Terrain.Overlay.STONE, GRASS, Buildings.Type.PUMP, null, 0],
-		[Vector2i(-2, 2), -1, Terrain.Base.WATER, -1, null, 0],
 		# Dough sink: belt at (0,2) below the mixer S edge, chest catches.
 		[Vector2i(0, 2),  Terrain.Overlay.STONE, GRASS, Buildings.Type.BELT,  null, BLT_S],
 		[Vector2i(0, 3),  Terrain.Overlay.STONE, GRASS, Buildings.Type.CHEST, null, 0],
+	]
+
+	# Cloth chain: Flax Planter at top, vertical south-running line down to
+	# Bag chest at bottom. Retter draws water from the SHARED network defined
+	# below — its E perimeter is at column +1 of the chain, where the shared
+	# network's western pipe terminates.
+	var cloth_o: Vector2i = player_tile + Vector2i(10, 8)
+	var cloth_plan: Array = [
+		[Vector2i(0, 0), Terrain.Overlay.SOIL_TILLED, GRASS, Buildings.Type.PLANTER,   Items.Type.FLAX, 0],
+		[Vector2i(0, 1), Terrain.Overlay.STONE,       GRASS, Buildings.Type.HARVESTER, null,            0],
+		[Vector2i(0, 2), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
+		[Vector2i(0, 3), Terrain.Overlay.STONE,       GRASS, Buildings.Type.RETTER,    null,            0],
+		[Vector2i(0, 4), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
+		[Vector2i(0, 5), Terrain.Overlay.STONE,       GRASS, Buildings.Type.LOOM,      null,            0],
+		[Vector2i(0, 6), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
+		[Vector2i(0, 7), Terrain.Overlay.STONE,       GRASS, Buildings.Type.TAILOR,    null,            0],
+		[Vector2i(0, 8), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
+		[Vector2i(0, 9), Terrain.Overlay.STONE,       GRASS, Buildings.Type.CHEST,     null,            0],
+	]
+
+	# Shared water network — one pump, one water tile, two consumers (Cloth
+	# Retter + Bread Mixer). Layout in player-relative coords:
+	#   Water at (13, 12), Pump at (13, 11), pipes form an L:
+	#     west:  (12, 11), (11, 11)  →  reaches Retter E perimeter at (11, 11)
+	#     N+E:   (13, 10), (14, 10), (14, 9)  →  reaches Mixer W perimeter at (14, 9)
+	# Water is placed FIRST so the pump's adjacency check passes when the
+	# pump entry is processed.
+	var shared_o: Vector2i = player_tile
+	var shared_plan: Array = [
+		[Vector2i(13, 12), -1,                    Terrain.Base.WATER, -1,            null, 0],
+		[Vector2i(13, 11), Terrain.Overlay.STONE, GRASS,              Buildings.Type.PUMP, null, 0],
+		# Pipes — order doesn't matter for connectivity (rebuilt lazily).
+		[Vector2i(12, 11), Terrain.Overlay.STONE, GRASS,              Buildings.Type.PIPE, null, 0],
+		[Vector2i(11, 11), Terrain.Overlay.STONE, GRASS,              Buildings.Type.PIPE, null, 0],
+		[Vector2i(13, 10), Terrain.Overlay.STONE, GRASS,              Buildings.Type.PIPE, null, 0],
+		[Vector2i(14, 10), Terrain.Overlay.STONE, GRASS,              Buildings.Type.PIPE, null, 0],
+		[Vector2i(14, 9),  Terrain.Overlay.STONE, GRASS,              Buildings.Type.PIPE, null, 0],
 	]
 
 	var plan: Array = []
@@ -264,6 +332,10 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 		plan.append([sugar_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
 	for entry in bread_plan:
 		plan.append([bread_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
+	for entry in cloth_plan:
+		plan.append([cloth_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
+	for entry in shared_plan:
+		plan.append([shared_o + entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]])
 	var placed: int = 0
 	var skipped: int = 0
 	for entry in plan:
@@ -301,7 +373,20 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 	if grid_world.has_building_at(bread_mixer_pos):
 		var mixer: Building = grid_world.building_at(bread_mixer_pos)
 		mixer.state["in_buffer"] = [[Items.Type.FLOUR, 100], [Items.Type.YEAST, 50]]
-	_show_toast("[debug] Demo chain: %d placed, %d skipped" % [placed, skipped])
+	# Pre-load the Flax Planter to ~80% growth and the Harvester with 2 flax
+	# already buffered. First flax lands in the chain in ~5s instead of 25s,
+	# so verification doesn't have to wait a full cold start. Downstream
+	# stages (Retter, Loom, Tailor) are NOT pre-loaded — they must run from
+	# scratch, so the chain genuinely flows end-to-end.
+	var flax_planter_pos: Vector2i = cloth_o + Vector2i(0, 0)
+	if grid_world.has_building_at(flax_planter_pos):
+		var planter: Building = grid_world.building_at(flax_planter_pos)
+		planter.state["growth"] = 400  # 80% of the 500-tick flax cycle
+	var flax_harvester_pos: Vector2i = cloth_o + Vector2i(0, 1)
+	if grid_world.has_building_at(flax_harvester_pos):
+		var harvester: Building = grid_world.building_at(flax_harvester_pos)
+		harvester.state["buffer"] = [[Items.Type.FLAX, 2]]
+	_show_toast("[debug] Demo chain: %d placed, %d skipped at origin %s" % [placed, skipped, str(player_tile)])
 
 func _overlay_list_str(overlays: Array) -> String:
 	var parts: Array = []
