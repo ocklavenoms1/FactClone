@@ -168,6 +168,30 @@ const DATA: Dictionary = {
 		"supports_direction": false,
 		"player_drainable": false,
 	},
+	Type.RETTER: {
+		"name": "Retter",
+		"swatch_color": Color(0.40, 0.55, 0.45),    # mossy vat green
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.LOOM: {
+		"name": "Loom",
+		"swatch_color": Color(0.72, 0.50, 0.28),    # warm wood
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
+	Type.TAILOR: {
+		"name": "Tailor",
+		"swatch_color": Color(0.42, 0.45, 0.62),    # tailor's slate-blue
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE],
+		"supports_direction": false,
+		"player_drainable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -285,6 +309,12 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return YeastCulture.make(pos)
 		Type.SUGAR_PRESS:
 			return SugarPress.make(pos)
+		Type.RETTER:
+			return Retter.make(pos)
+		Type.LOOM:
+			return Loom.make(pos)
+		Type.TAILOR:
+			return Tailor.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -300,7 +330,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Chest.tick(b, world)
 		# All recipe-driven processors share Processor.tick:
 		Type.MILL, Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, \
-		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:
+		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
+		Type.RETTER, Type.LOOM, Type.TAILOR:
 			Processor.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
@@ -341,6 +372,12 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			YeastCulture.draw(b, canvas, world_pos, tile_size)
 		Type.SUGAR_PRESS:
 			SugarPress.draw(b, canvas, world_pos, tile_size)
+		Type.RETTER:
+			Retter.draw(b, canvas, world_pos, tile_size)
+		Type.LOOM:
+			Loom.draw(b, canvas, world_pos, tile_size)
+		Type.TAILOR:
+			Tailor.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -529,7 +566,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Pump.info_lines(b)
 		# All recipe-driven processors use Processor.info_lines:
 		Type.MIXER, Type.THRESHER, Type.PROOFER, Type.OVEN, Type.PACKAGER, \
-		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS:
+		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
+		Type.RETTER, Type.LOOM, Type.TAILOR:
 			return Processor.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]

@@ -65,6 +65,10 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.PLANTER, "extra": Items.Type.SUGAR_BEET, "label": "Sugar Planter" },
 			{ "kind": "building", "value": Buildings.Type.HARVESTER },
 			{ "kind": "building", "value": Buildings.Type.PUMP },
+			# Cloth chain processors — Refining is at 9/9, so these live here.
+			{ "kind": "building", "value": Buildings.Type.RETTER },
+			{ "kind": "building", "value": Buildings.Type.LOOM },
+			{ "kind": "building", "value": Buildings.Type.TAILOR },
 		],
 		"selected": 0,
 	})
