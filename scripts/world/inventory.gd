@@ -91,6 +91,17 @@ func is_empty() -> bool:
 			return false
 	return true
 
+## Count of slots currently holding any item. Used by the inventory panel
+## to display "Slots: A/B used" so capacity changes (e.g., bag consumption
+## growing capacity) are visible to the player. Aggregate display by item
+## type hides the slot dimension; this exposes it.
+func slots_used() -> int:
+	var n: int = 0
+	for s in slots:
+		if not s.is_empty():
+			n += 1
+	return n
+
 ## Total items across all stacks. Useful for capacity-style checks.
 func total_count() -> int:
 	var n: int = 0

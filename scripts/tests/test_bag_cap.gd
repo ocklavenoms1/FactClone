@@ -44,6 +44,11 @@ static func run(_parent: Node) -> Dictionary:
 	inv.expand(-3)
 	_check(failures, inv.capacity == STARTING_CAPACITY + SLOTS_PER_BAG, "expand(-N) should be no-op")
 
+	# slots_used: 7 wheat at max_stack=100 fits in 1 slot. After expand by
+	# SLOTS_PER_BAG, capacity grew but used slots didn't.
+	_check(failures, inv.slots_used() == 1, "slots_used after 7 wheat: expected 1, got %d" % inv.slots_used())
+	_check(failures, inv.capacity - inv.slots_used() == SLOTS_PER_BAG + (STARTING_CAPACITY - 1), "free slot count mismatch after expand")
+
 	# --- Phase 2: cap-of-5 lifecycle ---
 	# Simulate the consume-bag flow as a state machine over 6 attempts.
 	# Mirrors main.gd's _confirm_bag_consume() preconditions + actions
