@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=11 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://scripts/ui/inventory_panel.gd" id="5_invpanel"]
 [ext_resource type="Script" path="res://scripts/ui/info_panel.gd" id="6_infopanel"]
 [ext_resource type="Script" path="res://scripts/ui/inventory_grid.gd" id="7_invgrid"]
+[ext_resource type="Script" path="res://scripts/ui/map_panel.gd" id="8_mappanel"]
+[ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="9_minimap"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -77,3 +79,20 @@ anchor_left = 0.0
 anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 1.0
+
+[node name="MapPanel" type="Control" parent="HUD"]
+script = ExtResource("8_mappanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Minimap" type="Control" parent="HUD"]
+script = ExtResource("9_minimap")
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2

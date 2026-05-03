@@ -9,6 +9,115 @@ Each entry has three sections:
 
 ---
 
+## Exploration UI — M-key fullscreen map + minimap + fog-of-war
+
+**Date:** 2026-05-03
+**Tag:** `session-explore-map`
+
+The navigation/awareness layer for the worldgen world. Player gains:
+- A 200×200 minimap top-right showing 7×7 regions of fog-of-war state centered on player
+- A fullscreen pannable map opened with M, showing the full 16×16 region world
+- Three visibility states (unrevealed / fog / active) tracked per region and persisted in save
+- Initial 3-radius reveal at game start so spawn vicinity has context
+
+Foundation for Stage 2+ exploration mechanics (radar buildings, map markers, etc.).
+
+### What shipped
+
+**Region visibility system** (`grid_world.gd`)
+- New `region_visibility: Dictionary[Vector2i, int]` — sparse per-region state (1=fog, 2=active; 0=unrevealed = no entry).
+- `update_vision(player_region)` — Chebyshev radius 2 around player. Downgrades exited regions to fog, upgrades in-range to active. Returns the list of changed regions for map dirty tracking.
+- `initial_reveal()` — radius 3 (7×7 = 49 regions) marked as fog at fresh game start. Spawn vicinity has navigation context on first M-press; corrected from the kickoff message's "radius 7" which would have pre-revealed 88% of the map.
+- `region_of()` and `region_of_world_pos()` — static helpers to map tile / world position to region coord.
+- `_in_region_bounds()` — clipping check; vision update at world corners produces 3×3 instead of 5×5.
+
+**Vision update timing** (`main.gd`)
+- Per-frame: one `Vector2i` compare (`_player_last_region` vs current). Microseconds.
+- On region cross only: `update_vision()` runs — ~50 dict ops total. Microseconds.
+- Cross detection works in real game loop (verified via headless probe + in-game smoke).
+
+**Map texture caching** (`map_panel.gd`)
+- Single 1024×1024 RGBA8 `Image` + `ImageTexture`. Per Q9 measurement (`ImageTexture.update()` = 7µs, `set_pixel × 1M` = 60ms), in-place GPU upload is essentially free.
+- **Background incremental build**: 8 regions per frame from `tick_background_build` while not yet `_initial_built`. ~32 frames at 60fps = 0.5sec total to build the 256-region map. Per-frame cost ≈ 0.8ms. Texture progressively reveals as build advances (not snap-to-full at end).
+- **Per-region dirty tracking**: vision changes / tile modifications / building placements mark specific regions dirty. On next visible frame, only dirty regions redraw, then `texture.update()` syncs GPU.
+
+**Fullscreen M-map**
+- Covers full viewport when open. No 85% panel — full coverage.
+- Display scale: `max(2.5, max(viewport.x, viewport.y) * 1.5 / TEX_SIZE)` — ensures texture is meaningfully larger than viewport in BOTH axes (drag-pan visible horizontally and vertically on any aspect ratio).
+- **Drag-to-pan**: hold left mouse, drag to scroll. Texture origin clamped to keep map covering viewport — no off-edge black void during pan.
+- **Re-center on player at every M-open**. Pan during one session, close M, reopen → texture re-centers on current player position.
+- **Black underlay across full viewport** before drawing texture — prevents world bleed-through where Control area isn't covered by texture (the bug the first smoke caught).
+- Three visibility states render correctly: black for unrevealed regions, color × `FOG_DIMMING` (0.45) for fog (preserves color identity for ore-type recognition), full color for active.
+- Buildings rendered as bright orange markers on top of underlying tile color.
+- Player position marker (yellow dot, black outline, radius 5px) drawn on top of texture each frame; reflects current world position regardless of pan offset.
+
+**Minimap** (`minimap.gd`)
+- 224×224 px top-right (margin: 20px right, 10px top — 6px gap from info panel).
+- Shows 7×7 regions = 224 tiles centered on player (1:1 px/tile, no filtering blur).
+- **Samples the main map's cached texture** via `draw_texture_rect_region` — zero duplicate render work; reuses the main map's incremental dirty tracking.
+- Player marker (yellow dot, 3px) at minimap center.
+- **Hidden when M-map or inventory grid is open** (polled per frame in main.gd).
+- `MOUSE_FILTER_IGNORE` so cursor over the minimap area passes through to the world (player can place buildings "behind" the minimap).
+- Edge-clamp behavior near world boundary: source rect extending past texture shows the texture's edge (which is unrevealed-black at init) — correct "world doesn't extend" semantic with no manual clipping needed.
+
+**Save format v11 → v12**
+- New top-level field `explored_regions: Array of [rx, ry]` — sparse list of regions ever charted (state ≥ 1).
+- **Active state collapses to fog on save**; load-time vision update re-derives active state from player position. Avoids "saved active but loaded somewhere else" inconsistency. Single source of truth: player position → active state.
+- v11 saves hard-fail with `OS.alert` per existing schema-bump policy.
+
+**Modal coordination**
+- M-key: opens / closes map panel; ESC also closes.
+- World inputs (placement, hotbar, inspect, save, etc.) suspended while map open (matches inventory grid pattern).
+- Player movement frozen while map open (`player.gd` gates on `map_panel.is_open() OR inventory_grid.is_open()`).
+- Drag-pan only fires inside the map panel (via `_gui_input` while open).
+
+**Tests**: 16/16 passing
+- **NEW** `test_region_visibility` — initial reveal (49 fog), vision update (25 active + 24 fog), region cross (returns changed list), boundary clipping at world corner (3×3 = 9), no out-of-bounds tracking, `region_of_world_pos` arithmetic correctness
+- **UPDATED** `test_save_load_roundtrip` for v12 — explored_regions persist as fog, post-load vision update re-derives 25 active regions
+
+### Decisions
+
+- **Three-state visibility tracked as a single int dict** with state collapse on save (active→fog). Two-bool variants would have required keeping two flags consistent; single int with three states naturally encodes the "active implies revealed" invariant. State 2 (active) is runtime-derived from player position — no risk of stale active-state-without-player.
+- **Vision radius = 2 (5×5 active area)**. Matches Factorio's player vision granularity. Cheap to compute, gives a small "currently visible" footprint distinct from the larger "ever explored" history.
+- **Initial reveal radius = 3 (7×7 = 49 regions = 19% of map)**. The kickoff message said radius 7 = 15×15 = 88% of map; corrected during design pass after recognizing this would eliminate the exploration loop. Spawn vicinity stays revealed; rest of world is discovery.
+- **Region cross detected by `Vector2i` compare**, not per-frame recomputation. One compare per frame; vision math runs only on the rare frame the player crosses a 32-tile region boundary.
+- **Map texture rebuild via per-region dirty tracking** (not full-rebuild on dirty). Q9 measurement showed full 1M-pixel rebuild is ~60ms (perceptible single-frame hitch); per-region rebuild is ~0.1ms each, so 5-10 region updates on a cross take 1ms total. Imperceptible.
+- **Background incremental build** (8 regions/frame from game start). Eliminates the 30-60ms first-M-press hitch by spreading build across ~32 frames before the player thinks to open the map. Makes "M opens instantly" the felt UX.
+- **`ImageTexture.update()` for incremental GPU upload**, not `create_from_image` per change. Q9 measured both at 7µs / 13µs — both effectively free. Used `update()` for clarity (in-place semantic).
+- **Fullscreen M-map (not 85% panel) per user revision**. Originally specced as centered 85% panel; user revised mid-session to "covers whole screen" with drag-pan. Required adding pan state + clamping + black underlay (the world-bleed-through bug surfaced at first smoke).
+- **Minimap shares the main map texture, not independent rendering**. `draw_texture_rect_region` samples a 7×7-region window of the cached image. Zero duplicate render work; minimap inherits the main map's dirty tracking automatically.
+- **Minimap visibility hidden when fullscreen modals open** (M-map or inventory grid). Reduces visual noise; M-map is redundant with minimap (same data at higher zoom).
+- **Cellular noise still deferred** (carried from worldgen-stage1) — not relevant to this session.
+
+### Lessons
+
+- **Q9 measurement before locking design saved a wrong architecture.** Pre-measurement, I'd budgeted 200-500ms for full rebuilds and was leaning toward complex partial-rebuild schemes. Empirical probe showed `set_pixel × 1M` is 60ms (~5x faster than estimate) and `ImageTexture.update()` is 7µs (effectively free). Per-region rebuild + in-place GPU upload became trivially cheap; no exotic architecture needed. Always measure before designing-around-cost.
+- **Mid-session scope additions need explicit gating.** User added two scope items mid-session (fullscreen + drag-pan, then minimap). Both got design-passes and pause points before implementation. The "fullscreen + pan" addition broke the original 85%-centered design and surfaced the world-bleed-through bug at smoke; the design-pass-first protocol caught it before it shipped.
+- **Anchor coords on Control nodes are easy to get wrong.** First minimap implementation set anchors to top-right (anchor_left=1.0, anchor_right=1.0) intending "stick to right edge," then drew at viewport-relative coords — Control's local coord system has origin at the right edge, so viewport coord 1676 added to right-edge origin = drawn far off-screen. Lesson: when a Control draws using viewport-absolute coords, anchor it to FILL the viewport (anchors 0..1) so local coord system matches viewport. Saved by the smoke test catching it immediately.
+- **The "first M-press" UX is dominated by hidden background build cost.** With background build at 8 regions/frame from game start, by the time a player walks around for a few seconds and reaches for M, the map is fully built. M opens instantly. Without this, M would have a visible 30-60ms hitch. The lesson is: anything that's "expensive but bounded" + "user will eventually do it" can be backgrounded into the dead time before the user asks.
+- **Two-version-axes pattern (save_version + worldgen_version) extended naturally.** Worldgen Stage 1 introduced this for procgen rehydration; the v12 bump for explored_regions only needed `SAVE_VERSION`, not `WorldGenerator.VERSION`. The split was right — independent axes evolve at independent cadences.
+- **`draw_texture_rect_region` edge-clamp behavior is the right default for "sample a window of a finite source."** No manual clipping needed — the texture's pre-init black fill becomes the "out of world" appearance automatically.
+- **Pan-clamping at world edges felt right immediately.** Without clamping, dragging past the map edge would expose black void. With clamping, the map "stops" at world boundary — natural and obvious. Cheap rule (~10 lines).
+- **Re-center on M-open, NOT continuous player-following.** Player can pan to look at distant ore patches, then close M to actually go there. Re-center on next open re-anchors them. Continuous following would prevent intentional pan-away.
+
+### Migration
+
+Save format v11 → v12. **All existing v11 saves hard-fail on load** with `OS.alert` per the existing schema-bump policy. Player must delete `%APPDATA%\Godot\app_userdata\Stewardship\save_slot_1.json` and start fresh. The new world generates with a random seed at fresh start (worldgen Stage 1 behavior unchanged).
+
+### Roadmap implications
+
+- **Map polish** (next likely session): zoom on map (mouse wheel), markers/waypoints, perhaps a more responsive minimap interaction model (click-to-pan-main-map, etc.). Out of scope for this session.
+- **Radar buildings** (Stage 2 of exploration): a building that extends `region_visibility` for nearby regions even when player isn't there. Architecture supports this trivially — just call `region_visibility[r] = 1` for the radar's covered regions. Hook would be Buildings.tick_one for the radar type.
+- **Worldgen Stages 2-5** (chunked, biomes, mining, etc.): unaffected by this session. Map architecture handles arbitrary `region_visibility` content; whatever future stages put in regions just renders.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (carried from worldgen-stage1).
+- **Cloth chain `prefer_dir` polish** (carried from Session E).
+- **Sprite migration** — long-term replacement for placeholder rect/circle rendering.
+
+---
+
 ## Worldgen Stage 1 — patch placement, distance gating, procgen rehydration
 
 **Date:** 2026-05-02

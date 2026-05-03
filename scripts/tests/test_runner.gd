@@ -27,6 +27,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_worldgen_distance_scaling.gd"),
 	preload("res://scripts/tests/test_worldgen_spawn_safety.gd"),
 	preload("res://scripts/tests/test_random_seed_save_roundtrip.gd"),
+	preload("res://scripts/tests/test_region_visibility.gd"),
 ]
 
 func _ready() -> void:

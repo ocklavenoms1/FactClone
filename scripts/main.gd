@@ -30,6 +30,8 @@ var target_zoom: float = 1.0
 @onready var inventory_panel: Control = $HUD/InventoryPanel
 @onready var info_panel: Control = $HUD/InfoPanel
 @onready var inventory_grid: Control = $HUD/InventoryGrid
+@onready var map_panel: MapPanel = $HUD/MapPanel
+@onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
 var toast_timer: float = 0.0
@@ -44,6 +46,12 @@ var placement_direction: int = Belt.DIR_E   # 0=E, 1=S, 2=W, 3=N
 # player manually cleans up old demo buildings if they want a fresh layout.
 var _demo_spawned: bool = false
 var _demo_origin: Vector2i = Vector2i.ZERO
+
+# Vision tracking: which region the player was in last frame. When the player
+# crosses a region boundary, GridWorld.update_vision() is called to upgrade
+# new in-range regions to active and demote out-of-range ones to fog.
+# Sentinel value (large) ensures the first frame triggers an update.
+var _player_last_region: Vector2i = Vector2i(99999, 99999)
 
 # Player progression — single dict so future progression state (score,
 # achievements, etc.) lives in one persistent container instead of
@@ -76,6 +84,16 @@ func _ready() -> void:
 	inventory_grid.toast_callback = _show_toast
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.
 	player.inventory_grid = inventory_grid
+	# Map panel needs world + player references for rendering and the
+	# player-position marker. Background build runs from _process below.
+	map_panel.world = grid_world
+	map_panel.player = player
+	# Player gates movement on map_panel.is_open() too.
+	player.map_panel = map_panel
+	# Minimap shares the map_panel's cached texture (samples a region each frame).
+	minimap.world = grid_world
+	minimap.player = player
+	minimap.map_panel = map_panel
 	# Initialize zoom from whatever the camera was authored at, so target
 	# tracking starts in lockstep instead of snapping on first wheel input.
 	target_zoom = camera.zoom.x
@@ -95,7 +113,16 @@ func _ready() -> void:
 		var generator: WorldGenerator = WorldGenerator.new()
 		generator.generate(grid_world, grid_world.world_seed)
 		var gen_elapsed: int = Time.get_ticks_msec() - gen_start_msec
-		_show_toast("New world (seed %d, gen %dms) · 1-9 build · Tab · R rotate · F5 save · B bag" % [grid_world.world_seed, gen_elapsed])
+		# Initial reveal: mark the spawn-vicinity 7×7 region area as fog so the
+		# map shows context on first M-press, not all-black.
+		grid_world.initial_reveal()
+		_show_toast("New world (seed %d, gen %dms) · 1-9 build · Tab · R rotate · F5 save · B bag · M map" % [grid_world.world_seed, gen_elapsed])
+
+	# Run an initial vision update from the player's spawn position — upgrades
+	# the 5×5 around player from fog (or unrevealed) to active. Same call site
+	# for both fresh-start and loaded-save paths.
+	_player_last_region = GridWorld.region_of_world_pos(player.global_position)
+	grid_world.update_vision(_player_last_region)
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
 ## defaults that main.gd's `player_progression` was initialized with — this
@@ -105,10 +132,31 @@ func _apply_loaded_progression(loaded: Dictionary) -> void:
 		player_progression[key] = loaded[key]
 
 func _process(delta: float) -> void:
+	# Vision update on region cross. Cheap: one Vector2i compare per frame;
+	# only does work on the rare frames where player crosses a region boundary
+	# (typically every several seconds at walking speed).
+	var current_region: Vector2i = GridWorld.region_of_world_pos(player.global_position)
+	if current_region != _player_last_region:
+		var changed: Array = grid_world.update_vision(current_region)
+		map_panel.mark_regions_dirty(changed)
+		_player_last_region = current_region
+
+	# Background build of the map texture: ~8 regions per frame from game
+	# start until the full 16×16 = 256 regions are built. Total ~32 frames
+	# at 60fps = ~0.5 sec; per-frame cost ~0.8ms (invisible).
+	map_panel.tick_background_build()
+
+	# Minimap visibility: hide when a fullscreen modal is open (M-map or
+	# inventory grid). Cheap conditional, polled per frame.
+	minimap.visible = not (map_panel.is_open() or inventory_grid.is_open())
+
 	# Inventory toggle (I) — always handled, even while grid is open
 	# (lets I close the grid).
 	if Input.is_action_just_pressed("toggle_inventory"):
 		inventory_grid.toggle()
+	# Map toggle (M) — always handled. M while open also closes (matches I/inventory).
+	if Input.is_action_just_pressed("toggle_map"):
+		map_panel.toggle()
 	# Esc closes the grid if it's open. We still handle close_info_panel
 	# below for the info panel; this branch comes first so Esc-while-grid-
 	# open closes the grid in preference to the info panel.
@@ -123,11 +171,10 @@ func _process(delta: float) -> void:
 	var z: float = lerp(camera.zoom.x, target_zoom, clamp(delta * ZOOM_SMOOTH_RATE, 0.0, 1.0))
 	camera.zoom = Vector2(z, z)
 
-	# When the inventory grid is open: skip world / hotbar / placement /
+	# When inventory grid OR map panel is open: skip world / hotbar / placement /
 	# inspect / save / consume input. Game tick still runs (factory keeps
-	# producing); player movement gated separately in player.gd via the
-	# inventory_grid.is_open() check.
-	if inventory_grid.is_open():
+	# producing); player movement gated separately in player.gd.
+	if inventory_grid.is_open() or map_panel.is_open():
 		# Toast timer still ticks so auto-return / "place cursor" toasts
 		# still surface and fade.
 		if toast_timer > 0.0:
@@ -276,6 +323,8 @@ func _try_place(pos: Vector2i) -> void:
 		"terrain":
 			if not grid_world.set_overlay(pos, hotbar.current_value()):
 				_rate_limited_fail_toast(grid_world.last_place_error)
+			else:
+				map_panel.mark_tile_dirty(pos)
 		"building":
 			var t: int = hotbar.current_value()
 			if grid_world.has_building_at(pos):
@@ -284,10 +333,18 @@ func _try_place(pos: Vector2i) -> void:
 			var extra = hotbar.current_extra()
 			if not grid_world.place_building(t, pos, dir, extra):
 				_rate_limited_fail_toast(grid_world.last_building_place_error)
+			else:
+				# Mark all footprint regions dirty (multi-tile buildings can span 2 regions).
+				var fp: Vector2i = Buildings.footprint_of(t)
+				for dx in fp.x:
+					for dy in fp.y:
+						map_panel.mark_tile_dirty(Vector2i(pos.x + dx, pos.y + dy))
 
 func _try_remove(pos: Vector2i) -> void:
 	if not grid_world.clear_tile(pos):
 		_rate_limited_fail_toast(grid_world.last_remove_error)
+	else:
+		map_panel.mark_tile_dirty(pos)
 
 ## Rate-limit toasts during drag-place / drag-remove so they don't spam per tick.
 func _rate_limited_fail_toast(msg: String) -> void:

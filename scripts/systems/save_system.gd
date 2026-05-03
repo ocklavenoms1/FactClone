@@ -49,8 +49,15 @@ extends RefCounted
 ##              - 4. Restore buildings / player / progression as before
 ##            v10 saves don't have a seed and use the hardcoded-lake world.
 ##            They cannot be safely upgraded — hard-fail.
+##  v11 → v12: M-key map + fog-of-war. New top-level field
+##            `explored_regions: Array of [rx, ry]` — sparse list of region
+##            coords ever charted (state >= 1 = fog or active).
+##            Active state (state == 2, currently in vision) is recomputed
+##            from player position at load time, not persisted. Avoids the
+##            "saved active but loaded somewhere else" inconsistency.
+##            v11 saves don't have this field — hard-fail.
 
-const SAVE_VERSION: int = 11
+const SAVE_VERSION: int = 12
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -76,6 +83,13 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		var b: Building = grid_world.buildings[anchor_key]
 		buildings_data.append(b.to_dict())
 
+	# v12: serialize explored regions (state >= 1). Active state collapses to
+	# fog on save; load-time vision update re-derives active from player pos.
+	var explored_data: Array = []
+	for region in grid_world.region_visibility.keys():
+		if int(grid_world.region_visibility[region]) >= 1:
+			explored_data.append([region.x, region.y])
+
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"world_seed": grid_world.world_seed,
@@ -83,6 +97,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"player": [player.global_position.x, player.global_position.y],
 		"tick": TickSystem.current_tick,
 		"tile_modifications": modifications_data,
+		"explored_regions": explored_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
 		"player_progression": player_progression,
@@ -174,6 +189,13 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		grid_world.tile_modifications[pos] = modified
 		if modified.resource_node == ResourceNodes.Type.NONE:
 			grid_world.resource_state.erase(pos)
+
+	# v12: restore explored regions as fog. Active state will be set by
+	# main.gd's vision update after load completes (running update_vision
+	# from the loaded player position).
+	grid_world.region_visibility.clear()
+	for entry in data.get("explored_regions", []):
+		grid_world.region_visibility[Vector2i(int(entry[0]), int(entry[1]))] = 1
 
 	for bdict in data.get("buildings", []):
 		var b: Building = Building.from_dict(bdict)

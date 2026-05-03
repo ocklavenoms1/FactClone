@@ -1,21 +1,24 @@
 extends RefCounted
 
-## Save/load round-trip test — locks the v11 schema.
+## Save/load round-trip test — locks the v12 schema.
 ##
-## v11 introduces procgen rehydration: world is regenerated from world_seed
-## on load, and only player tile_modifications persist. The test:
+## v11 introduced procgen rehydration; v12 adds explored_regions persistence
+## (M-key map fog-of-war state). The test:
 ##   1. Generates a world via WorldGenerator with a chosen seed
 ##   2. Adds player modifications (paint overlay, place buildings)
-##   3. Saves
-##   4. Loads into a blank world
-##   5. Asserts:
+##   3. Marks several regions as explored (initial_reveal + vision update)
+##   4. Saves
+##   5. Loads into a blank world
+##   6. Asserts:
 ##      - world_seed round-trips correctly
 ##      - regenerated tiles match (procgen produces identical world from seed)
-##      - player modifications were applied on top
+##      - player modifications applied on top
+##      - explored_regions persist (state=1 fog after load; vision update
+##        re-derives active state from player position)
 ##      - buildings, inventory, tick, progression all match
 ##
 ## Catches: schema regressions, procgen non-determinism, modification
-## not applied, occupancy desyncs.
+## not applied, occupancy desyncs, fog-of-war loss.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const WorldGenScript  = preload("res://scripts/world/world_generator.gd")
@@ -23,7 +26,7 @@ const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
 const TEST_SEED: int = 12345
 
 static func test_name() -> String:
-	return "save/load round-trip (v11)"
+	return "save/load round-trip (v12)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -115,6 +118,12 @@ static func run(parent: Node) -> Dictionary:
 	# bags_consumed = 3 means the player has consumed 3 bags lifetime.
 	var progression_a: Dictionary = { "bags_consumed": 3 }
 
+	# v12: simulate exploration. initial_reveal marks 7×7 around origin as
+	# fog; vision update around player_region (1, 0) upgrades 5×5 to active.
+	world_a.initial_reveal()
+	world_a.update_vision(Vector2i(1, 0))
+	var pre_save_explored_count: int = world_a.region_visibility.size()
+
 	# --- Save ---
 	if not SaveSystem.save_game(world_a, player_a, inv_a, progression_a):
 		return _fail(world_a, orig_path, "save_game returned false")
@@ -142,6 +151,24 @@ static func run(parent: Node) -> Dictionary:
 
 	# v11: world_seed round-trips.
 	_check(failures, world_b.world_seed == TEST_SEED, "world_seed mismatch: expected %d, got %d" % [TEST_SEED, world_b.world_seed])
+
+	# v12: explored_regions round-trip. After load, every region from world_a's
+	# region_visibility is present in world_b. Active state (2) collapses to
+	# fog (1) on save; runtime vision update re-derives active state. So all
+	# loaded entries should be state=1 immediately after load.
+	_check(failures, world_b.region_visibility.size() == pre_save_explored_count, "explored_regions count mismatch: pre-save %d vs loaded %d" % [pre_save_explored_count, world_b.region_visibility.size()])
+	for region in world_a.region_visibility.keys():
+		if not world_b.region_visibility.has(region):
+			failures.append("missing region %s in world_b after load" % str(region))
+			continue
+		_check(failures, int(world_b.region_visibility[region]) == 1, "region %s loaded with state %d (expected 1=fog; active state is recomputed at runtime)" % [str(region), int(world_b.region_visibility[region])])
+	# Now run vision update from player_b position; should re-derive 5×5 active.
+	world_b.update_vision(Vector2i(1, 0))
+	var post_vision_active: int = 0
+	for region in world_b.region_visibility.keys():
+		if int(world_b.region_visibility[region]) == 2:
+			post_vision_active += 1
+	_check(failures, post_vision_active == 25, "after post-load vision update, expected 25 active regions (5×5), got %d" % post_vision_active)
 
 	# v11: tile counts match (procgen rehydration produced identical world).
 	_check(failures, world_a.tiles.size() == world_b.tiles.size(), "tile count mismatch: %d vs %d" % [world_a.tiles.size(), world_b.tiles.size()])
@@ -209,7 +236,7 @@ static func run(parent: Node) -> Dictionary:
 	SaveSystem.save_path = orig_path
 
 	if failures.is_empty():
-		return { "ok": true, "message": "v11 round-trip preserves seed, modifications, regenerated terrain, buildings, state, inventory, tick, progression" }
+		return { "ok": true, "message": "v12 round-trip preserves seed, modifications, terrain, buildings, state, inventory, tick, progression, explored_regions" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------

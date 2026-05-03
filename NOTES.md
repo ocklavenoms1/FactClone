@@ -6,45 +6,19 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Exploration UI: M-key map + fog-of-war (NEXT SESSION)
+## Map polish (post-explore-map session)
 
-**Status:** designed but not implemented. Scoped as the immediate post-worldgen-Stage-1 session. Worldgen Stage 1 produces a 512×512 procedural world with discrete features (forests, ore patches, lakes) that are interesting to discover; the M-key map is the navigation/awareness layer that makes the world feel like a place instead of just a screen.
+**Status:** the M-key fullscreen map + minimap shipped at `session-explore-map`. Three-state visibility (unrevealed / fog / active), drag-pan, region-level fog tracking, save persistence — all live. What remains is polish.
 
-**Design starting points (captured during worldgen-stage1 session):**
+**Deferred items captured during the session:**
 
-- **M opens modal fullscreen map view.** Like inventory grid but full-screen scale, lower zoom level (whole-world overview).
-- **Fog-of-war.** Track explored regions in save. Within explored regions, map shows terrain (water, forest, plains), resource patches (colored dots per type), and buildings the player has placed. Outside explored regions, render as fog (black with maybe a subtle gradient at the edge to suggest "more world out there").
-- **Region-level fog, not tile-level.** Player explores a 32×32 region by walking near it. Region marked explored = full content visible on map. Cheaper to track and more legible than per-tile fog.
-- **Esc closes the map.** Same modal pattern as inventory grid.
-- **Save format implication:** new top-level field `explored_regions: Array[Vector2i]` (or sparse Dictionary). v11 → v12 schema bump.
-- **Future hook:** radar buildings that extend exploration radius. Build a radar tower → reveals N×N regions around it. Late-game megabase will want this for managing scattered outposts.
+- **Mouse-wheel zoom on M-map.** Currently fixed at the auto-computed display scale. Wheel could zoom in (smaller area, more detail) or out (whole world more visible). Pan-clamp adjusts naturally. ~30 min of work.
+- **Map markers / waypoints.** Right-click on map to drop a marker; visible on M-map and minimap. Persists in save. Useful when the player has scattered outposts to remember. v2 feature; no architectural blocker.
+- **Click-to-pan-from-minimap.** Right now minimap is `MOUSE_FILTER_IGNORE` (passive). Could open M-map at clicked position. Mild scope creep; defer until "I want to see X area" becomes a real friction.
+- **Facing-direction arrow on player marker.** Currently a dot. Player has no `facing` state today; would need to derive from velocity or track explicitly. Defer until needed.
+- **Fog-vs-active visual distinction beyond brightness.** 0.45 brightness multiplier reads but is subtle. Could add a desaturation overlay or animated edge for clearer "this is current vision." Wait for playtest feedback before tuning.
 
-**Architecture starting points:**
-
-- Map renderer is a separate Control overlay, not a separate scene. Reads from GridWorld via the same dict access patterns the main render uses.
-- Render strategy: rebuild the map texture once on open (or when explored set changes) into a `Texture2D`, then draw at low zoom. Don't re-walk 256K tiles per frame.
-- Resource patches on map: aggregate per-region (e.g., "this 32×32 region has 60 stone tiles" → render one stone-colored patch icon). Saves render cost and reads cleaner at map zoom.
-- Player position indicator: small arrow showing facing direction. Updates per frame.
-
-**Out of scope for the M-key session:**
-
-- Map markers / waypoints (player annotations) — defer to a v2 polish pass
-- Radar buildings — they're a hook the M-key session designs for, not an immediate ship
-- Pan/zoom on the map — fixed full-world view first; pan/zoom if the 512×512 view is uncomfortable
-
-**Hooks already present:**
-
-- Worldgen produces deterministic content per (seed, position) — map can either query GridWorld directly OR re-run WorldGenerator for unrendered chunks. For Stage 1's finite world, query is enough.
-- `world_seed` persists in save → map state can ignore seed (same world, same map structure).
-
-**Don't pre-build:**
-
-- Radar building's extraction logic — this is a building entry that the worldgen-rendering session will need to think about, but designed in the M-key session.
-- Per-tile fog — the region-level grain is the right abstraction; tile-level is overkill for navigation.
-
-**Until then:**
-
-- Player relies on memory + direct walking exploration. Adequate for Stage 1's 512×512 world during initial playtest, painful for sustained play.
+**Radar buildings (Stage 2 of exploration):** the architecture supports them trivially. A radar building's tick (or place-time) hook would call `world.region_visibility[r] = 1` for the regions it covers. Visual would be a different state (maybe value = 3 = "remote-revealed") if we want to distinguish player-explored from radar-revealed. Out of scope for Stage 1; designed for when bigger maps make this gameplay-meaningful.
 
 ---
 

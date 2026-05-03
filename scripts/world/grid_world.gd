@@ -38,6 +38,26 @@ var resource_state: Dictionary = {}   # Vector2i -> Dictionary (richness/growth 
 var buildings: Dictionary = {}        # Vector2i (anchor) -> Building
 var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor)
 
+# region_visibility: Vector2i (region coords) -> int state
+#   0 = unrevealed (sparse — no entry means unrevealed)
+#   1 = fog (charted but not currently in vision; persisted)
+#   2 = active (currently in player's 5×5 vision; recomputed at load)
+#
+# Save format persists ONLY entries with value >= 1 as `explored_regions`
+# (state collapses to 1 on save). On load, all loaded entries enter as
+# state=1, then update_vision() upgrades the 5×5 around player to state=2.
+var region_visibility: Dictionary = {}
+
+# Vision parameters. VISION_RADIUS is Chebyshev distance; the 5×5 area is
+# (2*VISION_RADIUS + 1)^2 = 25 regions when radius = 2.
+const VISION_RADIUS: int = 2
+
+# Initial reveal at fresh game start: regions within INITIAL_REVEAL_RADIUS
+# of (0, 0) start as fog. Provides "spawn vicinity" context on first M-press.
+# Radius 3 → 7×7 area = 49 regions ≈ 19% of the 16×16 world. Most of map
+# remains unrevealed for exploration.
+const INITIAL_REVEAL_RADIUS: int = 3
+
 var hover_tile: Vector2i = Vector2i.ZERO
 var show_hover: bool = false
 ## When the hotbar selection is a directional building, main.gd sets this
@@ -360,6 +380,74 @@ func find_adjacent_drainable(center: Vector2i) -> Building:
 				if b != null and Buildings.is_player_drainable(b.type):
 					return b
 	return null
+
+# ---------- region visibility / vision ----------
+
+## Convert a tile position to its containing region coordinate.
+## Region (rx, ry) covers tiles [rx*REGION_SIZE, rx*REGION_SIZE + REGION_SIZE-1]
+## in each axis.
+static func region_of(tile_pos: Vector2i) -> Vector2i:
+	return Vector2i(
+		int(floor(float(tile_pos.x) / float(WorldGenerator.REGION_SIZE))),
+		int(floor(float(tile_pos.y) / float(WorldGenerator.REGION_SIZE))),
+	)
+
+## Convert a player world-space position (Vector2 in pixels) to region coord.
+static func region_of_world_pos(world_pos: Vector2) -> Vector2i:
+	var tile_x: int = int(floor(world_pos.x / float(TILE_SIZE)))
+	var tile_y: int = int(floor(world_pos.y / float(TILE_SIZE)))
+	return region_of(Vector2i(tile_x, tile_y))
+
+## Region bounds check (matches WORLD_MIN/MAX in tile-space).
+func _in_region_bounds(region: Vector2i) -> bool:
+	return region.x >= WorldGenerator.REGION_MIN and region.x < WorldGenerator.REGION_MAX \
+		and region.y >= WorldGenerator.REGION_MIN and region.y < WorldGenerator.REGION_MAX
+
+## Recompute active-vs-fog for the current player region. Returns the list
+## of regions whose visibility CHANGED so the map texture can be marked
+## dirty for those regions only (avoids full rebuild).
+##
+## Algorithm:
+##   1. Downgrade currently-active regions that exited the vision radius to fog
+##   2. Upgrade in-range regions to active (covers fog→active and unrevealed→active)
+##
+## Cost: O(active_count + (2R+1)^2) ≈ 50 dict ops total.
+func update_vision(player_region: Vector2i) -> Array:
+	var changed: Array = []
+
+	# Downgrade out-of-range active regions to fog.
+	# Iterate keys (snapshot) since we mutate the dict.
+	for region in region_visibility.keys():
+		if int(region_visibility[region]) == 2:
+			var dist: int = max(abs(region.x - player_region.x), abs(region.y - player_region.y))
+			if dist > VISION_RADIUS:
+				region_visibility[region] = 1
+				changed.append(region)
+
+	# Upgrade in-range regions to active.
+	for dx in range(-VISION_RADIUS, VISION_RADIUS + 1):
+		for dy in range(-VISION_RADIUS, VISION_RADIUS + 1):
+			var r: Vector2i = player_region + Vector2i(dx, dy)
+			if not _in_region_bounds(r):
+				continue
+			var prev: int = int(region_visibility.get(r, 0))
+			if prev != 2:
+				region_visibility[r] = 2
+				changed.append(r)
+
+	return changed
+
+## Initial reveal: mark all regions within INITIAL_REVEAL_RADIUS Chebyshev
+## of origin as fog. Called once after fresh world generation, before the
+## first vision update. Vision update will then upgrade the 5×5 around
+## player position to active.
+func initial_reveal() -> void:
+	for dx in range(-INITIAL_REVEAL_RADIUS, INITIAL_REVEAL_RADIUS + 1):
+		for dy in range(-INITIAL_REVEAL_RADIUS, INITIAL_REVEAL_RADIUS + 1):
+			var r: Vector2i = Vector2i(dx, dy)
+			if not _in_region_bounds(r):
+				continue
+			region_visibility[r] = 1   # fog (later upgraded by vision update)
 
 # ---------- rendering ----------
 
