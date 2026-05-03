@@ -73,8 +73,22 @@ extends RefCounted
 ##                  could have stale overlay-on-deposit tiles which are
 ##                  now invalid state.
 ##            v12 saves don't have either — hard-fail.
+##  v13 → v14: Tree harvesting + generic resource state modifications.
+##            resource_state_modifications shape changed from
+##              Array of [x, y, richness:int]
+##            to
+##              Array of [x, y, dict]
+##            where dict contains state fields per resource type:
+##              ore:  {"richness": int}
+##              tree: {"regrowth_remaining": float}
+##            The Dictionary inner shape supports future resource types
+##            (crops, berries, etc.) by adding keys without further
+##            schema bumps. Each entry stores ONLY the fields relevant
+##            to its resource type.
+##            v13 saves have Array of [x, y, int] — incompatible with
+##            the new Dict shape — hard-fail.
 
-const SAVE_VERSION: int = 13
+const SAVE_VERSION: int = 14
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -107,13 +121,16 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		if int(grid_world.region_visibility[region]) >= 1:
 			explored_data.append([region.x, region.y])
 
-	# v13: serialize resource_state_modifications (mining-induced richness deltas).
-	# Only stores `current` richness; `original_richness` is rederived from
-	# WorldGenerator at load time.
+	# v14: serialize resource_state_modifications. Generic shape:
+	#   ore  → [x, y, {"richness": N}]
+	#   tree → [x, y, {"regrowth_remaining": F}]
+	# Inner dict can grow new keys for future resource types without bumping
+	# the save schema; only the field shape change required v13→v14.
 	var resource_mods_data: Array = []
 	for pos in grid_world.resource_state_modifications.keys():
-		var richness: int = int(grid_world.resource_state_modifications[pos])
-		resource_mods_data.append([pos.x, pos.y, richness])
+		var state: Dictionary = grid_world.resource_state_modifications[pos]
+		# duplicate() so save snapshot can't mutate via shared reference.
+		resource_mods_data.append([pos.x, pos.y, state.duplicate()])
 
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
@@ -216,21 +233,32 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		if modified.resource_node == ResourceNodes.Type.NONE:
 			grid_world.resource_state.erase(pos)
 
-	# v13: apply resource_state_modifications (partial-depletion deltas).
-	# WorldGenerator already restored canonical resource_state[pos] = {
-	# richness, original_richness } above; this overlay updates `richness`
-	# to the saved value. original_richness is preserved via procgen rerun.
-	# Fully-depleted tiles aren't here (already handled via tile_modifications
-	# setting resource_node=NONE, which erased resource_state).
+	# v14: apply resource_state_modifications (generic Dict shape).
+	# WorldGenerator already restored canonical resource_state from seed
+	# (with original_richness for ore patches); this overlay merges the
+	# saved state fields on top:
+	#   {"richness": N}            → ore: overwrite richness, keep original
+	#   {"regrowth_remaining": F}  → tree: insert regrowth state (tile.resource_node
+	#                                already cleared by tile_modifications above)
 	grid_world.resource_state_modifications.clear()
 	for entry in data.get("resource_state_modifications", []):
 		var rs_pos := Vector2i(int(entry[0]), int(entry[1]))
-		var rs_richness: int = int(entry[2])
-		grid_world.resource_state_modifications[rs_pos] = rs_richness
-		if grid_world.resource_state.has(rs_pos):
-			grid_world.resource_state[rs_pos]["richness"] = rs_richness
-		# Defensive: if the modification record points to a tile that's no
-		# longer in resource_state (e.g., schema race), skip silently.
+		var rs_state: Dictionary = entry[2] if entry.size() > 2 and entry[2] is Dictionary else {}
+		# Store the modification as-is (defensive copy).
+		grid_world.resource_state_modifications[rs_pos] = rs_state.duplicate()
+		# Merge into resource_state. For ore tiles, the canonical state already
+		# has richness + original_richness from procgen — overwrite richness.
+		# For tree-regrowth tiles, the canonical state may not exist (tree was
+		# at default mature) — create the entry from the saved dict.
+		if rs_state.has("richness"):
+			if grid_world.resource_state.has(rs_pos):
+				grid_world.resource_state[rs_pos]["richness"] = int(rs_state["richness"])
+			# else: tile not present in canonical resource_state (rare;
+			# defensive — skip silently)
+		elif rs_state.has("regrowth_remaining"):
+			# Tree regrowth: canonical state is "mature" (no entry). Insert
+			# the regrowth dict so _tick_regrowth picks it up next frame.
+			grid_world.resource_state[rs_pos] = rs_state.duplicate()
 
 	# v12: restore explored regions as fog. Active state will be set by
 	# main.gd's vision update after load completes (running update_vision

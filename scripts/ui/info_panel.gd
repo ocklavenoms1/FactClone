@@ -36,7 +36,10 @@ func _ready() -> void:
 	anchor_bottom = 0.0
 	offset_right = -16
 	offset_left = -16 - PANEL_WIDTH
-	offset_top = 240   # leave room for the inventory panel above
+	# Below the inventory panel, which sits below the minimap.
+	# Layout: minimap top=10..234, gap, inventory top=244..~440 (varies by
+	# item count), gap, info panel top=560.
+	offset_top = 560
 	offset_bottom = offset_top + 40
 	mouse_filter = MOUSE_FILTER_IGNORE
 	visible = false
@@ -149,18 +152,23 @@ func _resource_lines(t: Tile) -> Array:
 	var lines: Array = []
 	var state: Dictionary = world.resource_state.get(target_anchor, {})
 	if t.resource_node == ResourceNodes.Type.TREE:
-		# Trees: growth state. Default = mature; resource_state["growth"] only
-		# present if regrowth is in progress (Stage 4+ when harvest lands).
-		var growth: float = float(state.get("growth", 1.0))
-		if growth >= 1.0:
-			lines.append("Mature (renewable)")
-		else:
-			lines.append("Regrowing: %.0f%%" % (growth * 100.0))
+		# Mature tree (no regrowth state means the tree is at canonical full).
+		# Chopped+regrowing tiles have resource_node == NONE, so they don't
+		# reach this branch via the standard Q-inspect target flow.
+		lines.append("Mature (renewable)")
+		var wood: int = GridWorld.wood_yield_for_tree(target_anchor)
+		lines.append("Yields %d wood" % wood)
+		lines.append("Hold Space adjacent to chop")
 	elif ResourceNodes.is_ore(t.resource_node):
-		# Ore: finite richness.
+		# Ore: finite richness, drains 1 per mining tick.
 		var richness: int = int(state.get("richness", 0))
-		lines.append("Richness: %d" % richness)
-		lines.append("Status: untouched (mining lands Stage 4+)")
+		var original: int = int(state.get("original_richness", 0))
+		if original > 0:
+			var pct: float = 100.0 * float(richness) / float(original)
+			lines.append("Richness: %d / %d (%.0f%%)" % [richness, original, pct])
+		else:
+			lines.append("Richness: %d" % richness)
+		lines.append("Hold Space adjacent to mine")
 	else:
 		lines.append("(no extra info)")
 	return lines

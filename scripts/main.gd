@@ -21,34 +21,35 @@ const ZOOM_STEP: float = 1.15
 const ZOOM_SMOOTH_RATE: float = 12.0
 var target_zoom: float = 1.0
 
-# ---------- mining (manual tier) ----------
-# Per-resource tick interval (seconds). Each tick extracts 1 ore and drains
-# 1 richness. Stone/coal/clay are commodity-tier (2/sec); iron/copper are
-# mid-tier (1/sec). Far-tier patches are intentionally tedious to drain
-# manually — incentive for drill upgrades in a future session.
-const MINING_TICK_INTERVAL: Dictionary = {
+# ---------- harvesting (manual tier — ore mining + tree chopping) ----------
+# Per-resource tick interval (seconds). Each tick extracts 1 ore (drains
+# 1 richness) for ore types, OR chops 1 tree (single-shot) for trees.
+# Stone/coal/clay are commodity-tier ore (2/sec); iron/copper are mid-tier
+# (1/sec). Trees are 2 sec/chop (single-shot).
+const HARVEST_TICK_INTERVAL: Dictionary = {
 	ResourceNodes.Type.STONE:  0.5,
 	ResourceNodes.Type.COAL:   0.5,
 	ResourceNodes.Type.IRON:   1.0,
 	ResourceNodes.Type.COPPER: 1.0,
 	ResourceNodes.Type.CLAY:   0.5,
+	ResourceNodes.Type.TREE:   2.0,
 }
 
-# Resource → item produced per mining tick.
-const MINING_RESOURCE_TO_ITEM: Dictionary = {
+# Resource → item produced per harvest tick.
+const HARVEST_RESOURCE_TO_ITEM: Dictionary = {
 	ResourceNodes.Type.STONE:  Items.Type.RAW_STONE,
 	ResourceNodes.Type.COAL:   Items.Type.COAL,
 	ResourceNodes.Type.IRON:   Items.Type.IRON_ORE,
 	ResourceNodes.Type.COPPER: Items.Type.COPPER_ORE,
 	ResourceNodes.Type.CLAY:   Items.Type.CLAY,
+	ResourceNodes.Type.TREE:   Items.Type.WOOD,
 }
 
-# Sentinel — represents "no current mining target" (Vector2i.MAX is the
-# canonical "out of any conceivable world bounds" marker).
-const MINING_INVALID_TARGET: Vector2i = Vector2i(2147483647, 2147483647)
-var _mining_target: Vector2i = MINING_INVALID_TARGET
-var _mining_progress: float = 0.0   # accumulated time toward next tick
-var _last_mining_full_inv_tick: int = -100   # rate-limit "Inventory full" toast
+# Sentinel — represents "no current harvest target".
+const HARVEST_INVALID_TARGET: Vector2i = Vector2i(2147483647, 2147483647)
+var _harvest_target: Vector2i = HARVEST_INVALID_TARGET
+var _harvest_progress: float = 0.0   # accumulated time toward next tick
+var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toast
 
 @onready var player: CharacterBody2D = $Player
 @onready var camera: Camera2D = $Player/Camera
@@ -150,6 +151,10 @@ func _ready() -> void:
 		# Initial reveal: mark the spawn-vicinity 7×7 region area as fog so the
 		# map shows context on first M-press, not all-black.
 		grid_world.initial_reveal()
+		# Spawn position: seeded-random from passable tiles near origin so
+		# the player isn't dropped into water/lakes. Same seed → same spawn;
+		# different seeds → different spawn (gives fresh-start variety).
+		player.global_position = _safe_spawn_position()
 		_show_toast("New world (seed %d, gen %dms) · 1-9 build · Tab · R rotate · F5 save · B bag · M map" % [grid_world.world_seed, gen_elapsed])
 
 	# Run an initial vision update from the player's spawn position — upgrades
@@ -170,6 +175,41 @@ func _apply_loaded_progression(loaded: Dictionary) -> void:
 func _on_resource_changed(pos: Vector2i) -> void:
 	if map_panel != null:
 		map_panel.mark_tile_dirty(pos)
+
+## Pick a safe (passable) spawn position for fresh-start play. Scans tiles
+## within a small radius of origin, collects passable candidates sorted by
+## distance to origin, and uses seeded RNG to pick from the closest N.
+##
+## Deterministic per seed: same world_seed → same spawn. Different seeds
+## produce different spawns, giving fresh-start variety while keeping
+## save/load consistent.
+const SPAWN_SEARCH_RADIUS: int = 30
+const SPAWN_PICK_TOP_N: int = 20
+const SPAWN_SEED_OFFSET: int = 999
+
+func _safe_spawn_position() -> Vector2:
+	var candidates: Array[Vector2i] = []
+	for x in range(-SPAWN_SEARCH_RADIUS, SPAWN_SEARCH_RADIUS + 1):
+		for y in range(-SPAWN_SEARCH_RADIUS, SPAWN_SEARCH_RADIUS + 1):
+			var pos: Vector2i = Vector2i(x, y)
+			if grid_world.is_passable_at(pos):
+				candidates.append(pos)
+	if candidates.is_empty():
+		# Defensive: no passable tile in spawn area (extreme seed). Fall back
+		# to (0, 0) — player will start on water but the move-and-slide
+		# escape valve in player.gd lets them walk off.
+		return Vector2(0, 0)
+	# Sort by distance from origin so we pick from the closest passable tiles.
+	candidates.sort_custom(func(a, b):
+		return (a.x * a.x + a.y * a.y) < (b.x * b.x + b.y * b.y)
+	)
+	var top_n: int = min(SPAWN_PICK_TOP_N, candidates.size())
+	var rng := RandomNumberGenerator.new()
+	rng.seed = grid_world.world_seed + SPAWN_SEED_OFFSET
+	var picked: Vector2i = candidates[rng.randi_range(0, top_n - 1)]
+	# Center of tile in world coords (TILE_SIZE = 32).
+	var ts: float = float(GridWorld.TILE_SIZE)
+	return Vector2(picked.x * ts + ts * 0.5, picked.y * ts + ts * 0.5)
 
 func _process(delta: float) -> void:
 	# Vision update on region cross. Cheap: one Vector2i compare per frame;
@@ -270,9 +310,11 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("remove_tile"):
 		_try_remove(hover_tile)
 
-	# Mining (manual tier). Spacebar held + cursor over an adjacent mineable
-	# deposit tile = mining ticks every MINING_TICK_INTERVAL[type] seconds.
-	_update_mining(delta, hover_tile, player_tile)
+	# Harvesting (manual tier). Spacebar held + cursor over an adjacent
+	# resource_node tile (ore deposit OR tree) = harvest ticks every
+	# HARVEST_TICK_INTERVAL[type] seconds. Ore drains 1 richness/tick;
+	# trees chop in a single 2-second tick + start regrowth timer.
+	_update_harvest(delta, hover_tile, player_tile)
 
 	if Input.is_action_just_pressed("interact"):
 		_try_interact(player_tile)
@@ -400,73 +442,88 @@ func _rate_limited_fail_toast(msg: String) -> void:
 
 # ---------- mining ----------
 
-## Resolve the current mining target. Returns MINING_INVALID_TARGET if any
-## condition fails (no adjacency / no mineable deposit).
+## Resolve the current harvest target. Returns HARVEST_INVALID_TARGET if any
+## condition fails (no adjacency / no harvestable resource).
 ##
-## Rules (Q1, Q2 of design pass; Q8 became automatic under the "no overlay
-## on deposits" invariant locked in this session — deposits never carry
-## an overlay, so the obscure-the-deposit case is impossible).
+## Rules:
 ##   - Manhattan distance from player_tile to hover_tile must be ≤ 1
 ##     (4-directional including self)
-##   - hover_tile must have a mineable resource_node (is_ore() — trees
-##     not mineable this session)
-func _resolve_mining_target(hover_tile: Vector2i, player_tile: Vector2i) -> Vector2i:
+##   - hover_tile must have a resource_node in HARVEST_TICK_INTERVAL
+##     (ore deposit OR tree)
+##   - Tree tiles in regrowth state (resource_node == NONE but
+##     resource_state has regrowth_remaining) are NOT harvestable —
+##     player must wait for regrowth to complete
+func _resolve_harvest_target(hover_tile: Vector2i, player_tile: Vector2i) -> Vector2i:
 	var manhattan: int = abs(player_tile.x - hover_tile.x) + abs(player_tile.y - hover_tile.y)
 	if manhattan > 1:
-		return MINING_INVALID_TARGET
+		return HARVEST_INVALID_TARGET
 	if not grid_world.tiles.has(hover_tile):
-		return MINING_INVALID_TARGET
+		return HARVEST_INVALID_TARGET
 	var t: Tile = grid_world.tiles[hover_tile]
-	if not ResourceNodes.is_ore(t.resource_node):
-		return MINING_INVALID_TARGET
-	if not MINING_TICK_INTERVAL.has(t.resource_node):
-		return MINING_INVALID_TARGET   # defensive
+	if not HARVEST_TICK_INTERVAL.has(t.resource_node):
+		return HARVEST_INVALID_TARGET
 	return hover_tile
 
-func _update_mining(delta: float, hover_tile: Vector2i, player_tile: Vector2i) -> void:
-	var mining_held: bool = Input.is_action_pressed("mine")
-	var valid_target: Vector2i = MINING_INVALID_TARGET
-	if mining_held:
-		valid_target = _resolve_mining_target(hover_tile, player_tile)
+func _update_harvest(delta: float, hover_tile: Vector2i, player_tile: Vector2i) -> void:
+	var harvest_held: bool = Input.is_action_pressed("mine")
+	var valid_target: Vector2i = HARVEST_INVALID_TARGET
+	if harvest_held:
+		valid_target = _resolve_harvest_target(hover_tile, player_tile)
 
-	if valid_target == MINING_INVALID_TARGET:
-		if _mining_target != MINING_INVALID_TARGET:
-			_mining_target = MINING_INVALID_TARGET
-			_mining_progress = 0.0
-			grid_world.clear_mining_indicator()
+	if valid_target == HARVEST_INVALID_TARGET:
+		if _harvest_target != HARVEST_INVALID_TARGET:
+			_harvest_target = HARVEST_INVALID_TARGET
+			_harvest_progress = 0.0
+			grid_world.clear_harvest_indicator()
 		return
 
-	# Active mining tick.
-	if valid_target != _mining_target:
-		_mining_target = valid_target
-		_mining_progress = 0.0
-	var resource_type: int = grid_world.tiles[_mining_target].resource_node
-	var tick_interval: float = float(MINING_TICK_INTERVAL[resource_type])
-	_mining_progress += delta
-	while _mining_progress >= tick_interval:
-		_mining_progress -= tick_interval
-		_try_mining_tick(_mining_target, resource_type)
-		# Tile may have just depleted — re-check target validity.
-		if not grid_world.tiles.has(_mining_target) \
-		or not ResourceNodes.is_ore(grid_world.tiles[_mining_target].resource_node):
-			_mining_target = MINING_INVALID_TARGET
-			_mining_progress = 0.0
-			grid_world.clear_mining_indicator()
+	# Active harvest tick.
+	if valid_target != _harvest_target:
+		_harvest_target = valid_target
+		_harvest_progress = 0.0
+	var resource_type: int = grid_world.tiles[_harvest_target].resource_node
+	var tick_interval: float = float(HARVEST_TICK_INTERVAL[resource_type])
+	_harvest_progress += delta
+	while _harvest_progress >= tick_interval:
+		_harvest_progress -= tick_interval
+		_try_harvest_tick(_harvest_target, resource_type)
+		# Tile may have just transitioned (ore depleted, tree chopped) —
+		# re-check target validity. is_harvestable check covers both:
+		# depleted ore tiles have resource_node == NONE; chopped trees too.
+		if not grid_world.tiles.has(_harvest_target) \
+		or not HARVEST_TICK_INTERVAL.has(grid_world.tiles[_harvest_target].resource_node):
+			_harvest_target = HARVEST_INVALID_TARGET
+			_harvest_progress = 0.0
+			grid_world.clear_harvest_indicator()
 			return
 
-	grid_world.set_mining_indicator(_mining_target, _mining_progress / tick_interval)
+	grid_world.set_harvest_indicator(_harvest_target, _harvest_progress / tick_interval)
 
-func _try_mining_tick(pos: Vector2i, resource_type: int) -> void:
-	var item_type: int = int(MINING_RESOURCE_TO_ITEM[resource_type])
-	if not player_inventory.has_room_for(item_type, 1):
-		# Rate-limit "Inventory full" toast. Per-call _rate_limited_fail_toast
-		# would conflict with other place-failures, so use a separate counter.
-		if TickSystem.current_tick - _last_mining_full_inv_tick > 30:
+## Per-tick harvest action. Dispatches on resource type:
+##   - Ore (is_ore): drain 1 richness, add 1 ore item to inventory.
+##   - Tree (TREE): single-shot chop — tile becomes empty, regrowth timer
+##     starts, N wood added (N = GridWorld.wood_yield_for_tree(pos),
+##     varies 1-4 based on visible tree size).
+##
+## Inventory-full handling shared across both paths: rate-limited toast,
+## skip the tick (no extraction).
+func _try_harvest_tick(pos: Vector2i, resource_type: int) -> void:
+	var item_type: int = int(HARVEST_RESOURCE_TO_ITEM[resource_type])
+	# Compute amount up front: ore is always 1; trees yield 1-4 based on
+	# visible tree size (deterministic per-position hash).
+	var amount: int = 1
+	if resource_type == ResourceNodes.Type.TREE:
+		amount = GridWorld.wood_yield_for_tree(pos)
+	if not player_inventory.has_room_for(item_type, amount):
+		if TickSystem.current_tick - _last_harvest_full_inv_tick > 30:
 			_show_toast("Inventory full.")
-			_last_mining_full_inv_tick = TickSystem.current_tick
+			_last_harvest_full_inv_tick = TickSystem.current_tick
 		return
-	player_inventory.add(item_type, 1)
-	grid_world.deplete_resource(pos, 1)
+	player_inventory.add(item_type, amount)
+	if ResourceNodes.is_ore(resource_type):
+		grid_world.deplete_resource(pos, 1)
+	elif resource_type == ResourceNodes.Type.TREE:
+		grid_world.chop_tree(pos)
 
 func _try_inspect(hover_tile: Vector2i) -> void:
 	# Building takes priority — the info panel is primarily a building debugger.

@@ -1,11 +1,14 @@
 extends RefCounted
 
-## v13 resource_state_modifications round-trip test.
+## resource_state_modifications round-trip test (v13 → v14 shape).
 ##
-## THE critical test for the v13 schema. Without it, a bug where mining
-## depletion doesn't persist would silently break saves: player mines a
-## patch down to 47/100, saves, quits, loads — and finds the patch back
-## at 100/100. Catastrophic UX.
+## v13 stored richness as raw int; v14 stores per-tile Dict for generic
+## state (richness for ore, regrowth_remaining for trees, etc.).
+##
+## THE critical test for save persistence of mining state. Without it, a
+## bug where mining depletion doesn't persist would silently break saves:
+## player mines a patch down to 47/100, saves, quits, loads — and finds
+## the patch back at 100/100. Catastrophic UX.
 ##
 ## What this test locks in:
 ##   1. After deplete_resource, resource_state_modifications[pos] holds
@@ -68,8 +71,10 @@ static func run(parent: Node) -> Dictionary:
 		failures.append("after deplete: richness %d, expected %d" % [post_deplete_richness, expected_after])
 	if not world_a.resource_state_modifications.has(target_pos):
 		failures.append("after deplete: resource_state_modifications missing entry at %s" % str(target_pos))
-	elif int(world_a.resource_state_modifications[target_pos]) != expected_after:
-		failures.append("after deplete: resource_state_modifications[%s] = %d, expected %d" % [str(target_pos), int(world_a.resource_state_modifications[target_pos]), expected_after])
+	else:
+		var mod_a: Dictionary = world_a.resource_state_modifications[target_pos]
+		if int(mod_a.get("richness", -1)) != expected_after:
+			failures.append("after deplete: resource_state_modifications[%s].richness = %s, expected %d" % [str(target_pos), str(mod_a.get("richness")), expected_after])
 
 	# ---- Save, then clear in-memory and load fresh ----
 	var player_a := Node2D.new()
@@ -105,8 +110,10 @@ static func run(parent: Node) -> Dictionary:
 	# (c) resource_state_modifications loaded.
 	if not world_b.resource_state_modifications.has(target_pos):
 		failures.append("after load: resource_state_modifications missing entry at %s" % str(target_pos))
-	elif int(world_b.resource_state_modifications[target_pos]) != expected_after:
-		failures.append("after load: resource_state_modifications[%s] = %d, expected %d" % [str(target_pos), int(world_b.resource_state_modifications[target_pos]), expected_after])
+	else:
+		var mod_b: Dictionary = world_b.resource_state_modifications[target_pos]
+		if int(mod_b.get("richness", -1)) != expected_after:
+			failures.append("after load: resource_state_modifications[%s].richness = %s, expected %d" % [str(target_pos), str(mod_b.get("richness")), expected_after])
 
 	# ---- Now test FULL depletion path: drain rest, save, load, assert tile is grass ----
 	world_b.deplete_resource(target_pos, expected_after)   # drain remaining

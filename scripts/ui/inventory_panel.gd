@@ -28,7 +28,9 @@ func _ready() -> void:
 	anchor_top = 0.0
 	anchor_bottom = 0.0
 	offset_right = -16
-	offset_top = 80
+	# Position below minimap. Minimap is at top=10, height=224 (y-bottom=234).
+	# Add 10px gap so the two panels are visually distinct.
+	offset_top = 244
 	offset_left = -16 - PANEL_WIDTH
 	mouse_filter = MOUSE_FILTER_IGNORE
 

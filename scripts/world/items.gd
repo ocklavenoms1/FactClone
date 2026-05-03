@@ -41,6 +41,8 @@ enum Type {
 	IRON_ORE,
 	COPPER_ORE,
 	CLAY,
+	# --- tree harvesting (session-tree-harvest) ---
+	WOOD,
 }
 
 const DATA: Dictionary = {
@@ -66,6 +68,8 @@ const DATA: Dictionary = {
 	Type.IRON_ORE:       { "name": "Iron Ore",       "color": Color(0.62, 0.45, 0.38), "max_stack": 100 },
 	Type.COPPER_ORE:     { "name": "Copper Ore",     "color": Color(0.45, 0.55, 0.65), "max_stack": 100 },
 	Type.CLAY:           { "name": "Clay",           "color": Color(0.68, 0.50, 0.36), "max_stack": 200 },
+	# --- tree harvesting (color matches tree trunk, not canopy — the produced item is wood) ---
+	Type.WOOD:           { "name": "Wood",           "color": Color(0.50, 0.32, 0.18), "max_stack": 200 },
 }
 
 static func name_of(t: int) -> String:

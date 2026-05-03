@@ -29,6 +29,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_random_seed_save_roundtrip.gd"),
 	preload("res://scripts/tests/test_region_visibility.gd"),
 	preload("res://scripts/tests/test_resource_state_modifications_roundtrip.gd"),
+	preload("res://scripts/tests/test_tree_harvest_lifecycle.gd"),
 ]
 
 func _ready() -> void:

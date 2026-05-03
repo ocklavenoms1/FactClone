@@ -159,6 +159,19 @@ func set_overlay(pos: Vector2i, overlay: int) -> bool:
 		else:
 			last_place_error = "Can't pave over %s." % rname.to_lower()
 		return false
+	# Cancel any active tree regrowth at this position. Player paving a
+	# chopped tile committed to that decision — the tree won't regrow here.
+	# Specifically check for "regrowth_remaining" rather than blanket-erasing
+	# resource_state — defensive against future code paths that programmatically
+	# call set_overlay on tiles with other resource state shapes.
+	if resource_state.has(pos):
+		var rstate: Dictionary = resource_state[pos]
+		if rstate.has("regrowth_remaining"):
+			resource_state.erase(pos)
+			resource_state_modifications.erase(pos)
+		# Else: leave other state intact (overlay-on-ore is blocked above
+		# at the resource_node validation; this branch shouldn't fire for
+		# ore tiles, but stays defensive).
 	var base: int = base_at(pos)
 	var current_overlay: int = overlay_at(pos)
 	if not Terrain.can_place_overlay(overlay, base, current_overlay):
@@ -505,7 +518,9 @@ func deplete_resource(pos: Vector2i, amount: int) -> int:
 	var new_richness: int = current - extracted
 	if new_richness > 0:
 		resource_state[pos]["richness"] = new_richness
-		resource_state_modifications[pos] = new_richness
+		# v14 shape: per-tile state dict (richness for ore, regrowth_remaining
+		# for tree). Each tile stores ONLY the fields relevant to its type.
+		resource_state_modifications[pos] = {"richness": new_richness}
 	else:
 		# Tile fully depleted — resource_node reverts to NONE, tile becomes
 		# default if no overlay. Tile_modifications records the change so
@@ -536,44 +551,159 @@ func richness_at(pos: Vector2i) -> int:
 func original_richness_at(pos: Vector2i) -> int:
 	return int(resource_state.get(pos, {}).get("original_richness", 0))
 
-# ---------- mining indicator (visual feedback while player mines a tile) ----------
+# ---------- tree chopping (manual harvest, single-shot) ----------
 
-const MINING_INDICATOR_INVALID: Vector2i = Vector2i(2147483647, 2147483647)
-var mining_indicator_pos: Vector2i = MINING_INDICATOR_INVALID
-var mining_indicator_progress: float = 0.0   # 0..1, where 1 = next tick imminent
+# Tree regrowth timer (seconds). Long enough that re-visiting feels rewarding
+# (trees came back), short enough that a 30-min play session sees a full
+# cycle. Tunable; constant lives here so future drill/lumber-camp sessions
+# can reference it.
+const TREE_REGROWTH_SECONDS: float = 300.0
 
-func set_mining_indicator(pos: Vector2i, progress: float) -> void:
-	mining_indicator_pos = pos
-	mining_indicator_progress = clamp(progress, 0.0, 1.0)
+## Chop the tree at `pos`. Single-shot: tile.resource_node becomes NONE,
+## resource_state[pos] gets a regrowth timer, tile_modifications records
+## the chopped state. When the timer expires (via _tick_regrowth in
+## _process), tree restores via _restore_tree.
+##
+## No-op if pos has no tree (defensive).
+func chop_tree(pos: Vector2i) -> void:
+	if not tiles.has(pos):
+		return
+	var t: Tile = tiles[pos]
+	if t.resource_node != ResourceNodes.Type.TREE:
+		return
+	# Mark tile as chopped: tree gone, regrowth in progress.
+	t.resource_node = ResourceNodes.Type.NONE
+	resource_state[pos] = {"regrowth_remaining": TREE_REGROWTH_SECONDS}
+	resource_state_modifications[pos] = {"regrowth_remaining": TREE_REGROWTH_SECONDS}
+	# tile_modifications records the chopped state. If tile collapses to pure
+	# default (grass / no overlay / no resource), erase from tiles dict but
+	# KEEP the tile_modifications entry — that entry is what overrides procgen
+	# canonical (which says TREE) on save/load.
+	if t.base == Terrain.Base.GRASS and t.overlay == Terrain.Overlay.NONE:
+		tile_modifications[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.NONE)
+		tiles.erase(pos)
+	else:
+		tile_modifications[pos] = Tile.new(t.base, t.overlay, ResourceNodes.Type.NONE)
+	emit_signal("resource_changed", pos)
 
-func clear_mining_indicator() -> void:
-	mining_indicator_pos = MINING_INDICATOR_INVALID
-	mining_indicator_progress = 0.0
+## Restore a tree at `pos` (regrowth timer expired). Inverse of chop_tree:
+## resource_node back to TREE, erase the regrowth state, erase the tile
+## modification (now matches procgen canonical = tree present).
+##
+## No-op if no regrowth timer is active here.
+func _restore_tree(pos: Vector2i) -> void:
+	if not resource_state.has(pos):
+		return
+	if not resource_state[pos].has("regrowth_remaining"):
+		return
+	resource_state.erase(pos)
+	resource_state_modifications.erase(pos)
+	# Restore tile to canonical procgen state (Tile(GRASS, NONE, TREE)).
+	# tile_modifications is erased so the tile matches canonical from now on.
+	tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
+	tile_modifications.erase(pos)
+	emit_signal("resource_changed", pos)
 
-## Draw the mining progress arc on the currently-targeted tile.
+## Read the regrowth time remaining at a tile (0 if no timer active).
+## Used by Q-inspect for the "Regrowing: X%" display.
+func regrowth_remaining_at(pos: Vector2i) -> float:
+	return float(resource_state.get(pos, {}).get("regrowth_remaining", 0.0))
+
+## Wood yield for chopping the tree at `pos`. Deterministic per-position
+## hash so the same tree always yields the same amount (and the same
+## tree continues to yield the same amount after regrowth — yield is a
+## property of the position, not a per-instance value).
+##
+## Correlates with the visual size_jitter in _draw_tree (uses the same
+## byte of the position hash) so visibly-bigger trees yield more wood.
+##
+## Distribution (skewed toward small trees):
+##   ~50%  yield 1 (the most common scrubby tree)
+##   ~35%  yield 2
+##   ~10%  yield 3
+##   ~5%   yield 4 (rare big tree — visibly large in the world)
+## Average ≈ 1.7 wood per tree.
+static func wood_yield_for_tree(pos: Vector2i) -> int:
+	var jitter_h: int = (pos.x * 73856093) ^ (pos.y * 19349663)
+	var size_byte: int = jitter_h & 0xFF   # same byte _draw_tree uses for size_jitter
+	# Convert to the same -0.125..+0.125 range _draw_tree uses, then to 0..1
+	# normalized "size factor" so yield maps to canopy size.
+	var size_norm: float = float(size_byte) / 255.0
+	if size_norm < 0.50:
+		return 1
+	elif size_norm < 0.85:
+		return 2
+	elif size_norm < 0.95:
+		return 3
+	return 4
+
+# ---------- harvest indicator (visual feedback while player mines or chops a tile) ----------
+
+const HARVEST_INDICATOR_INVALID: Vector2i = Vector2i(2147483647, 2147483647)
+var harvest_indicator_pos: Vector2i = HARVEST_INDICATOR_INVALID
+var harvest_indicator_progress: float = 0.0   # 0..1, where 1 = next tick imminent
+
+func set_harvest_indicator(pos: Vector2i, progress: float) -> void:
+	harvest_indicator_pos = pos
+	harvest_indicator_progress = clamp(progress, 0.0, 1.0)
+
+func clear_harvest_indicator() -> void:
+	harvest_indicator_pos = HARVEST_INDICATOR_INVALID
+	harvest_indicator_progress = 0.0
+
+## Draw the harvest progress arc on the currently-targeted tile.
 ## Filled clockwise from 12 o'clock as progress approaches 1.0 (next tick).
-const MINING_ARC_RADIUS_RATIO: float = 0.42   # tile-radius factor
-const MINING_ARC_WIDTH: float = 3.0
-const MINING_ARC_COLOR: Color = Color(1.0, 0.92, 0.4, 0.95)
-const MINING_ARC_BG_COLOR: Color = Color(0.0, 0.0, 0.0, 0.4)
+const HARVEST_ARC_RADIUS_RATIO: float = 0.42   # tile-radius factor
+const HARVEST_ARC_WIDTH: float = 3.0
+const HARVEST_ARC_COLOR: Color = Color(1.0, 0.92, 0.4, 0.95)
+const HARVEST_ARC_BG_COLOR: Color = Color(0.0, 0.0, 0.0, 0.4)
 
-func _draw_mining_indicator() -> void:
-	var pos: Vector2i = mining_indicator_pos
+func _draw_harvest_indicator() -> void:
+	var pos: Vector2i = harvest_indicator_pos
 	var center: Vector2 = Vector2(pos.x * TILE_SIZE + TILE_SIZE * 0.5, pos.y * TILE_SIZE + TILE_SIZE * 0.5)
-	var radius: float = TILE_SIZE * MINING_ARC_RADIUS_RATIO
+	var radius: float = TILE_SIZE * HARVEST_ARC_RADIUS_RATIO
 	# Background ring (full circle, dim) — gives the arc a "track" to fill.
-	draw_arc(center, radius, 0.0, TAU, 32, MINING_ARC_BG_COLOR, MINING_ARC_WIDTH)
+	draw_arc(center, radius, 0.0, TAU, 32, HARVEST_ARC_BG_COLOR, HARVEST_ARC_WIDTH)
 	# Foreground arc — bright yellow, fills based on progress (0..1) clockwise
 	# from 12 o'clock. Godot's draw_arc takes radians; -PI/2 = 12 o'clock.
 	var start_angle: float = -PI * 0.5
-	var end_angle: float = start_angle + TAU * mining_indicator_progress
-	if mining_indicator_progress > 0.0:
-		draw_arc(center, radius, start_angle, end_angle, max(8, int(32.0 * mining_indicator_progress)), MINING_ARC_COLOR, MINING_ARC_WIDTH)
+	var end_angle: float = start_angle + TAU * harvest_indicator_progress
+	if harvest_indicator_progress > 0.0:
+		draw_arc(center, radius, start_angle, end_angle, max(8, int(32.0 * harvest_indicator_progress)), HARVEST_ARC_COLOR, HARVEST_ARC_WIDTH)
 
 # ---------- rendering ----------
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_tick_regrowth(delta)
 	queue_redraw()
+
+## Per-frame regrowth tick. Iterates resource_state for entries with
+## regrowth_remaining (chopped trees), decrements, and restores trees
+## when the timer hits zero.
+##
+## Cost: O(active timers). With ~hundreds of chopped trees max,
+## negligible per-frame work (microseconds).
+func _tick_regrowth(delta: float) -> void:
+	if resource_state.is_empty():
+		return
+	var to_restore: Array[Vector2i] = []
+	# Iterate keys snapshot — we mutate resource_state inside the loop body
+	# (and _restore_tree mutates further). Snapshot avoids modify-during-iter
+	# pathology.
+	var keys: Array = resource_state.keys()
+	for pos in keys:
+		var state: Dictionary = resource_state[pos]
+		if not state.has("regrowth_remaining"):
+			continue
+		var remaining: float = float(state["regrowth_remaining"]) - delta
+		if remaining <= 0.0:
+			to_restore.append(pos)
+		else:
+			state["regrowth_remaining"] = remaining
+			# Mirror to modifications so save captures current timer value.
+			resource_state_modifications[pos] = {"regrowth_remaining": remaining}
+	for pos in to_restore:
+		_restore_tree(pos)
 
 ## Convert "I want at least N pixels on screen" to "this many world units,
 ## given the current camera zoom." Returns max(world_px, world_px / zoom):
@@ -727,11 +857,11 @@ func _draw() -> void:
 			continue
 		Buildings.draw_one(b, self, tile_to_world_origin(anchor), TILE_SIZE)
 
-	# Mining progress arc — yellow arc on the targeted tile, fills 0 → TAU
+	# Harvest progress arc — yellow arc on the targeted tile, fills 0 → TAU
 	# clockwise as the next tick approaches. Visual feedback for "this tile
-	# is being mined."
-	if mining_indicator_pos != MINING_INDICATOR_INVALID:
-		_draw_mining_indicator()
+	# is being harvested" (mined for ore, chopped for tree).
+	if harvest_indicator_pos != HARVEST_INDICATOR_INVALID:
+		_draw_harvest_indicator()
 
 	# Hover indicator.
 	if show_hover:

@@ -1,9 +1,10 @@
 extends RefCounted
 
-## Save/load round-trip test — locks the v13 schema.
+## Save/load round-trip test — locks the v14 schema.
 ##
 ## v11 introduced procgen rehydration; v12 adds explored_regions persistence
-## (M-key map fog-of-war state); v13 adds resource_state_modifications
+## (M-key map fog-of-war state); v13 adds resource_state_modifications;
+## v14 widens resource_state_modifications shape to Dict for generic state
 ## (mining-induced richness deltas). The test:
 ##   1. Generates a world via WorldGenerator with a chosen seed
 ##   2. Adds player modifications (paint overlay, place buildings)
@@ -27,7 +28,7 @@ const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
 const TEST_SEED: int = 12345
 
 static func test_name() -> String:
-	return "save/load round-trip (v13)"
+	return "save/load round-trip (v14)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -237,7 +238,7 @@ static func run(parent: Node) -> Dictionary:
 	SaveSystem.save_path = orig_path
 
 	if failures.is_empty():
-		return { "ok": true, "message": "v13 round-trip preserves seed, modifications, terrain, buildings, state, inventory, tick, progression, explored_regions, resource_state_modifications" }
+		return { "ok": true, "message": "v14 round-trip preserves seed, modifications, terrain, buildings, state, inventory, tick, progression, explored_regions, resource_state_modifications (Dict shape)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------

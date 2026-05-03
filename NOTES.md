@@ -149,35 +149,48 @@ R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`)
 
 ---
 
-## Resource mining roadmap (manual tier shipped, drill tiers next)
+## Resource harvesting roadmap (manual tier shipped, drill/lumber tiers next)
 
-**Status update:** the **MANUAL TIER** shipped at `session-mining-manual`. Player walks adjacent to a deposit, holds Space, ore enters inventory, deposit depletes, tile reverts to grass. Save v13 persists partial-depletion via `resource_state_modifications` (parallel architecture to `tile_modifications`). 5 ore items in `Items` (RAW_STONE, COAL, IRON_ORE, COPPER_ORE, CLAY).
+**Status update:** **MANUAL TIER for both ore and trees has shipped.**
+- Ore mining at `session-mining-manual`: walk adjacent → hold Space → drain richness → tile reverts at 0. 5 ore items.
+- Tree chopping at `session-tree-harvest`: walk adjacent → hold Space → 2-second chop → wood (1-4 yield, varies with visible size) → 5-minute regrowth.
+- Save v14 persists per-tile state (richness, regrowth_remaining) via generic Dict-shape `resource_state_modifications`. Future state types (crops, berries, etc.) are config-only additions.
 
-**What remains: drill tiers + processing chains.**
+**What remains: building-tier automation + processing chains.**
 
-**Goal:** stop letting the player paint stone for free, AND give the player a reason to automate mining beyond manual extraction. Stone (and ore, wood) become finite resources extracted from world-gen deposits, automated via drills, processed into raw materials, and then placed.
+**Drill tier + lumber camp (next likely sessions):** placeable buildings that automate ore mining and tree chopping. Architecture supports this directly:
+- `HARVEST_TICK_INTERVAL` is a per-resource dict on `main.gd`. Drills/lumber can use their own intervals or multipliers.
+- `GridWorld.deplete_resource(pos, amount)` already takes an amount parameter — drills extract more per tick.
+- `GridWorld.chop_tree(pos)` is a one-shot primitive — lumber camp calls it on a schedule.
+- `GridWorld.wood_yield_for_tree(pos)` static helper — lumber camp calls to compute output.
+- Resource_node + richness + regrowth_remaining model is in place.
+- Buildings just need new entries in `Buildings.tick_one`.
 
-**Drill tier (next likely mining session):** a placeable building (Drill / Quarry / etc.) that mines deposits automatically without player input. Architecture supports this trivially:
-- `MINING_TICK_INTERVAL` is a per-resource dict on `main.gd` — drills could multiply
-- `GridWorld.deplete_resource(pos, amount)` already takes an amount parameter — drills extract more per tick
-- Resource_node + richness model is in place
-- Just need a new Building type with extraction logic in `Buildings.tick_one`
+Manual harvest stays as the fallback / early-game tool. Building upgrades feel like meaningful automation gain (10-20× faster, no manual button-holding, scales beyond walking radius).
 
-Manual mining stays as the fallback / early-game tool. Drill upgrades feel like meaningful automation gain (10-20× faster, no manual button-holding).
+**Hooks already in place (as of session-tree-harvest):**
 
-**Hooks already in place (as of session-mining-manual):**
+- `ResourceNodes.is_renewable(t)` distinguishes ore from trees in behavior.
+- `GridWorld.deplete_resource(pos, amount)` — canonical ore extraction primitive.
+- `GridWorld.chop_tree(pos)` — canonical tree chop primitive (single-shot, starts regrowth).
+- `GridWorld.wood_yield_for_tree(pos)` — deterministic yield helper.
+- `resource_state[pos]` — per-tile dict; `{richness, original_richness}` for ore, `{regrowth_remaining}` for chopped trees, future fields for future types.
+- Save format v14 — `resource_state_modifications` is generic Dict; future state types add keys without schema bump.
 
-- `ResourceNodes.is_renewable(t)` and `is_ore(t)` distinguish behavior.
-- `GridWorld.deplete_resource(pos, amount)` is the canonical extraction primitive — used by manual mining today; will be used by drills tomorrow.
-- `resource_state[pos] = {richness, original_richness}` — original_richness is rederived from procgen on load (not persisted).
-- Save format v13 — `resource_state_modifications` already persists partial-depletion deltas. Drill mining uses the same path.
+**Stage 5 (processing chains)** — still the plan:
+- `stone_crusher`: `raw_stone × N → stone_block × 1` (the existing stone overlay becomes a consumable item).
+- `smelter`: `iron_ore + fuel_briquette → iron_ingot`.
+- `sawmill`: `wood × N → planks × 1`.
+- `charcoal_kiln`: `wood → charcoal` (alternative fuel to coal/briquettes).
+- `brick_kiln`: `clay → brick` (building material).
 
-**Stage 5 (post-drill) processing chains** — still the original plan:
-- `stone_crusher`: `raw_stone × N` → `stone_block × 1` (the existing stone overlay is renamed `STONE_BLOCK_TILE` or similar; the consumable item is `stone_block`).
-- `smelter`: `iron_ore + fuel_briquette` → `iron_ingot`.
-- `sawmill`: `raw_wood` → `planks`. (Tree harvesting also a future-session mechanic.)
+**Stone overlay becomes a consumable** at processing-chain ship: hotbar's "Stone" slot stops being a free brush. Painting consumes 1 `stone_block` per tile. Belts, harvesters, mills, etc. that currently require Stone overlay continue to work — the overlay still exists, you just have to manufacture it now.
 
-**Stone overlay becomes a consumable** at processing-chain ship: hotbar's "Stone" slot stops being a free brush. Painting consumes 1 `stone_block` from player inventory per tile. Belts, harvesters, mills, etc. that currently require Stone overlay continue to work — the overlay still exists, you just have to manufacture it now.
+## Sapling visualization during tree regrowth (deferred polish)
+
+**Status:** at `session-tree-harvest`, chopped tile regrowth uses empty-grass rendering during the 5-minute timer. Player can't visually distinguish a regrowing tile from default grass — they only know via Q-inspect or by waiting and watching.
+
+**Polish path:** small sapling sprite drawn on regrowing tiles, growing in size toward mature as the timer ticks down. Cheap render (one circle that scales 0.0 → 0.32 over 300 sec). ~20 lines of code in `_draw_resource` or a new `_draw_regrowth`. Defer until "I can't tell which tiles I chopped" becomes a real complaint in playtest.
 
 **Design sketch:**
 

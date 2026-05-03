@@ -9,6 +9,119 @@ Each entry has three sections:
 
 ---
 
+## Tree harvesting — manual tier + variable yield (save v13 → v14)
+
+**Date:** 2026-05-04
+**Tag:** `session-tree-harvest`
+
+The second slice of manual harvesting: player walks adjacent to a tree, holds Spacebar, gets wood, tree disappears, regrows after 5 minutes. Wood yield varies 1-4 per tree based on visible tree size (deterministic per position). Three smaller fixes also shipped in this session: safe player spawn (no more starting in water), inventory panel relocated below the minimap, and a generic-Dict schema shape for `resource_state_modifications` that makes future per-tile state types (crops, berries, etc.) config-only additions.
+
+### What shipped
+
+**Tree chop mechanics**
+- Reuses Spacebar (the existing `mine` input action) — same "extract resource" verb for both ore and trees.
+- Hover-targeted: cursor over an adjacent tree + Space held = 2-second chop tick → tree gone, wood added to inventory.
+- Adjacency: same as mining (Manhattan ≤ 1, includes own tile).
+- Auto-stops when target depletes (tree gone) or moves out of range.
+- Inventory full: rate-limited toast `Inventory full.`, no extraction.
+
+**Variable wood yield**
+- `GridWorld.wood_yield_for_tree(pos)` — static helper, deterministic per position.
+- Yield distribution (skewed toward small trees):
+  - ~50% yield 1 (common scrubby tree)
+  - ~35% yield 2
+  - ~10% yield 3
+  - ~5% yield 4 (rare big tree)
+- **Correlated with visible size**: uses the same byte of the position hash that drives `size_jitter` in `_draw_tree`. Visibly bigger trees actually give more wood. Player learns to recognize value-vs-effort at a glance.
+- Q-inspect on mature tree shows `Yields N wood` line.
+- Yield is a property of the position (not the tree instance) — survives chop/regrowth cycles.
+
+**WOOD item**
+- New `Items.Type.WOOD` — color brown matching trunk (`Color(0.50, 0.32, 0.18)`), max stack 200, bare name (no `RAW_` prefix; consumed directly).
+- Future hooks: charcoal kiln (`WOOD → CHARCOAL` alternative fuel), sawmill (`WOOD → PLANKS` building material).
+
+**5-minute regrowth timer**
+- `TREE_REGROWTH_SECONDS = 300.0`. Long enough that a re-visited chopping ground feels rewarding; short enough that a 30-min play session sees a full cycle.
+- `GridWorld._process(delta)` ticks active timers each frame via `_tick_regrowth`. O(active timers) per frame; negligible cost.
+- Restored tree visual is identical to canonical (same `_draw_tree` jitter) — same yield, same size, same color (deterministic per position).
+
+**Code-share rename: `MINING_*` → `HARVEST_*`**
+- One verb covers both mining and chopping at the player-input layer:
+  - `MINING_TICK_INTERVAL` → `HARVEST_TICK_INTERVAL` (now includes TREE: 2.0)
+  - `MINING_RESOURCE_TO_ITEM` → `HARVEST_RESOURCE_TO_ITEM` (now includes TREE: WOOD)
+  - `_try_mining_tick` → `_try_harvest_tick` (dispatches: `is_ore` → `deplete_resource`, TREE → `chop_tree`)
+  - `_resolve_mining_target` → `_resolve_harvest_target` (filter via `HARVEST_TICK_INTERVAL.has`, replaces hardcoded `is_ore` check)
+  - GridWorld's `mining_indicator_*` → `harvest_indicator_*`
+- Inventory-full handling shared across both paths — written once, applied uniformly.
+- Buildings (future drills, lumber camps) call into the underlying primitives (`deplete_resource`, `chop_tree`) directly — they don't go through `_try_harvest_tick`. Player input layer and building tick layer are independent.
+
+**Save format v13 → v14: generic Dict shape**
+- `resource_state_modifications` field shape changed from `Array of [x, y, richness:int]` to `Array of [x, y, dict]` where dict carries fields per resource type:
+  - Ore: `{"richness": int}`
+  - Tree: `{"regrowth_remaining": float}`
+  - Future (crops, berries, etc.): just add keys; no schema bump
+- v13 saves hard-fail with `OS.alert` per existing schema-bump policy.
+- Trade-off: lighter typing per entry. GDScript dynamically typed anyway; `state.get(key, default)` idiom matches existing patterns (`tile.state.get("dir", 0)`, `building.state.get(...)`).
+
+**Overlay-cancels-regrowth rule**
+- New rule in `set_overlay`: if target tile has `resource_state[pos]["regrowth_remaining"]`, erase the regrowth timer before placing overlay. Player committed to paving — tree won't return.
+- Defensive check: only cancels for `regrowth_remaining` specifically, not blanket-erase. Future code paths that programmatically `set_overlay` on tiles with other resource state shapes are unaffected.
+
+**Spawn position fix (safe spawn)**
+- Old behavior: player at hardcoded `(64, 64)` = tile `(2, 2)`. On many seeds this lands in a spawn-area lake.
+- New: `_safe_spawn_position()` — scans tiles within 30-tile radius of origin, picks from top 20 closest passable tiles using seeded RNG. Same seed → same spawn (save/load consistent); different seeds → different spawn (variety per fresh start).
+- Fallback to `(0, 0)` if no passable tile found (extreme seed). Player's escape valve in `player.gd::_move_with_passability` lets them walk off impassable.
+
+**Inventory panel layout move**
+- `inventory_panel.gd::_ready` updated `offset_top` from 80 → 244, putting the panel below the minimap (which sits at top=10..234 with 224 height) with a 10px gap.
+- `info_panel.gd` bumped from 240 → 560 to stay below the inventory panel's typical max height.
+
+**Tests: 18/18 passing** (was 17; added 1, updated 2)
+- **NEW** `test_tree_harvest_lifecycle` — covers chop_tree mutation, regrowth tick, full restore at timer-end, save mid-regrowth round-trip, overlay-cancels-regrowth rule, WOOD item registration, AND wood-yield distribution sanity (yield 1 most common, yield 4 rare; deterministic per position).
+- **UPDATED** `test_save_load_roundtrip` for v14 (Dict shape).
+- **UPDATED** `test_resource_state_modifications_roundtrip` — assertions adjusted for Dict-shaped modifications. Test still covers partial AND full ore depletion round-trip.
+
+### Decisions
+
+- **(a) Generalize-and-rename over (b) separate functions.** The verb truly is "harvest" for both ore and trees; "mining" was a subtype. Single dispatch path keeps inventory-full handling shared and keeps the player-input layer compact. Buildings are independent of this layer; (a) vs (b) doesn't affect future drills/lumber-camps.
+- **Path 1 (generic Dict) over Path 2 (parallel fields).** Forward-extensibility wins for the next 5+ stages of features. Adding a third resource state type = config-only key. Path 2 would force schema bump + new field + new serialize/load loop every time. GDScript's dynamic typing makes the "lighter typing" cost real-but-tolerable.
+- **(c) Cancel regrowth on overlay placement.** Player committed; honor the intent. Maintains the "no overlay + resource_node simultaneously" invariant naturally. Also matches the stewardship theme: terraforming is a commitment.
+- **Variable yield tied to visible size, not random per-chop.** Same hash byte drives both `size_jitter` and `wood_yield`. Player can predict yield by looking at the tree. Deterministic per position; yield doesn't change after regrowth.
+- **5-minute regrowth at default.** Single tunable constant; balance based on playtest feedback.
+- **`wood_yield_for_tree` static helper, no per-tile state for yield.** Yield is a property of the position, derived from hash. No state to persist. Survives chop/regrowth/load cycles automatically.
+- **`Tile.is_passable()` system was the right primitive.** It existed already (water collision in mining-manual session); added the spawn-position fix on top, no new infrastructure. Future passability checks (cliffs, walls, etc.) get the same treatment for free.
+
+### Lessons
+
+- **Generic schema paid off immediately.** The Dict-shape decision was made for tree regrowth in this session, but the next two state-type additions (whatever they are) will be schema-free. Path 1 vs Path 2 is the kind of architectural decision where the win is invisible until the second use case lands; the second use case shipped one session later.
+- **Same-byte-hash trick: visual variance + gameplay variance for free.** Reusing the byte of the position hash that drives `size_jitter` to also drive yield means the two are inherently correlated. Player perception ("big tree = more wood") is automatically backed by code; no separate state, no risk of drift between visual and gameplay layers. Pattern worth reusing for future "visible variance" features (crop quality, berry ripeness, etc.).
+- **Mid-session refinement was cheap.** User's "big trees should give more wood" landed late but cost ~30 lines (one helper, one dispatch site, one Q-inspect line). Variable-yield architecture was already implicit in the chop-tick dispatch — just needed an `amount` parameter.
+- **Spawn-on-water was a latent bug** invisible until water collision shipped (mining-manual session). Before water-collision, spawning in water was awkward but not broken. After water-collision, spawning in water leaves the player on impassable terrain, escape-valve required. The bug existed for one session before showing up in playtest. Lesson: when changing movement rules, sweep all spawn / placement sites for new edge cases.
+- **UI layout drift is easy to forget.** Inventory panel moved → info panel needed to follow. Both reference the SAME visual region of the screen (top-right column). When relocating one, sweep callers/neighbors for layout dependencies. Bumped info_panel.gd `offset_top` 240 → 560; would have been an obvious "the info panel disappeared!" bug at next Q-inspect smoke.
+- **The Path 1 schema cost showed up in the test.** `test_resource_state_modifications_roundtrip` had `int(modifications[pos])` assertions that broke when shape changed. Updated to `dict.get("richness", -1)` — clean, but a reminder that schema changes ripple to test code.
+
+### Migration
+
+Save format v13 → v14. **All existing v13 saves hard-fail on load** with `OS.alert`. Player must delete `%APPDATA%\Godot\app_userdata\Stewardship\save_slot_1.json` and start fresh. Reason: structural change to `resource_state_modifications` (int → Dictionary) is incompatible with v13's int reader path.
+
+### Roadmap implications
+
+- **Burner mining drill** (next likely): the architecture supports it directly. Drills call `GridWorld.deplete_resource(pos, amount)` from their tick handler with `amount > 1`. No code in this session needs changing for drill support.
+- **Lumber camp** (parallel to drill): calls `GridWorld.chop_tree(pos)` directly + handles its own scheduling. Wood yield via `GridWorld.wood_yield_for_tree(pos)`.
+- **Charcoal kiln / sawmill**: process WOOD into CHARCOAL / PLANKS. Standard processor recipe; no new mechanics needed.
+- **Soil exhaustion**: extends `resource_state` to non-ore tiles (e.g., `{"fertility": float}` on farmable grass). Path 1 generic-Dict shape supports this with zero schema changes.
+- **Sapling visualization**: deferred polish item. Currently regrowing tiles render as plain grass; a small sapling sprite would be discoverable in playtest.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers, click-to-pan-from-minimap — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** — new this session. Empty-grass during 5-min regrowth feels invisible; small sapling sprite + size-grows-toward-mature animation would be discoverable. Defer to polish session.
+
+---
+
 ## Mining mechanics — manual tier (save v12 → v13)
 
 **Date:** 2026-05-04
