@@ -9,6 +9,60 @@ Each entry has three sections:
 
 ---
 
+## Polish session — cloth chain prefer_dir + hover-outline minimum-pixel-floor
+
+**Date:** 2026-05-02
+**Tag:** `session-polish-1`
+
+Two carried-forward issues closed in one session: (1) the cloth chain ergonomic wart from Session E (no `prefer_dir` ports → fragile to "added a chest, chain stopped"), and (2) the camera zoom session's known limitation (hover outline fades to sub-pixel anti-aliased lines at extreme zoom-out). Polish, not new content.
+
+### What shipped
+
+- **Cloth chain `prefer_dir` ports.** All three cloth recipes now declare canonical-east ports — input from W, output to E — matching the bread chain authoring convention. Buildings rotate at runtime via `Buildings.world_dir()` so the F11 demo's south-running layout works with `dir = DIR_S`.
+  - `retter_fiber`: flax (W) + water (no prefer_dir) → fiber (E)
+  - `loom_cloth`: 3 fiber (W) → cloth (E)
+  - `tailor_bag`: 4 cloth (W) → bag (E)
+- **`supports_direction: true`** on `Type.RETTER`, `Type.LOOM`, `Type.TAILOR`. R-key now rotates them in placement preview and in-place via the existing hover-rotate flow.
+- **`Retter.make`, `Loom.make`, `Tailor.make`** updated to accept `dir: int = 0` and thread it to `Processor.make_state(recipe_id, dir)`. Building dispatch in `Buildings.gd::make()` updated.
+- **F11 demo cloth chain rotated south:** `cloth_plan` in `main.gd` now sets `dir = BLT_S` on the three cloth processor entries. Canonical W input rotates to world N (pulls from belt above), canonical E output rotates to world S (pushes to belt below). Water input has no prefer_dir, so the shared pipe network still feeds the Retter regardless of rotation.
+- **Hover-outline minimum-pixel-floor:** `grid_world.gd::_draw()` hover rect outline width changed from a literal `2.0` world units to `screen_px(2.0)`, which returns `max(2.0, 2.0 / camera.zoom.x)`. At zoom ≥ 1, world-unit width wins and the outline aligns exactly to tile boundaries (the camera-zoom session's "outline matches tile" criterion preserved). At zoom < 1, the floor kicks in so the outline never falls below 2 screen pixels — visible at extreme zoom-out instead of sub-pixel anti-aliased.
+  - Trade-off accepted: at zoom 0.85 (min), the outline now overshoots the tile by ~0.18 world units (~0.15 screen pixels) per side. Much smaller than the pre-camera-zoom-session overshoot bug; visibility win outweighs it.
+- **`screen_px()` helper** is now actually used (was "kept but unused" per NOTES.md after the camera zoom session). Comment rewritten to clarify per-call trade-off — used selectively for hover, NOT for grid lines / port dots / building borders (those stay in world units to match tile boundaries exactly).
+- **New test `test_cloth_prefer_dir.gd`**, +1 to suite (11/11 passing). Two cases:
+  - Case A (`dir = 0`): pre-load Retter `out_buffer` with fiber, place belts at N and S only (NO E belt), tick 1500. Assert: both N and S chests stay empty, fiber stays in `out_buffer`. Locks in "prefer_dir is strict — items go to the declared port or wait, no fallback."
+  - Case B (`dir = S`): same setup, rotate Retter south. Assert: S chest gets ≥9 fiber, N chest stays empty (no canonical W output declared, only input). Locks in "rotation routes the output to the right edge."
+- **Save schema unchanged at v10.** No structural change; rotation is data on existing `state.dir` field with defensive `state.get("dir", 0)` reads everywhere.
+
+### Decisions
+
+- **Canonical-east everywhere.** Considered making cloth canonical-south to match the F11 demo layout. Rejected — would split authoring conventions across the codebase. Bread chain is canonical-east; cloth follows the same. The F11 demo carries the rotation flag, which is one column in `cloth_plan`.
+- **Retter water input stays without `prefer_dir`.** The original ergonomic complaint was about solid outputs (chest stealing fiber). Water arrives via the shared pipe network; adding a fluid prefer_dir would lock it to one side and force re-routing the shared network. Out of scope for a polish pass; matches Mixer (also no fluid prefer_dir).
+- **R-key rotates in place — no remove+replace migration.** Confirmed by reading `main.gd::152-173` before locking in the migration story. Defensive `state.get("dir", 0)` reads everywhere mean old saves load cleanly with implicit east-facing; player rotates each cloth processor with R until "Facing: S" appears. Three R-presses per processor.
+- **Hover-outline floor uses `screen_px(2.0)`, NOT a new formula.** The helper already exists; reusing it consumes the "kept but unused" flag from NOTES.md. Inline comment documents the per-call trade-off so the next person reading the code knows why hover uses screen_px and grid lines / port dots don't.
+- **Negative-assertion test pattern.** `test_cloth_prefer_dir.gd` Case A asserts the chain DOESN'T work at `dir = 0`. Catches regressions where someone removes `prefer_dir` from `retter_fiber` (Case A would fail because fiber would push to N or S). Pairs with the existing `test_thresher_rotation.gd` pattern.
+
+### Lessons
+
+- **Verify before locking in migration story.** First instinct on R-key migration was "remove + replace each cloth processor." Two minutes of reading `main.gd::152-173` revealed R rotates in place when hand is empty — much cleaner migration ("press R three times"). Don't write migration docs from memory of how a feature MIGHT work. Read the relevant code first.
+- **Polish sessions are real sessions, not afterthoughts.** Two small carried-forward items + tests + logs is ~90 minutes of work. Worth doing as its own session with its own tag rather than bundling into the next big session — keeps PROJECT_LOG entries scoped and makes it possible to bisect a regression to "the polish session vs Session F."
+- **The `screen_px()` helper was the right tool for the right job.** The camera zoom session reverted nearly every screen_px usage to world-unit literals. Correct call for grid lines / port dots / building borders (where overshoot proportionally matters). Wrong call for hover outline only — the hover-outline overshoot at low zoom is ~0.15 screen pixels per side, way under perception threshold, and the visibility win at extreme zoom-out is real. Per-call dimensional choice, not blanket rule.
+- **The "kept but unused" flag in NOTES.md was a future-self breadcrumb that worked.** Camera zoom session left the helper in place specifically anticipating this fix. Removing dead code is good general policy; leaving it with a "future use case X" comment is sometimes better.
+
+### Migration (read this if you have a v10 save with cloth chain content)
+
+Any cloth processor placed before this session was placed with `dir = 0` (east-facing). Inputs and outputs were both routed by "any neighbor accepts" before this session; now they're routed strictly by `prefer_dir`. **Old saves load cleanly** (defensive `.get("dir", 0)` reads everywhere) but **the cloth chain stops producing** until each Retter / Loom / Tailor is rotated to face south.
+
+**Fix:**
+1. Hover the Retter with empty hand. Press R three times until toast says "Retter rotated to S".
+2. Repeat for Loom and Tailor.
+3. Chain resumes within ~30 seconds.
+
+This applies to **any v10 save with cloth processors**, including F11-spawned chains placed before this session. The save file isn't corrupt; the processors just need their orientation set. Alternative: delete the save and re-spawn with F11 (the demo now spawns them rotated south).
+
+The save schema does NOT bump (still v10). Old saves work fine; rotation is the only manual step.
+
+---
+
 ## Camera zoom session — pop the stash, diagnose displacement, ship
 
 **Date:** 2026-05-02

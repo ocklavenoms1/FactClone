@@ -338,16 +338,19 @@ func find_adjacent_drainable(center: Vector2i) -> Building:
 func _process(_delta: float) -> void:
 	queue_redraw()
 
-## Convert "I want N pixels on screen" to "this many world units, given the
-## current camera zoom." For draw_line widths and hover/port outlines that
-## should look the same size at any zoom, pass the result here.
+## Convert "I want at least N pixels on screen" to "this many world units,
+## given the current camera zoom." Returns max(world_px, world_px / zoom):
+##   - At zoom >= 1: returns world_px (the value is the floor).
+##   - At zoom <  1: returns world_px / zoom, which renders as exactly
+##     world_px screen pixels — keeps a line/outline visible when zoomed out.
+##
+## Used selectively: hover rect outline (where vanishing-at-low-zoom is
+## the worse failure mode than 0.15-screen-px overshoot at min zoom).
+## NOT used for grid lines, building borders, port dots — those stay in
+## world units to match tile boundaries exactly. The trade-off is per-call.
 func screen_px(world_px: float) -> float:
 	if camera == null:
 		return world_px
-	# Floor at the requested base width so things never get thinner than
-	# they would be at zoom = 1; just stops the line from disappearing
-	# when zoomed in close. (Looks fine to overshoot the fixed size at
-	# high zoom — makes outlines emphatic.)
 	return max(world_px, world_px / camera.zoom.x)
 
 func _draw() -> void:
@@ -423,8 +426,19 @@ func _draw() -> void:
 			if blocked:
 				break
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
-		# Outline width in world units so it scales with the tile.
-		draw_rect(hover_rect, hover_color, false, 2.0)
+		# Hover outline width: 2 world units AT zoom >= 1 (so it scales
+		# with the tile and stays exactly aligned with tile boundaries),
+		# floored at 2 screen pixels at lower zoom (so it stays visible
+		# when zoomed out and doesn't fade to sub-pixel anti-aliased
+		# lines). screen_px(2.0) returns max(2.0, 2.0 / camera.zoom.x):
+		#   zoom = 1.5 (default): 2.0 world units → 3.0 screen px (clear).
+		#   zoom = 6.75 (max):    2.0 world units → 13.5 screen px (chunky, proportional).
+		#   zoom = 0.85 (min):    2.353 world units → 2.0 screen px (floored).
+		# At low zoom the outline overshoots the tile by ~0.18 world units
+		# on each side (~0.15 screen pixels) — much smaller than the
+		# pre-camera-zoom-session overshoot bug, and the visibility win
+		# outweighs it (per NOTES.md "minimum-pixel-floor" deferred fix).
+		draw_rect(hover_rect, hover_color, false, screen_px(2.0))
 		# Direction preview arrow for directional placements (belts and every
 		# rotatable processor). Centered on the footprint, not the anchor
 		# cell — for a 2×2 building this puts the arrow at the visual middle.

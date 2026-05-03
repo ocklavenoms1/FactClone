@@ -422,15 +422,19 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 	# below — its E perimeter is at column +1 of the chain, where the shared
 	# network's western pipe terminates.
 	var cloth_o: Vector2i = player_tile + Vector2i(10, 8)
+	# Cloth processors rotated to face S (BLT_S): canonical W input → world N
+	# (pulls from belt above), canonical E output → world S (pushes to belt
+	# below). Water has no prefer_dir, still arrives via shared pipe network
+	# regardless of building rotation.
 	var cloth_plan: Array = [
 		[Vector2i(0, 0), Terrain.Overlay.SOIL_TILLED, GRASS, Buildings.Type.PLANTER,   Items.Type.FLAX, 0],
 		[Vector2i(0, 1), Terrain.Overlay.STONE,       GRASS, Buildings.Type.HARVESTER, null,            0],
 		[Vector2i(0, 2), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
-		[Vector2i(0, 3), Terrain.Overlay.STONE,       GRASS, Buildings.Type.RETTER,    null,            0],
+		[Vector2i(0, 3), Terrain.Overlay.STONE,       GRASS, Buildings.Type.RETTER,    null,            BLT_S],
 		[Vector2i(0, 4), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
-		[Vector2i(0, 5), Terrain.Overlay.STONE,       GRASS, Buildings.Type.LOOM,      null,            0],
+		[Vector2i(0, 5), Terrain.Overlay.STONE,       GRASS, Buildings.Type.LOOM,      null,            BLT_S],
 		[Vector2i(0, 6), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
-		[Vector2i(0, 7), Terrain.Overlay.STONE,       GRASS, Buildings.Type.TAILOR,    null,            0],
+		[Vector2i(0, 7), Terrain.Overlay.STONE,       GRASS, Buildings.Type.TAILOR,    null,            BLT_S],
 		[Vector2i(0, 8), Terrain.Overlay.STONE,       GRASS, Buildings.Type.BELT,      null,            BLT_S],
 		[Vector2i(0, 9), Terrain.Overlay.STONE,       GRASS, Buildings.Type.CHEST,     null,            0],
 	]

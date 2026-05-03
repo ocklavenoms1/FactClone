@@ -173,7 +173,7 @@ const DATA: Dictionary = {
 		"swatch_color": Color(0.40, 0.55, 0.45),    # mossy vat green
 		"footprint": Vector2i(1, 1),
 		"requires_overlay": [Terrain.Overlay.STONE],
-		"supports_direction": false,
+		"supports_direction": true,
 		"player_drainable": false,
 	},
 	Type.LOOM: {
@@ -181,7 +181,7 @@ const DATA: Dictionary = {
 		"swatch_color": Color(0.72, 0.50, 0.28),    # warm wood
 		"footprint": Vector2i(1, 1),
 		"requires_overlay": [Terrain.Overlay.STONE],
-		"supports_direction": false,
+		"supports_direction": true,
 		"player_drainable": false,
 	},
 	Type.TAILOR: {
@@ -189,7 +189,7 @@ const DATA: Dictionary = {
 		"swatch_color": Color(0.42, 0.45, 0.62),    # tailor's slate-blue
 		"footprint": Vector2i(1, 1),
 		"requires_overlay": [Terrain.Overlay.STONE],
-		"supports_direction": false,
+		"supports_direction": true,
 		"player_drainable": false,
 	},
 }
@@ -310,11 +310,11 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 		Type.SUGAR_PRESS:
 			return SugarPress.make(pos)
 		Type.RETTER:
-			return Retter.make(pos)
+			return Retter.make(pos, dir)
 		Type.LOOM:
-			return Loom.make(pos)
+			return Loom.make(pos, dir)
 		Type.TAILOR:
-			return Tailor.make(pos)
+			return Tailor.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 

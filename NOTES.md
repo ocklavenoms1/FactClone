@@ -70,30 +70,46 @@ That's the verifiable scope. Everything beyond that — reading state programmat
 
 ---
 
-## Camera zoom — shipped, known limitations
+## Camera zoom — shipped + polished
 
-**Status:** mouse-wheel zoom + smooth-lerp shipped at `session-camera-zoom`. The stash's displacement bug was diagnosed (sub-pixel jitter from non-integer zoom × fractional camera position) and fixed via project-level pixel-snap rendering. The zoom spec previously in `SESSION_E_PLAN.md` is now history; this entry replaces the stash reminder.
+**Status:** mouse-wheel zoom + smooth-lerp shipped at `session-camera-zoom`. The stash's displacement bug was diagnosed (sub-pixel jitter from non-integer zoom × fractional camera position) and fixed via project-level pixel-snap rendering. The hover-outline-fades-at-low-zoom limitation that was deferred from that session was closed at `session-polish-1` via `screen_px(2.0)` floor. **No active limitations.**
 
-### Known limitation: outlines fade at extreme zoom-out
+### What `screen_px()` is used for now
 
-Hover indicator, grid lines, building borders, port dots, and direction arrows all use **world-unit widths** so they scale with the tile. The trade-off chosen during the session: at zoom 0.85, a 2-world-unit outline = 1.7 screen pixels (sub-pixel anti-aliased — visible but thin). At default zoom 1.5, 3 px (clear). At max zoom 6.75, 13.5 px (chunky but proportional).
+`grid_world.gd::screen_px(world_px)` returns `max(world_px, world_px / camera.zoom.x)`. At zoom ≥ 1, it returns `world_px` (the floor wins); at zoom < 1, it returns `world_px / zoom` so the rendered output is at least `world_px` screen pixels.
 
-The alternative was screen-fixed outline widths via a `screen_px()` helper. That made outlines overshoot small tiles at low zoom — the hover box looked larger than the tile beneath it. The "outline matches tile exactly" verification criterion took priority over "outlines stay readable at any zoom."
+**Used selectively:**
+- **Hover rect outline** (line 427-ish in `_draw`) — vanishing-at-low-zoom was the worse failure mode than ~0.15 screen-pixel overshoot at min zoom.
 
-**Future fix option (deferred):** minimum-pixel-floor for hover outline only. Pseudocode:
+**NOT used for:**
+- Grid lines, building borders, port dots, direction arrow strokes — these stay in world units to match tile boundaries exactly. Overshoot on these (especially port dots, where the radius is small) was visible at low zoom and looked bad. Per-call dimensional choice.
 
-```gdscript
-var width: float = max(world_units, 2.0 / camera.zoom.x)  # at least 2 screen px
-draw_rect(rect, color, false, width)
-```
+The trade-off is acknowledged: at zoom 0.85 (min), the hover outline overshoots the tile by ~0.18 world units / ~0.15 screen pixels per side. Under perception threshold; visibility win is the priority for hover specifically.
 
-This keeps world-unit widths above default zoom (preserving exact tile alignment when zoomed in) but adds a floor at low zoom so the outline stays at least 2 screen pixels visible. Add only if it bites in playtest. ~30 minutes of work — small, scoped, easy to layer in later.
+### Long-term solution: sprite migration
 
-The wider concern (outlines fading on placeholder art) is solved long-term by **moving from colored rectangles to actual sprites** — sprite outlines are inside the sprite texture, not draw_line/draw_rect calls, so they don't have the screen/world dimension question. Sprite migration is its own future session.
+The wider "outlines on placeholder art" question is solved by **moving from colored rectangles to actual sprites** — sprite outlines are inside the sprite texture, not draw_rect calls, so they don't have the screen/world dimension question at all. Sprite migration is its own future session.
 
-### `screen_px()` helper kept but unused
+---
 
-`grid_world.gd::screen_px(world_px)` exists for future in-world overlays that genuinely need constant screen-pixel size. No current callers. Cheap to keep; removing later if dead code accumulates is trivial.
+## Cloth chain prefer_dir — shipped, save migration recorded
+
+**Status:** shipped at `session-polish-1`. The Session E follow-up about no-prefer_dir on cloth recipes is closed. Retter/Loom/Tailor now use canonical-east ports with rotation; the F11 demo rotates them south to match the chain's vertical layout.
+
+### Save migration notes (informational, no version bump)
+
+Save schema stayed at v10 — no structural change. But any save with cloth processors placed before `session-polish-1` will need each processor rotated south manually. Defensive `.get("dir", 0)` reads everywhere mean the save loads cleanly; the chain just doesn't produce until rotation is applied.
+
+**The migration steps:**
+1. Hover the Retter with empty hand. Press R three times until toast says "Retter rotated to S".
+2. Repeat for Loom and Tailor.
+3. Chain resumes within ~30 seconds.
+
+Alternative: delete the save (`%APPDATA%\Godot\app_userdata\Stewardship\save_slot_1.json`) and re-spawn with F11 — the demo now spawns them rotated.
+
+### Lesson recorded
+
+R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`), gated on `Buildings.supports_direction(t)`. Discovered during the polish session by reading the actual code rather than assuming "rotation only works during placement preview." First instinct was to write migration docs as "remove + replace each cloth processor" — much worse UX than rotating in place. **Lesson: read the code before writing migration docs.**
 
 ---
 

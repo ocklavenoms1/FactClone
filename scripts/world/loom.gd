@@ -13,8 +13,8 @@ const WARP: Color = Color(0.86, 0.84, 0.76)          # fiber-colored warp thread
 const SHUTTLE: Color = Color(0.92, 0.80, 0.62)       # cloth-colored shuttle
 const FABRIC: Color = Color(0.92, 0.80, 0.62)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.LOOM, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.LOOM, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))

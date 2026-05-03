@@ -13,8 +13,8 @@ const WATER: Color = Color(0.35, 0.50, 0.55, 0.85)   # murky retting water
 const FLAX_COLOR: Color = Color(0.55, 0.72, 0.78)
 const FIBER_COLOR: Color = Color(0.86, 0.84, 0.76)
 
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.RETTER, pos, Processor.make_state(DEFAULT_RECIPE_ID))
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.RETTER, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))

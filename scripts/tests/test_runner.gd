@@ -20,6 +20,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_thresher_multioutput.gd"),
 	preload("res://scripts/tests/test_thresher_prefer_dir.gd"),
 	preload("res://scripts/tests/test_thresher_rotation.gd"),
+	preload("res://scripts/tests/test_cloth_prefer_dir.gd"),
 	preload("res://scripts/tests/test_bag_cap.gd"),
 	preload("res://scripts/tests/test_chest_paired_view.gd"),
 ]

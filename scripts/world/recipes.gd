@@ -138,35 +138,40 @@ const DATA: Dictionary = {
 	"retter_fiber": {
 		"id": "retter_fiber",
 		"building_type": Buildings.Type.RETTER,
-		"inputs_solid":  [[Items.Type.FLAX, 1]],
+		# Canonical (east-facing) ports: flax in from W, fiber out to E.
+		# Water has no prefer_dir — accepts a pump/pipe network adjacent to
+		# any of the 4 perimeter cells, regardless of building.dir.
+		"inputs_solid":  [[Items.Type.FLAX, 1, Belt.DIR_W]],
 		"inputs_fluid":  [[Fluids.Type.WATER, 1]],
-		"outputs_solid": [[Items.Type.FIBER, 1]],
+		"outputs_solid": [[Items.Type.FIBER, 1, Belt.DIR_E]],
 		"time_ticks": 160,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "Flax + Water → Fiber",
+		"display_name": "Flax (W) + Water → Fiber (E)",
 	},
 	"loom_cloth": {
 		"id": "loom_cloth",
 		"building_type": Buildings.Type.LOOM,
-		"inputs_solid":  [[Items.Type.FIBER, 3]],
+		# Canonical (east-facing) ports: fiber in from W, cloth out to E.
+		"inputs_solid":  [[Items.Type.FIBER, 3, Belt.DIR_W]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.CLOTH, 1]],
+		"outputs_solid": [[Items.Type.CLOTH, 1, Belt.DIR_E]],
 		"time_ticks": 120,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "3× Fiber → Cloth",
+		"display_name": "3× Fiber (W) → Cloth (E)",
 	},
 	"tailor_bag": {
 		"id": "tailor_bag",
 		"building_type": Buildings.Type.TAILOR,
-		"inputs_solid":  [[Items.Type.CLOTH, 4]],
+		# Canonical (east-facing) ports: cloth in from W, bag out to E.
+		"inputs_solid":  [[Items.Type.CLOTH, 4, Belt.DIR_W]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.BAG, 1]],
+		"outputs_solid": [[Items.Type.BAG, 1, Belt.DIR_E]],
 		"time_ticks": 160,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "4× Cloth → Bag",
+		"display_name": "4× Cloth (W) → Bag (E)",
 	},
 }
 
