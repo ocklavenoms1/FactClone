@@ -350,7 +350,12 @@ func _place_patch(world: GridWorld, center: Vector2i, type: int, base_radius: fl
 			var distance_multiplier: float = 1.0 + pow(origin_distance / DISTANCE_SCALE, DISTANCE_POWER)
 			var richness: int = int(round(intra_intensity * float(BASE_RICHNESS[type]) * distance_multiplier))
 			world.tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, type)
-			world.resource_state[pos] = {"richness": richness}
+			# original_richness: the canonical generated value; stays constant for the
+			# lifetime of the patch so depletion alpha-fade can be proportional
+			# (current/original) rather than absolute. Recomputable from seed at load
+			# time, NOT persisted in save (resource_state_modifications stores only
+			# `current` richness; original is rederived via WorldGenerator.generate).
+			world.resource_state[pos] = {"richness": richness, "original_richness": richness}
 
 # ---------- pass 3: forest clusters ----------
 

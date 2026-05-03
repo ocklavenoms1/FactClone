@@ -38,6 +38,14 @@ func is_water() -> bool:
 func has_resource_node() -> bool:
 	return resource_node != ResourceNodes.Type.NONE
 
+## Player can walk through this tile? Generic passability check; today only
+## water blocks, but extensible for future cliffs / walls / structures.
+## Resource_node tiles (deposits, trees) stay passable — player walks
+## through ore patches and forests freely; they're "stuff on the ground"
+## not "obstacles."
+func is_passable() -> bool:
+	return base != Terrain.Base.WATER
+
 func to_dict() -> Dictionary:
 	return { "b": base, "o": overlay, "r": resource_node }
 

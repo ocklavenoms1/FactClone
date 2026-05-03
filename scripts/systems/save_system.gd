@@ -56,8 +56,25 @@ extends RefCounted
 ##            from player position at load time, not persisted. Avoids the
 ##            "saved active but loaded somewhere else" inconsistency.
 ##            v11 saves don't have this field — hard-fail.
+##  v12 → v13: Manual mining mechanics. New top-level field
+##            `resource_state_modifications: Array of [x, y, richness]` —
+##            sparse list of ore-deposit tiles whose richness has been
+##            depleted by mining. Parallel to `tile_modifications`: only
+##            deltas from procgen-canonical state persist.
+##            On load: WorldGenerator regenerates canonical resource_state
+##            (with original_richness intact) from seed, then apply
+##            modifications to overwrite richness. Fully-depleted tiles
+##            (richness=0) are handled by tile_modifications setting
+##            resource_node=NONE; the resource_state_modifications entry
+##            for those is erased at depletion time.
+##            DUAL REASON for v12 hard-fail at this bump:
+##              (1) the new resource_state_modifications field
+##              (2) the "no overlay on deposits" rule reversal — v12 saves
+##                  could have stale overlay-on-deposit tiles which are
+##                  now invalid state.
+##            v12 saves don't have either — hard-fail.
 
-const SAVE_VERSION: int = 12
+const SAVE_VERSION: int = 13
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -90,6 +107,14 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		if int(grid_world.region_visibility[region]) >= 1:
 			explored_data.append([region.x, region.y])
 
+	# v13: serialize resource_state_modifications (mining-induced richness deltas).
+	# Only stores `current` richness; `original_richness` is rederived from
+	# WorldGenerator at load time.
+	var resource_mods_data: Array = []
+	for pos in grid_world.resource_state_modifications.keys():
+		var richness: int = int(grid_world.resource_state_modifications[pos])
+		resource_mods_data.append([pos.x, pos.y, richness])
+
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"world_seed": grid_world.world_seed,
@@ -97,6 +122,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"player": [player.global_position.x, player.global_position.y],
 		"tick": TickSystem.current_tick,
 		"tile_modifications": modifications_data,
+		"resource_state_modifications": resource_mods_data,
 		"explored_regions": explored_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
@@ -189,6 +215,22 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		grid_world.tile_modifications[pos] = modified
 		if modified.resource_node == ResourceNodes.Type.NONE:
 			grid_world.resource_state.erase(pos)
+
+	# v13: apply resource_state_modifications (partial-depletion deltas).
+	# WorldGenerator already restored canonical resource_state[pos] = {
+	# richness, original_richness } above; this overlay updates `richness`
+	# to the saved value. original_richness is preserved via procgen rerun.
+	# Fully-depleted tiles aren't here (already handled via tile_modifications
+	# setting resource_node=NONE, which erased resource_state).
+	grid_world.resource_state_modifications.clear()
+	for entry in data.get("resource_state_modifications", []):
+		var rs_pos := Vector2i(int(entry[0]), int(entry[1]))
+		var rs_richness: int = int(entry[2])
+		grid_world.resource_state_modifications[rs_pos] = rs_richness
+		if grid_world.resource_state.has(rs_pos):
+			grid_world.resource_state[rs_pos]["richness"] = rs_richness
+		# Defensive: if the modification record points to a tile that's no
+		# longer in resource_state (e.g., schema race), skip silently.
 
 	# v12: restore explored regions as fog. Active state will be set by
 	# main.gd's vision update after load completes (running update_vision

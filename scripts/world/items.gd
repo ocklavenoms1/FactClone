@@ -6,6 +6,17 @@ extends RefCounted
 ##
 ## Add a new item: APPEND to Type enum (never reorder — type ints are
 ## stored in saves). Add a DATA entry.
+##
+## NAMING CONVENTION (locked in mining-manual session):
+##   RAW_*   — extracted form before processing (collision-dodge OR
+##              substantial transformation expected). E.g., RAW_STONE
+##              avoids collision with Terrain.Overlay.STONE; future
+##              "stone crusher" would output STONE_BLOCK as the placeable
+##              item that replaces today's free-stone painting.
+##   *_ORE   — extracted form of metal that will be smelted to *_INGOT.
+##              IRON_ORE → IRON_INGOT (future) → tools / electric tier.
+##   bare    — extracted form usable as-is in chains. COAL goes straight
+##              to fuel; CLAY goes straight to brick recipes.
 
 enum Type {
 	WHEAT,
@@ -24,6 +35,12 @@ enum Type {
 	FIBER,
 	CLOTH,
 	BAG,
+	# --- mining (manual tier, session-mining-manual) ---
+	RAW_STONE,
+	COAL,
+	IRON_ORE,
+	COPPER_ORE,
+	CLAY,
 }
 
 const DATA: Dictionary = {
@@ -43,6 +60,12 @@ const DATA: Dictionary = {
 	Type.FIBER:          { "name": "Fiber",          "color": Color(0.86, 0.84, 0.76), "max_stack": 100 },
 	Type.CLOTH:          { "name": "Cloth",          "color": Color(0.92, 0.80, 0.62), "max_stack": 100 },
 	Type.BAG:            { "name": "Bag",            "color": Color(0.55, 0.30, 0.18), "max_stack": 100 },
+	# --- mining (colors match ResourceNodes.color_of for visual continuity) ---
+	Type.RAW_STONE:      { "name": "Raw Stone",      "color": Color(0.55, 0.55, 0.58), "max_stack": 200 },
+	Type.COAL:           { "name": "Coal",           "color": Color(0.18, 0.18, 0.22), "max_stack": 200 },
+	Type.IRON_ORE:       { "name": "Iron Ore",       "color": Color(0.62, 0.45, 0.38), "max_stack": 100 },
+	Type.COPPER_ORE:     { "name": "Copper Ore",     "color": Color(0.45, 0.55, 0.65), "max_stack": 100 },
+	Type.CLAY:           { "name": "Clay",           "color": Color(0.68, 0.50, 0.36), "max_stack": 200 },
 }
 
 static func name_of(t: int) -> String:

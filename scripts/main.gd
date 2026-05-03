@@ -21,6 +21,35 @@ const ZOOM_STEP: float = 1.15
 const ZOOM_SMOOTH_RATE: float = 12.0
 var target_zoom: float = 1.0
 
+# ---------- mining (manual tier) ----------
+# Per-resource tick interval (seconds). Each tick extracts 1 ore and drains
+# 1 richness. Stone/coal/clay are commodity-tier (2/sec); iron/copper are
+# mid-tier (1/sec). Far-tier patches are intentionally tedious to drain
+# manually — incentive for drill upgrades in a future session.
+const MINING_TICK_INTERVAL: Dictionary = {
+	ResourceNodes.Type.STONE:  0.5,
+	ResourceNodes.Type.COAL:   0.5,
+	ResourceNodes.Type.IRON:   1.0,
+	ResourceNodes.Type.COPPER: 1.0,
+	ResourceNodes.Type.CLAY:   0.5,
+}
+
+# Resource → item produced per mining tick.
+const MINING_RESOURCE_TO_ITEM: Dictionary = {
+	ResourceNodes.Type.STONE:  Items.Type.RAW_STONE,
+	ResourceNodes.Type.COAL:   Items.Type.COAL,
+	ResourceNodes.Type.IRON:   Items.Type.IRON_ORE,
+	ResourceNodes.Type.COPPER: Items.Type.COPPER_ORE,
+	ResourceNodes.Type.CLAY:   Items.Type.CLAY,
+}
+
+# Sentinel — represents "no current mining target" (Vector2i.MAX is the
+# canonical "out of any conceivable world bounds" marker).
+const MINING_INVALID_TARGET: Vector2i = Vector2i(2147483647, 2147483647)
+var _mining_target: Vector2i = MINING_INVALID_TARGET
+var _mining_progress: float = 0.0   # accumulated time toward next tick
+var _last_mining_full_inv_tick: int = -100   # rate-limit "Inventory full" toast
+
 @onready var player: CharacterBody2D = $Player
 @onready var camera: Camera2D = $Player/Camera
 @onready var grid_world: Node2D = $GridWorld
@@ -90,10 +119,15 @@ func _ready() -> void:
 	map_panel.player = player
 	# Player gates movement on map_panel.is_open() too.
 	player.map_panel = map_panel
+	# Player needs grid_world for tile-passability collision (water blocks).
+	player.grid_world = grid_world
 	# Minimap shares the map_panel's cached texture (samples a region each frame).
 	minimap.world = grid_world
 	minimap.player = player
 	minimap.map_panel = map_panel
+	# Resource depletion → map dirty hookup. When mining changes a tile's
+	# resource state, the map texture for that tile's region needs redraw.
+	grid_world.resource_changed.connect(_on_resource_changed)
 	# Initialize zoom from whatever the camera was authored at, so target
 	# tracking starts in lockstep instead of snapping on first wheel input.
 	target_zoom = camera.zoom.x
@@ -130,6 +164,12 @@ func _ready() -> void:
 func _apply_loaded_progression(loaded: Dictionary) -> void:
 	for key in loaded.keys():
 		player_progression[key] = loaded[key]
+
+## Forward GridWorld.resource_changed signal to the map panel's dirty
+## tracking so M-map / minimap re-render the affected region next frame.
+func _on_resource_changed(pos: Vector2i) -> void:
+	if map_panel != null:
+		map_panel.mark_tile_dirty(pos)
 
 func _process(delta: float) -> void:
 	# Vision update on region cross. Cheap: one Vector2i compare per frame;
@@ -229,6 +269,10 @@ func _process(delta: float) -> void:
 		_try_place(hover_tile)
 	if Input.is_action_pressed("remove_tile"):
 		_try_remove(hover_tile)
+
+	# Mining (manual tier). Spacebar held + cursor over an adjacent mineable
+	# deposit tile = mining ticks every MINING_TICK_INTERVAL[type] seconds.
+	_update_mining(delta, hover_tile, player_tile)
 
 	if Input.is_action_just_pressed("interact"):
 		_try_interact(player_tile)
@@ -354,17 +398,88 @@ func _rate_limited_fail_toast(msg: String) -> void:
 		_show_toast(msg)
 		_last_failed_place_tick = TickSystem.current_tick
 
+# ---------- mining ----------
+
+## Resolve the current mining target. Returns MINING_INVALID_TARGET if any
+## condition fails (no adjacency / no mineable deposit).
+##
+## Rules (Q1, Q2 of design pass; Q8 became automatic under the "no overlay
+## on deposits" invariant locked in this session — deposits never carry
+## an overlay, so the obscure-the-deposit case is impossible).
+##   - Manhattan distance from player_tile to hover_tile must be ≤ 1
+##     (4-directional including self)
+##   - hover_tile must have a mineable resource_node (is_ore() — trees
+##     not mineable this session)
+func _resolve_mining_target(hover_tile: Vector2i, player_tile: Vector2i) -> Vector2i:
+	var manhattan: int = abs(player_tile.x - hover_tile.x) + abs(player_tile.y - hover_tile.y)
+	if manhattan > 1:
+		return MINING_INVALID_TARGET
+	if not grid_world.tiles.has(hover_tile):
+		return MINING_INVALID_TARGET
+	var t: Tile = grid_world.tiles[hover_tile]
+	if not ResourceNodes.is_ore(t.resource_node):
+		return MINING_INVALID_TARGET
+	if not MINING_TICK_INTERVAL.has(t.resource_node):
+		return MINING_INVALID_TARGET   # defensive
+	return hover_tile
+
+func _update_mining(delta: float, hover_tile: Vector2i, player_tile: Vector2i) -> void:
+	var mining_held: bool = Input.is_action_pressed("mine")
+	var valid_target: Vector2i = MINING_INVALID_TARGET
+	if mining_held:
+		valid_target = _resolve_mining_target(hover_tile, player_tile)
+
+	if valid_target == MINING_INVALID_TARGET:
+		if _mining_target != MINING_INVALID_TARGET:
+			_mining_target = MINING_INVALID_TARGET
+			_mining_progress = 0.0
+			grid_world.clear_mining_indicator()
+		return
+
+	# Active mining tick.
+	if valid_target != _mining_target:
+		_mining_target = valid_target
+		_mining_progress = 0.0
+	var resource_type: int = grid_world.tiles[_mining_target].resource_node
+	var tick_interval: float = float(MINING_TICK_INTERVAL[resource_type])
+	_mining_progress += delta
+	while _mining_progress >= tick_interval:
+		_mining_progress -= tick_interval
+		_try_mining_tick(_mining_target, resource_type)
+		# Tile may have just depleted — re-check target validity.
+		if not grid_world.tiles.has(_mining_target) \
+		or not ResourceNodes.is_ore(grid_world.tiles[_mining_target].resource_node):
+			_mining_target = MINING_INVALID_TARGET
+			_mining_progress = 0.0
+			grid_world.clear_mining_indicator()
+			return
+
+	grid_world.set_mining_indicator(_mining_target, _mining_progress / tick_interval)
+
+func _try_mining_tick(pos: Vector2i, resource_type: int) -> void:
+	var item_type: int = int(MINING_RESOURCE_TO_ITEM[resource_type])
+	if not player_inventory.has_room_for(item_type, 1):
+		# Rate-limit "Inventory full" toast. Per-call _rate_limited_fail_toast
+		# would conflict with other place-failures, so use a separate counter.
+		if TickSystem.current_tick - _last_mining_full_inv_tick > 30:
+			_show_toast("Inventory full.")
+			_last_mining_full_inv_tick = TickSystem.current_tick
+		return
+	player_inventory.add(item_type, 1)
+	grid_world.deplete_resource(pos, 1)
+
 func _try_inspect(hover_tile: Vector2i) -> void:
 	# Building takes priority — the info panel is primarily a building debugger.
 	if grid_world.has_building_at(hover_tile):
 		var b: Building = grid_world.building_at(hover_tile)
 		info_panel.set_target(b, grid_world)
 		return
-	# Fall through to resource inspect: tile has resource_node, no overlay
-	# obscuring it (matches the visual rule from GridWorld._draw_resource).
+	# Fall through to resource inspect: tile has resource_node.
+	# (Under the "no overlay on deposits" invariant, deposits never carry
+	# an overlay, so no need to check for obscured-by-paint here.)
 	if grid_world.tiles.has(hover_tile):
 		var t: Tile = grid_world.tiles[hover_tile]
-		if t.resource_node != ResourceNodes.Type.NONE and not t.has_overlay():
+		if t.resource_node != ResourceNodes.Type.NONE:
 			info_panel.set_resource_target(hover_tile, grid_world)
 			return
 	info_panel.clear_target()

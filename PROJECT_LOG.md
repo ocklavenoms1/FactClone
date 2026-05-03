@@ -9,6 +9,112 @@ Each entry has three sections:
 
 ---
 
+## Mining mechanics — manual tier (save v12 → v13)
+
+**Date:** 2026-05-04
+**Tag:** `session-mining-manual`
+
+The first slice of mining mechanics: player walks adjacent to a deposit, holds a key, ore enters inventory, deposit depletes, and when richness hits 0 the tile reverts to grass. Foundation for future drill tiers, soil exhaustion, and processing chains.
+
+Three significant non-mining changes also shipped in this session: a generic `Tile.is_passable()` system (water now blocks player movement, extensible for future cliffs/walls), a deposit-overlay rule reversal (overlay placement on deposit tiles is now blocked — previous "overlay obscures deposit, RMB reveals" design was a UX trap that's been removed), and a `resource_state_modifications` parallel-architecture save field that fits cleanly alongside the existing `tile_modifications` model.
+
+### What shipped
+
+**Mining input + targeting**
+- Mine action bound to **Spacebar (held)**.
+- Hover-targeted: cursor over an adjacent deposit + Space held = mining ticks. Manhattan distance ≤ 1 from player tile (4-directional + self).
+- Mining auto-stops when target tile depletes, target moves out of range, or Space released.
+
+**Tick rate (per resource)**
+- Stone, Coal, Clay: **2/sec** (commodity / common-fuel tier).
+- Iron, Copper: **1/sec** (advanced ore tier; intentionally slower to incentivize drill upgrades in a future session).
+- Each tick drains 1 richness AND produces 1 ore.
+
+**5 new items in `Items` registry**
+- `RAW_STONE` (gray, max_stack 200) — avoids `Terrain.Overlay.STONE` namespace collision; future stone-crusher chain produces `STONE_BLOCK`.
+- `COAL` (near-black, 200) — feeds existing `FUEL_BRIQUETTE` chain directly.
+- `IRON_ORE` (rust, 100) — `_ORE` suffix anticipates `IRON_INGOT` post-smelting.
+- `COPPER_ORE` (verdigris, 100) — same pattern.
+- `CLAY` (warm orange, 200) — future brick / pottery chains.
+- Naming convention documented in `items.gd` header: `RAW_*` for collision-dodge or substantial-transformation, `*_ORE` for smelt-to-ingot, bare names for direct-use materials.
+
+**Resource state with original_richness**
+- Every patch tile now stores `{richness: int, original_richness: int}` in `GridWorld.resource_state[pos]`. `original_richness` is set once by `WorldGenerator` and stays constant for the patch's lifetime. Used by visuals for proportional alpha-fade.
+- `original_richness` is NOT persisted in save — rederived from `(world_seed, worldgen_version)` at load time via procgen rerun.
+
+**Save format v12 → v13**
+- New top-level field `resource_state_modifications: Array of [x, y, richness]` — sparse, only stores tiles whose richness has been depleted from procgen-canonical state.
+- **Architecturally parallel** to `tile_modifications`: WorldGenerator restores canonical state on load, then this overlay applies player-driven mining changes on top.
+- Fully-depleted tiles (richness=0) handled by `tile_modifications` (resource_node = NONE); their entry in `resource_state_modifications` is erased at depletion.
+- v12 saves hard-fail with `OS.alert`. **Dual reason for the bump**: (1) new field, (2) the "no overlay on deposits" rule reversal — v12 saves could have stale overlay-on-deposit tiles now considered invalid.
+
+**Tile-passability system** (`Tile.is_passable()`)
+- Generic Boolean check on every tile. Returns `false` for water, `true` for everything else. Extensible: future cliff / wall / structure-blocking variants override the same method.
+- `GridWorld.is_passable_at(pos)` defaults to passable for unmapped tiles (implicit grass).
+- `Player._move_with_passability(delta)` replaces `move_and_slide()` for tile-level movement: per-axis sliding so diagonal movement glides along water edges instead of stopping dead. Defensive: player on impassable terrain (e.g., scripted spawn) can still escape.
+
+**Deposit-overlay rule reversal**
+- Yesterday's "overlay obscures deposit, RMB-clear reveals" design was reversed. **New rule: overlay placement is BLOCKED on deposit tiles.** Player must mine the deposit out (richness→0, tile becomes grass) before paving.
+- Toast: `Mine the {ore} first.` (ore tiles) / `Can't pave over {tree}.` (tree tiles).
+- Eliminates the UX trap where a player accidentally paves over a deposit and loses track of it. Matches the stewardship theme — you mine an iron vein, you don't pave over it.
+- Mining-Q8 from the design pass became automatic under this invariant: deposits never carry overlays, so the "can't mine through overlay" check is redundant. Cleaned up.
+
+**Visual feedback during mining**
+- **Progress arc** on the targeted tile: yellow circular arc fills clockwise as the next tick approaches. Background dim ring gives the arc a "track." Drawn after buildings, before hover indicator, in `GridWorld._draw`.
+- **Proportional alpha-fade** on partially-depleted deposits: `alpha = lerp(0.35, 1.0, current/original)`. Player sees at-a-glance how much is left. Alpha-fade survives save/load (current and original both restored correctly via procgen rerun + modifications overlay).
+
+**Tile reversion on full depletion**
+- `GridWorld.deplete_resource(pos, amount)` decrements richness; on hit-zero, erases `resource_state[pos]`, mutates `tiles[pos].resource_node = NONE`, and either erases `tiles[pos]` (if base+overlay both default) or records the depleted state in `tile_modifications`. Either way the next render shows grass.
+- `resource_changed` signal fires per tile; `main.gd` forwards to `map_panel.mark_tile_dirty(pos)` so M-map / minimap re-render that region.
+
+**Inventory full handling**
+- Each mining tick: `inventory.has_room_for(item, 1)` check. Failed → toast `Inventory full.` (rate-limited to one per 30 ticks ≈ 0.5sec). No silent richness loss; the failed tick simply doesn't extract.
+
+**Tests: 17/17 passing** (was 16; one new + one updated)
+- **NEW** `test_resource_state_modifications_roundtrip` — partial-depletion via `deplete_resource`, save → clear → load → assert `richness` preserved AND `original_richness` rederived from procgen. Also exercises the full-depletion + save+load path: depleted tiles stay grass after reload (don't re-appear from procgen rehydration because `tile_modifications` overrides with `resource_node=NONE`). **THE critical test for v13.**
+- **UPDATED** `test_save_load_roundtrip` — name v12 → v13.
+- **UPDATED** `test_placement_rules` — overlay-on-deposit assertions (toast `Mine the ...`); overlay-on-tree assertions (toast `Can't pave over ...`); `Tile.is_passable_at()` assertions (water blocks, deposits/trees/grass/overlay all passable).
+
+### Decisions
+
+- **Deposits are walkable but block overlay placement.** Player walks freely over an iron deposit (it's "stuff on the ground," not an obstacle), but can't pave it (paving destroys data; mining preserves player intent). Two rules from different axes that don't conflict.
+- **Mining requires NO overlay on the target tile** — but this is now automatic since the rule above forbids overlay on deposits in the first place. The mining check is defensive rather than active.
+- **Generic `Tile.is_passable()` over hardcoded `is_water()`.** Future cliffs / walls / structure-blocking buildings will register as impassable via the same method. Cost today: zero (one new method on Tile, one new method on GridWorld). Future payoff: every blocker uses the same passability path, no `if water or cliff or wall or ...` cascades.
+- **Per-axis sliding instead of `move_and_slide()`.** CharacterBody2D's `move_and_slide()` only respects Godot's physics-collision shapes; we don't have those for tiles. Custom per-axis check + global_position update bypasses physics in favor of direct tile-passability lookup. Diagonal movement near water glides along edge — required for "Factorio feel."
+- **`original_richness` runtime-only, not persisted in save.** Recomputable from `(seed, worldgen_version)` at load time. Saving it would double the per-tile state and provide no information that procgen doesn't already produce deterministically. Same pattern as `tile_modifications` (player edits persist; procgen-canonical state is rederived).
+- **Save schema v13 with dual-reason hard-fail.** Both the new `resource_state_modifications` field AND the rule-reversal-induced state-validity issue are addressed by the same v12→v13 bump. One bump, two architectural changes documented in the migration log.
+- **Spacebar for mining (held).** Free key, conventional "primary action while moving," doesn't conflict with WASD movement. `mine` action added to project.godot.
+- **5×5 region area mining check** (Manhattan ≤ 1, including self). Player can mine the tile they're standing on or any of 4 cardinal neighbors. Diagonal mining excluded — feels weird; matches placement adjacency conventions.
+- **Tick rate per resource** (not uniform). Stone/coal/clay 2/sec, iron/copper 1/sec. Differentiates ore tiers in feel; future drill upgrades multiply rates.
+- **Proportional alpha-fade requires `original_richness`.** Absolute-threshold alternative (e.g., "fade when richness < 30") would make a 500-richness iron tile look identical at 500 and at 50 — player can't read depletion at a glance. Tracking original is one int per ore tile (~6,400 tiles target generation = ~25KB) — negligible. Reversed during design pass review.
+
+### Lessons
+
+- **Yesterday's "overlay obscures deposit" design was wrong, and the cost was low to reverse.** The UX trap (player accidentally paves over a deposit and loses track) wasn't visible in design but became obvious in playtest. Reversed mid-session — `set_overlay` now rejects, downstream code (info_panel, mining checks) became defensive but kept their structure. Lesson: when a design rule has a clean architectural inverse, reversing it is cheap; the high cost is in the player-facing UX trap if you ship the wrong rule.
+- **Headless tests catch architectural bugs that smoke tests miss.** The first run of `test_resource_state_modifications_roundtrip` failed because WorldGenerator places some patch tiles with `intra_intensity` so low that richness rounds to 0 — those tiles exist in `tiles` but are unmineable (richness 0). The smoke tests would have shown this as "alpha 0 = invisible" if alpha-fade were proportional, but the player would have struggled to ever notice. The headless test surfaced it as "first stone tile has richness 0 — can't run partial-depletion test." Worth a follow-up sweep: WorldGenerator should probably skip placing 0-richness tiles, but it's not blocking gameplay so deferred.
+- **Per-axis sliding is the right primitive for "feels like Factorio" movement.** First implementation used `move_and_slide()` and just relied on Godot's physics. That doesn't see tiles. Switching to manual per-axis passability checks took ~30 lines and immediately produced the "glide along the water edge" feel. Don't fight the physics system — bypass it for tile-grid games.
+- **Save-format parallel-architecture pattern keeps cleaner.** `tile_modifications` (player tile edits) and `resource_state_modifications` (mining-induced richness deltas) are independent fields with the same shape and load procedure. Adding the second one was almost zero design overhead — it follows the established model. Procgen rehydration as the canonical model continues to pay off three sessions in.
+- **"Mine the deposit first" toast is enough teaching, no tutorial needed.** Reversed-design discovery was instant for the user: try to paint, see toast, RMB or mine first, retry succeeds. Discovery learning + fast feedback. No special tutorial state required.
+
+### Migration
+
+Save format v12 → v13. **All existing v12 saves hard-fail on load** with `OS.alert` per existing schema-bump policy. Player must delete `%APPDATA%\Godot\app_userdata\Stewardship\save_slot_1.json` and start fresh. **Dual reason** for the bump (documented in code): (1) new `resource_state_modifications` field, (2) the "no overlay on deposits" rule reversal would leave v12 saves with possibly-invalid overlay-on-deposit tiles.
+
+### Roadmap implications
+
+- **Drill tiers** are the natural next session. Architecture supports them: `MINING_TICK_INTERVAL` is a per-resource dict (drills could multiply); `deplete_resource(pos, amount)` already takes an amount parameter (drills extract more per tick); resource_node + richness model is already in place. Just need a new building type with extraction logic.
+- **Soil exhaustion** would extend the `resource_state` model to non-ore tiles (e.g., farmable grass tiles get a "fertility" field that decreases as crops are planted/harvested, regenerates over time). Same procgen + modifications save pattern. Likely a separate session.
+- **Cliffs / walls / structure-blocking** for movement: `Tile.is_passable()` is the hook. New `Tile.cliff: bool` field or new `Terrain.Base.CLIFF` enum value, override `is_passable()` accordingly. Player movement code unchanged.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** — still deferred, unchanged from worldgen-stage1.
+- **Cloth chain `prefer_dir` polish** — still deferred from Session E.
+- **Map polish** — zoom, markers, click-to-pan-from-minimap (carried from session-explore-map).
+- **Patch-edge zero-richness tiles** — WorldGenerator places some tiles with richness rounded to 0 (very low intra-patch intensity). Not blocking gameplay but visually inconsistent with the "alpha-fade indicates depletion" rule (these tiles are alpha-0 from generation). Could fix by adding a richness floor in `_place_patch` or skipping the tile placement entirely. Defer until it bites.
+
+---
+
 ## Exploration UI — M-key fullscreen map + minimap + fog-of-war
 
 **Date:** 2026-05-03

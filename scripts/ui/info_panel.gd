@@ -78,8 +78,11 @@ func _process(_delta: float) -> void:
 				clear_target()
 				return
 			var t: Tile = world.tiles[target_anchor]
-			if t.resource_node == ResourceNodes.Type.NONE or t.has_overlay():
-				# Resource gone or obscured by player paint — close.
+			if t.resource_node == ResourceNodes.Type.NONE:
+				# Resource gone (mined out / removed) — close.
+				# Note: overlay-obscures-deposit case can't happen under
+				# the "no overlay on deposits" invariant, but the
+				# resource_node==NONE check covers the post-mining revert.
 				clear_target()
 				return
 	queue_redraw()

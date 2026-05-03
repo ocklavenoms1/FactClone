@@ -6,6 +6,26 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Tile passability system (post-mining-manual)
+
+**Status:** shipped at `session-mining-manual`. `Tile.is_passable() -> bool` is the generic blocker check. Today only water blocks; player movement uses per-axis sliding via `Player._move_with_passability(delta)`.
+
+**Foundation for future blocker types:**
+- **Cliffs / elevation barriers** — a future `Tile.cliff: bool` field or a `Terrain.Base.CLIFF` enum value with `is_passable() = false`. Player can't walk off a cliff edge; future ladder/ramp buildings allow traversal.
+- **Walls** — placeable building or terrain that blocks movement. `tile.has_wall: bool` field, `is_passable()` returns false. Player walks around. Doors are walls with a `passable_when_open` flag.
+- **Structures** — large buildings could mark their footprint cells as impassable so player walks around them rather than through. Today buildings don't block movement (player walks through them visually, which is a small UX wart).
+
+**Why generic `is_passable()` over specific `is_water()`:**
+- Future blocker types add their own logic to `Tile.is_passable()` rather than touching player movement code
+- Per-axis sliding logic in `Player._move_with_passability` doesn't care WHY a tile blocks; works for any combination of blockers
+- New blocker = override one method, no other code changes needed
+
+**Don't pre-build:**
+- Wall buildings, cliff terrain, ladder mechanics — wait for them to be needed in actual gameplay before scaffolding
+- Save format implications — adding fields to Tile is a schema bump; do it when the feature lands, not pre-emptively
+
+---
+
 ## Map polish (post-explore-map session)
 
 **Status:** the M-key fullscreen map + minimap shipped at `session-explore-map`. Three-state visibility (unrevealed / fog / active), drag-pan, region-level fog tracking, save persistence — all live. What remains is polish.
@@ -129,20 +149,35 @@ R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`)
 
 ---
 
-## Resource mining: stone / ore / wood become world-gen consumables (Stage 5)
+## Resource mining roadmap (manual tier shipped, drill tiers next)
 
-**Status update:** the WORLD-GEN half of this roadmap shipped at `session-worldgen-stage1`. Deposits and trees are placed by `WorldGenerator`, with richness stored in `GridWorld.resource_state[pos]["richness"]`. Trees are renewable, ore is finite. What remains is the MINING MECHANICS half — buildings that consume the richness.
+**Status update:** the **MANUAL TIER** shipped at `session-mining-manual`. Player walks adjacent to a deposit, holds Space, ore enters inventory, deposit depletes, tile reverts to grass. Save v13 persists partial-depletion via `resource_state_modifications` (parallel architecture to `tile_modifications`). 5 ore items in `Items` (RAW_STONE, COAL, IRON_ORE, COPPER_ORE, CLAY).
 
-**Goal:** stop letting the player paint stone for free. Stone (and ore, wood) become finite resources extracted from world-gen deposits via mining buildings, processed into raw materials, and then placed.
+**What remains: drill tiers + processing chains.**
 
-**Target session:** Stage 5 of the worldgen roadmap (after biomes Stage 4). Earlier than originally planned ("Sessions G/H") because worldgen Stage 1 went deeper than expected.
+**Goal:** stop letting the player paint stone for free, AND give the player a reason to automate mining beyond manual extraction. Stone (and ore, wood) become finite resources extracted from world-gen deposits, automated via drills, processed into raw materials, and then placed.
 
-**Hooks already in place (as of session-worldgen-stage1):**
+**Drill tier (next likely mining session):** a placeable building (Drill / Quarry / etc.) that mines deposits automatically without player input. Architecture supports this trivially:
+- `MINING_TICK_INTERVAL` is a per-resource dict on `main.gd` — drills could multiply
+- `GridWorld.deplete_resource(pos, amount)` already takes an amount parameter — drills extract more per tick
+- Resource_node + richness model is in place
+- Just need a new Building type with extraction logic in `Buildings.tick_one`
 
-- `Tile.resource_node: int` populated with `ResourceNodes.Type` (NONE / TREE / STONE / COAL / IRON / COPPER / CLAY).
-- `GridWorld.resource_state[pos]: Dictionary` — sparse per-tile richness/growth. Mining drains `richness`; tree harvest sets `growth: 0.0` and starts a regrowth timer.
-- `ResourceNodes.is_renewable(t)` and `is_ore(t)` already distinguish behavior.
-- Save format v11 — `resource_state` is regenerated from seed; if Stage 5 needs to persist depleted richness, that's a save shape change (resource_state additions to `tile_modifications` or a new field).
+Manual mining stays as the fallback / early-game tool. Drill upgrades feel like meaningful automation gain (10-20× faster, no manual button-holding).
+
+**Hooks already in place (as of session-mining-manual):**
+
+- `ResourceNodes.is_renewable(t)` and `is_ore(t)` distinguish behavior.
+- `GridWorld.deplete_resource(pos, amount)` is the canonical extraction primitive — used by manual mining today; will be used by drills tomorrow.
+- `resource_state[pos] = {richness, original_richness}` — original_richness is rederived from procgen on load (not persisted).
+- Save format v13 — `resource_state_modifications` already persists partial-depletion deltas. Drill mining uses the same path.
+
+**Stage 5 (post-drill) processing chains** — still the original plan:
+- `stone_crusher`: `raw_stone × N` → `stone_block × 1` (the existing stone overlay is renamed `STONE_BLOCK_TILE` or similar; the consumable item is `stone_block`).
+- `smelter`: `iron_ore + fuel_briquette` → `iron_ingot`.
+- `sawmill`: `raw_wood` → `planks`. (Tree harvesting also a future-session mechanic.)
+
+**Stone overlay becomes a consumable** at processing-chain ship: hotbar's "Stone" slot stops being a free brush. Painting consumes 1 `stone_block` from player inventory per tile. Belts, harvesters, mills, etc. that currently require Stone overlay continue to work — the overlay still exists, you just have to manufacture it now.
 
 **Design sketch:**
 

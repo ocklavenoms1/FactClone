@@ -34,7 +34,15 @@ var world_seed: int = 0
 # go through helpers that ALSO update `tile_modifications` so saves stay correct.
 var tiles: Dictionary = {}            # Vector2i -> Tile (post-rehydration view)
 var tile_modifications: Dictionary = {}  # Vector2i -> Tile (player edits only)
-var resource_state: Dictionary = {}   # Vector2i -> Dictionary (richness/growth state, sparse)
+var resource_state: Dictionary = {}   # Vector2i -> Dictionary (richness/original_richness/growth, sparse)
+
+# resource_state_modifications: Vector2i -> int (current richness).
+# Sparse delta from procgen-canonical resource_state, persisted in v13+ saves.
+# Parallel architecture to tile_modifications: WorldGenerator.generate()
+# repopulates resource_state from seed at load; resource_state_modifications
+# overlays player-driven mining changes on top. original_richness is NOT
+# persisted (rederived from procgen).
+var resource_state_modifications: Dictionary = {}
 var buildings: Dictionary = {}        # Vector2i (anchor) -> Building
 var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor)
 
@@ -115,18 +123,41 @@ func overlay_at(pos: Vector2i) -> int:
 func is_water_at(pos: Vector2i) -> bool:
 	return base_at(pos) == Terrain.Base.WATER
 
+## Player passability check at a tile coord. Default-grass tiles (no entry
+## in `tiles`) are passable; water tiles are not. Generic — extensible for
+## future obstacle types via Tile.is_passable().
+func is_passable_at(pos: Vector2i) -> bool:
+	if not tiles.has(pos):
+		return true   # implicit grass — passable
+	return tiles[pos].is_passable()
+
 # ---------- placement / removal ----------
 
 ## Paint an overlay at pos. Returns true on success.
 ## Sets last_place_error on failure.
 ##
-## Player-overlay writes preserve any procgen resource_node — the overlay
-## visually obscures the deposit but the deposit data persists. RMB-clear
-## later reveals it again. Matches "modifications layer over procgen" model.
+## RULE (locked in mining-manual session, reversing yesterday's design):
+## Overlays cannot be placed on tiles with a resource_node. Player must
+## mine the deposit out (richness → 0, tile reverts to grass) before
+## paving. Reasoning: prevents the UX trap where a player accidentally
+## paves over a deposit and loses track of it. Matches the stewardship
+## theme — you mine an iron vein, you don't pave over it.
+##
+## (Trees are also resource_nodes; they can't be paved over either. Tree
+## harvesting is a future-session mechanic; for now, players can't pave
+## tree tiles. They can paint around them.)
 func set_overlay(pos: Vector2i, overlay: int) -> bool:
 	last_place_error = ""
 	if has_building_at(pos):
 		last_place_error = "Can't paint terrain under a building"
+		return false
+	# Block overlay placement on deposit / tree tiles.
+	if tiles.has(pos) and tiles[pos].resource_node != ResourceNodes.Type.NONE:
+		var rname: String = ResourceNodes.name_of(tiles[pos].resource_node)
+		if ResourceNodes.is_ore(tiles[pos].resource_node):
+			last_place_error = "Mine the %s first." % rname.to_lower()
+		else:
+			last_place_error = "Can't pave over %s." % rname.to_lower()
 		return false
 	var base: int = base_at(pos)
 	var current_overlay: int = overlay_at(pos)
@@ -138,13 +169,13 @@ func set_overlay(pos: Vector2i, overlay: int) -> bool:
 		return false
 	if current_overlay == overlay:
 		return true  # idempotent
-	# Mutate or insert. Preserve resource_node from current tile.
-	var current_resource: int = ResourceNodes.DEFAULT
+	# Mutate or insert. resource_node is GUARANTEED to be NONE here (early
+	# return above blocks any deposit/tree tile), so the new tile carries
+	# Tile.resource_node = NONE.
 	if tiles.has(pos):
-		current_resource = tiles[pos].resource_node
 		tiles[pos].overlay = overlay
 	else:
-		tiles[pos] = Tile.new(Terrain.DEFAULT_BASE, overlay, current_resource)
+		tiles[pos] = Tile.new(Terrain.DEFAULT_BASE, overlay, ResourceNodes.DEFAULT)
 	# Record as modification so save/load preserves the player's edit.
 	tile_modifications[pos] = Tile.new(tiles[pos].base, tiles[pos].overlay, tiles[pos].resource_node)
 	return true
@@ -154,8 +185,10 @@ func set_overlay(pos: Vector2i, overlay: int) -> bool:
 ##   - overlay present:  clear overlay back to NONE (always allowed; player placed it)
 ##   - bare base (grass or water): silent no-op (nothing to remove)
 ##
-## Clearing the overlay preserves base + resource_node (the player only
-## removed THEIR overlay; procgen-canonical content underneath is restored).
+## Clearing the overlay preserves base + resource_node. With the
+## "no overlay on deposits" rule, resource_node is always NONE on tiles
+## that have an overlay — but the preservation path stays defensive
+## (cheap, future-proof if rule changes).
 func clear_tile(pos: Vector2i) -> bool:
 	last_remove_error = ""
 	if has_building_at(pos):
@@ -449,6 +482,94 @@ func initial_reveal() -> void:
 				continue
 			region_visibility[r] = 1   # fog (later upgraded by vision update)
 
+# ---------- resource depletion (manual mining) ----------
+
+# Signal listeners (e.g. main.gd → map_panel) hook in for dirty tracking.
+# Emitted whenever a tile's resource state changes — partial depletion or
+# full revert. Position is the tile that changed; receiver typically marks
+# its enclosing region dirty in the map texture.
+signal resource_changed(pos: Vector2i)
+
+## Decrement the richness at `pos` by `amount`. Handles full depletion
+## (richness reaches 0 → tile.resource_node = NONE, tile_modifications
+## records the revert, resource_state[pos] erased).
+##
+## No-op if pos has no resource_state entry (defensive against double-deplete).
+##
+## Returns the amount actually extracted (clamped if richness < amount).
+func deplete_resource(pos: Vector2i, amount: int) -> int:
+	if not resource_state.has(pos):
+		return 0
+	var current: int = int(resource_state[pos].get("richness", 0))
+	var extracted: int = min(amount, current)
+	var new_richness: int = current - extracted
+	if new_richness > 0:
+		resource_state[pos]["richness"] = new_richness
+		resource_state_modifications[pos] = new_richness
+	else:
+		# Tile fully depleted — resource_node reverts to NONE, tile becomes
+		# default if no overlay. Tile_modifications records the change so
+		# save/load preserves the post-depletion state.
+		resource_state.erase(pos)
+		resource_state_modifications.erase(pos)
+		var t: Tile = tiles.get(pos, null)
+		if t != null:
+			t.resource_node = ResourceNodes.Type.NONE
+			# If the tile collapses to pure default (grass / no overlay /
+			# no resource), erase from tiles AND record an explicit erase
+			# in tile_modifications by storing the default value.
+			if t.base == Terrain.Base.GRASS and t.overlay == Terrain.Overlay.NONE:
+				tile_modifications[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.NONE)
+				tiles.erase(pos)
+			else:
+				# Has water or overlay — keep tile entry, just clear resource_node.
+				tile_modifications[pos] = Tile.new(t.base, t.overlay, ResourceNodes.Type.NONE)
+	emit_signal("resource_changed", pos)
+	return extracted
+
+## Read the current richness at a tile (0 if no resource).
+func richness_at(pos: Vector2i) -> int:
+	return int(resource_state.get(pos, {}).get("richness", 0))
+
+## Read the canonical original (procgen) richness at a tile (0 if no resource).
+## Used by visuals for proportional depletion fade.
+func original_richness_at(pos: Vector2i) -> int:
+	return int(resource_state.get(pos, {}).get("original_richness", 0))
+
+# ---------- mining indicator (visual feedback while player mines a tile) ----------
+
+const MINING_INDICATOR_INVALID: Vector2i = Vector2i(2147483647, 2147483647)
+var mining_indicator_pos: Vector2i = MINING_INDICATOR_INVALID
+var mining_indicator_progress: float = 0.0   # 0..1, where 1 = next tick imminent
+
+func set_mining_indicator(pos: Vector2i, progress: float) -> void:
+	mining_indicator_pos = pos
+	mining_indicator_progress = clamp(progress, 0.0, 1.0)
+
+func clear_mining_indicator() -> void:
+	mining_indicator_pos = MINING_INDICATOR_INVALID
+	mining_indicator_progress = 0.0
+
+## Draw the mining progress arc on the currently-targeted tile.
+## Filled clockwise from 12 o'clock as progress approaches 1.0 (next tick).
+const MINING_ARC_RADIUS_RATIO: float = 0.42   # tile-radius factor
+const MINING_ARC_WIDTH: float = 3.0
+const MINING_ARC_COLOR: Color = Color(1.0, 0.92, 0.4, 0.95)
+const MINING_ARC_BG_COLOR: Color = Color(0.0, 0.0, 0.0, 0.4)
+
+func _draw_mining_indicator() -> void:
+	var pos: Vector2i = mining_indicator_pos
+	var center: Vector2 = Vector2(pos.x * TILE_SIZE + TILE_SIZE * 0.5, pos.y * TILE_SIZE + TILE_SIZE * 0.5)
+	var radius: float = TILE_SIZE * MINING_ARC_RADIUS_RATIO
+	# Background ring (full circle, dim) — gives the arc a "track" to fill.
+	draw_arc(center, radius, 0.0, TAU, 32, MINING_ARC_BG_COLOR, MINING_ARC_WIDTH)
+	# Foreground arc — bright yellow, fills based on progress (0..1) clockwise
+	# from 12 o'clock. Godot's draw_arc takes radians; -PI/2 = 12 o'clock.
+	var start_angle: float = -PI * 0.5
+	var end_angle: float = start_angle + TAU * mining_indicator_progress
+	if mining_indicator_progress > 0.0:
+		draw_arc(center, radius, start_angle, end_angle, max(8, int(32.0 * mining_indicator_progress)), MINING_ARC_COLOR, MINING_ARC_WIDTH)
+
 # ---------- rendering ----------
 
 func _process(_delta: float) -> void:
@@ -478,18 +599,39 @@ func screen_px(world_px: float) -> float:
 ##     centered, canopy slightly offset upward (visual reading: tree base at
 ##     center, foliage above). Per-tree color jitter (deterministic from
 ##     position) gives a forest organic variation.
-func _draw_resource(resource_type: int, tile_rect: Rect2) -> void:
+func _draw_resource(resource_type: int, tile_rect: Rect2, tile_pos: Vector2i) -> void:
 	if resource_type == ResourceNodes.Type.TREE:
 		_draw_tree(tile_rect)
 		return
-	# Ore deposit: inset filled rect.
+	# Ore deposit: inset filled rect with proportional alpha-fade based on
+	# (current richness / original richness). At full richness: full alpha.
+	# Drained to 0 (immediately before erase): fades to MIN_DEPOSIT_ALPHA.
+	# Player can read at-a-glance how much is left without Q-inspecting.
+	var alpha: float = _depletion_alpha_at(tile_pos)
 	var inset: float = TILE_SIZE * 0.10
 	var inner: Rect2 = Rect2(tile_rect.position + Vector2(inset, inset), tile_rect.size - Vector2(inset * 2, inset * 2))
-	var color: Color = ResourceNodes.color_of(resource_type)
+	var base: Color = ResourceNodes.color_of(resource_type)
+	var color: Color = Color(base.r, base.g, base.b, alpha)
 	draw_rect(inner, color, true)
-	# Subtle darker outline for definition.
-	var outline: Color = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, 1.0)
+	# Subtle darker outline for definition. Outline alpha matches fill alpha.
+	var outline: Color = Color(base.r * 0.6, base.g * 0.6, base.b * 0.6, alpha)
 	draw_rect(inner, outline, false, 1.0)
+
+const MIN_DEPOSIT_ALPHA: float = 0.35
+const FULL_DEPOSIT_ALPHA: float = 1.0
+
+## Compute proportional alpha for a deposit tile based on
+## current_richness / original_richness. Defensive: returns full alpha if
+## original is missing (e.g., loaded from older save without the field).
+func _depletion_alpha_at(pos: Vector2i) -> float:
+	if not resource_state.has(pos):
+		return FULL_DEPOSIT_ALPHA
+	var current: int = int(resource_state[pos].get("richness", 0))
+	var original: int = int(resource_state[pos].get("original_richness", 0))
+	if original <= 0:
+		return FULL_DEPOSIT_ALPHA
+	var ratio: float = float(current) / float(original)
+	return lerp(MIN_DEPOSIT_ALPHA, FULL_DEPOSIT_ALPHA, clamp(ratio, 0.0, 1.0))
 
 ## Tree rendering: trunk + canopy. Position-derived jitter keeps each tree
 ## slightly distinct without a per-tree resource_state entry.
@@ -553,10 +695,13 @@ func _draw() -> void:
 		# Overlay layer: draw if present.
 		if t.overlay != Terrain.Overlay.NONE:
 			draw_rect(rect, Terrain.overlay_color(t.overlay), true)
-		# Resource layer: draw deposit/tree if no overlay obscures it.
-		# (Water tiles never have resource_node; tested via base check too.)
+		# Resource layer: draw deposit/tree.
+		# Under the "no overlay on deposits" invariant, t.overlay is always
+		# NONE when t.resource_node != NONE — but the defensive check stays
+		# (cheap; future-proof if rule changes).
+		# (Water tiles never have resource_node; defensive base check too.)
 		if t.overlay == Terrain.Overlay.NONE and t.resource_node != ResourceNodes.Type.NONE and t.base != Terrain.Base.WATER:
-			_draw_resource(t.resource_node, rect)
+			_draw_resource(t.resource_node, rect, tp)
 
 	# Grid lines — width in world units so the line scales with the tile.
 	# At low zoom this fades the line slightly (sub-pixel anti-aliased),
@@ -581,6 +726,12 @@ func _draw() -> void:
 		if anchor.y + fp.y - 1 < min_tile.y or anchor.y > max_tile.y:
 			continue
 		Buildings.draw_one(b, self, tile_to_world_origin(anchor), TILE_SIZE)
+
+	# Mining progress arc — yellow arc on the targeted tile, fills 0 → TAU
+	# clockwise as the next tick approaches. Visual feedback for "this tile
+	# is being mined."
+	if mining_indicator_pos != MINING_INDICATOR_INVALID:
+		_draw_mining_indicator()
 
 	# Hover indicator.
 	if show_hover:

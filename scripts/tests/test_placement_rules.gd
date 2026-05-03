@@ -86,6 +86,32 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, not world.place_building(Buildings.Type.PLANTER, Vector2i(0, 0)), "planter on water should fail")
 	_check(failures, not world.place_building(Buildings.Type.PLANTER, Vector2i(99, 99)), "planter on bare grass should fail")
 
+	# --- Overlay placement on deposits / trees: BLOCKED (mining-manual session rule) ---
+	# Player must mine the deposit (or wait for tree harvesting in a future
+	# session) before paving. Toast: "Mine the X first." / "Can't pave over X."
+	world.tiles[Vector2i(10, 10)] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.IRON)
+	ok = world.set_overlay(Vector2i(10, 10), Terrain.Overlay.STONE)
+	_check(failures, not ok, "set_overlay should fail on iron deposit (mine the deposit first)")
+	_check(failures, world.last_place_error.find("Mine") != -1, "last_place_error should reference 'Mine': got '%s'" % world.last_place_error)
+	_check(failures, world.tiles[Vector2i(10, 10)].overlay == Terrain.Overlay.NONE, "iron tile overlay must remain NONE after rejected paint")
+	_check(failures, world.tiles[Vector2i(10, 10)].resource_node == ResourceNodes.Type.IRON, "iron tile resource_node must remain IRON after rejected paint")
+
+	# Tree tiles also block overlay.
+	world.tiles[Vector2i(11, 11)] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
+	ok = world.set_overlay(Vector2i(11, 11), Terrain.Overlay.PATH)
+	_check(failures, not ok, "set_overlay should fail on tree tile (can't pave over tree)")
+	_check(failures, world.last_place_error.find("pave") != -1, "last_place_error should reference 'pave' for tree: got '%s'" % world.last_place_error)
+
+	# --- Tile passability (water blocks player movement) ---
+	# Water tiles: not passable. Default grass / overlays / deposits / trees: passable.
+	_check(failures, not world.is_passable_at(Vector2i(0, 0)), "water tile must NOT be passable")
+	_check(failures, world.is_passable_at(Vector2i(99, 99)), "default grass (no entry) must be passable")
+	_check(failures, world.is_passable_at(Vector2i(10, 10)), "iron deposit tile must be passable (deposits don't block)")
+	_check(failures, world.is_passable_at(Vector2i(11, 11)), "tree tile must be passable (trees don't block)")
+	# Stone overlay (which we placed at 1, 0 earlier and then RMB-cleared, but place a fresh one for this check).
+	world.set_overlay(Vector2i(50, 50), Terrain.Overlay.STONE)
+	_check(failures, world.is_passable_at(Vector2i(50, 50)), "stone overlay tile must be passable")
+
 	# Cleanup.
 	for w in [world]:
 		if TickSystem.tick.is_connected(w._on_tick):
