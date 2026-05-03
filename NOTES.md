@@ -6,6 +6,48 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Exploration UI: M-key map + fog-of-war (NEXT SESSION)
+
+**Status:** designed but not implemented. Scoped as the immediate post-worldgen-Stage-1 session. Worldgen Stage 1 produces a 512×512 procedural world with discrete features (forests, ore patches, lakes) that are interesting to discover; the M-key map is the navigation/awareness layer that makes the world feel like a place instead of just a screen.
+
+**Design starting points (captured during worldgen-stage1 session):**
+
+- **M opens modal fullscreen map view.** Like inventory grid but full-screen scale, lower zoom level (whole-world overview).
+- **Fog-of-war.** Track explored regions in save. Within explored regions, map shows terrain (water, forest, plains), resource patches (colored dots per type), and buildings the player has placed. Outside explored regions, render as fog (black with maybe a subtle gradient at the edge to suggest "more world out there").
+- **Region-level fog, not tile-level.** Player explores a 32×32 region by walking near it. Region marked explored = full content visible on map. Cheaper to track and more legible than per-tile fog.
+- **Esc closes the map.** Same modal pattern as inventory grid.
+- **Save format implication:** new top-level field `explored_regions: Array[Vector2i]` (or sparse Dictionary). v11 → v12 schema bump.
+- **Future hook:** radar buildings that extend exploration radius. Build a radar tower → reveals N×N regions around it. Late-game megabase will want this for managing scattered outposts.
+
+**Architecture starting points:**
+
+- Map renderer is a separate Control overlay, not a separate scene. Reads from GridWorld via the same dict access patterns the main render uses.
+- Render strategy: rebuild the map texture once on open (or when explored set changes) into a `Texture2D`, then draw at low zoom. Don't re-walk 256K tiles per frame.
+- Resource patches on map: aggregate per-region (e.g., "this 32×32 region has 60 stone tiles" → render one stone-colored patch icon). Saves render cost and reads cleaner at map zoom.
+- Player position indicator: small arrow showing facing direction. Updates per frame.
+
+**Out of scope for the M-key session:**
+
+- Map markers / waypoints (player annotations) — defer to a v2 polish pass
+- Radar buildings — they're a hook the M-key session designs for, not an immediate ship
+- Pan/zoom on the map — fixed full-world view first; pan/zoom if the 512×512 view is uncomfortable
+
+**Hooks already present:**
+
+- Worldgen produces deterministic content per (seed, position) — map can either query GridWorld directly OR re-run WorldGenerator for unrendered chunks. For Stage 1's finite world, query is enough.
+- `world_seed` persists in save → map state can ignore seed (same world, same map structure).
+
+**Don't pre-build:**
+
+- Radar building's extraction logic — this is a building entry that the worldgen-rendering session will need to think about, but designed in the M-key session.
+- Per-tile fog — the region-level grain is the right abstraction; tile-level is overkill for navigation.
+
+**Until then:**
+
+- Player relies on memory + direct walking exploration. Adequate for Stage 1's 512×512 world during initial playtest, painful for sustained play.
+
+---
+
 ## Tooling: godot-mcp (installed, capability honestly documented)
 
 - **Repo:** [satelliteoflove/godot-mcp](https://github.com/satelliteoflove/godot-mcp), addon version **2.17.0**.
@@ -113,17 +155,20 @@ R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`)
 
 ---
 
-## Resource mining: stone / ore / wood become world-gen consumables
+## Resource mining: stone / ore / wood become world-gen consumables (Stage 5)
 
-**Goal:** stop letting the player paint stone for free. Stone (and eventually ore, wood) become finite resources mined from world-gen deposits, processed into raw materials, and then placed.
+**Status update:** the WORLD-GEN half of this roadmap shipped at `session-worldgen-stage1`. Deposits and trees are placed by `WorldGenerator`, with richness stored in `GridWorld.resource_state[pos]["richness"]`. Trees are renewable, ore is finite. What remains is the MINING MECHANICS half — buildings that consume the richness.
 
-**Target session:** G or H. Sessions C–F focus on chains and content; this is a mid-tier complexity feature that fits after the chain content is in place but before the world becomes "complete."
+**Goal:** stop letting the player paint stone for free. Stone (and ore, wood) become finite resources extracted from world-gen deposits via mining buildings, processed into raw materials, and then placed.
 
-**Hooks already present (as of post-Session-B):**
+**Target session:** Stage 5 of the worldgen roadmap (after biomes Stage 4). Earlier than originally planned ("Sessions G/H") because worldgen Stage 1 went deeper than expected.
 
-- `Tile.resource_node: int` — every tile carries a resource-node slot. World-gen will populate it with `ResourceNodes.Type.STONE_DEPOSIT` / `ORE_DEPOSIT` / `WOOD_GROVE` (currently only `NONE` exists).
-- `ResourceNodes` registry — `scripts/world/resource_nodes.gd`. Empty enum slots ready for new types.
-- Save schema v8 — tile entry already includes `resource_node`. No more save bumps needed when mining lands.
+**Hooks already in place (as of session-worldgen-stage1):**
+
+- `Tile.resource_node: int` populated with `ResourceNodes.Type` (NONE / TREE / STONE / COAL / IRON / COPPER / CLAY).
+- `GridWorld.resource_state[pos]: Dictionary` — sparse per-tile richness/growth. Mining drains `richness`; tree harvest sets `growth: 0.0` and starts a regrowth timer.
+- `ResourceNodes.is_renewable(t)` and `is_ore(t)` already distinguish behavior.
+- Save format v11 — `resource_state` is regenerated from seed; if Stage 5 needs to persist depleted richness, that's a save shape change (resource_state additions to `tile_modifications` or a new field).
 
 **Design sketch:**
 

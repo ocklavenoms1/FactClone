@@ -84,12 +84,18 @@ func _ready() -> void:
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
 		if result.success:
 			_apply_loaded_progression(result.player_progression)
-			_show_toast("World loaded from save")
+			_show_toast("World loaded from save (seed %d)" % grid_world.world_seed)
 		else:
 			_show_toast(result.error_message if result.error_message != "" else "Save file present but failed to load")
 	else:
-		grid_world.generate_default_world()
-		_show_toast("1-9 build · Tab category · R rotate · E drain · Q inspect · Esc close · F5/F9 save/load · B consume bag")
+		# Fresh game: random seed, then procedurally generate the world via WorldGenerator.
+		# Save persists the seed; loads regenerate the world from it (procgen rehydration).
+		grid_world.world_seed = randi()
+		var gen_start_msec: int = Time.get_ticks_msec()
+		var generator: WorldGenerator = WorldGenerator.new()
+		generator.generate(grid_world, grid_world.world_seed)
+		var gen_elapsed: int = Time.get_ticks_msec() - gen_start_msec
+		_show_toast("New world (seed %d, gen %dms) · 1-9 build · Tab · R rotate · F5 save · B bag" % [grid_world.world_seed, gen_elapsed])
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
 ## defaults that main.gd's `player_progression` was initialized with — this
@@ -292,11 +298,19 @@ func _rate_limited_fail_toast(msg: String) -> void:
 		_last_failed_place_tick = TickSystem.current_tick
 
 func _try_inspect(hover_tile: Vector2i) -> void:
+	# Building takes priority — the info panel is primarily a building debugger.
 	if grid_world.has_building_at(hover_tile):
 		var b: Building = grid_world.building_at(hover_tile)
 		info_panel.set_target(b, grid_world)
-	else:
-		info_panel.clear_target()
+		return
+	# Fall through to resource inspect: tile has resource_node, no overlay
+	# obscuring it (matches the visual rule from GridWorld._draw_resource).
+	if grid_world.tiles.has(hover_tile):
+		var t: Tile = grid_world.tiles[hover_tile]
+		if t.resource_node != ResourceNodes.Type.NONE and not t.has_overlay():
+			info_panel.set_resource_target(hover_tile, grid_world)
+			return
+	info_panel.clear_target()
 
 func _try_interact(player_tile: Vector2i) -> void:
 	var b: Building = grid_world.find_adjacent_drainable(player_tile)

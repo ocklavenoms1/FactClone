@@ -32,8 +32,25 @@ extends RefCounted
 ##            progression dict is the explicit counter and the future home
 ##            for additional progression state (score/value, achievements,
 ##            etc.). v9 saves don't have this field — hard-fail.
+##  v10 → v11: WORLDGEN STAGE 1 — procgen rehydration model.
+##            New top-level fields:
+##              - `world_seed: int` — the seed used to generate this world
+##              - `worldgen_version: int` — must match WorldGenerator.VERSION
+##                or load hard-fails (procgen logic changes invalidate saves)
+##            Tile data shape change:
+##              - `tiles` → `tile_modifications`. Stores ONLY tiles that
+##                differ from procgen-canonical state. Saves are dramatically
+##                smaller (KB instead of MB) since most world content is
+##                regenerated from the seed.
+##            Load procedure changes:
+##              - 1. Read seed + worldgen_version (hard-fail mismatch)
+##              - 2. Run WorldGenerator.generate(world, seed) to rebuild canon
+##              - 3. Apply tile_modifications on top
+##              - 4. Restore buildings / player / progression as before
+##            v10 saves don't have a seed and use the hardcoded-lake world.
+##            They cannot be safely upgraded — hard-fail.
 
-const SAVE_VERSION: int = 10
+const SAVE_VERSION: int = 11
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -46,11 +63,13 @@ static var save_path: String = DEFAULT_SAVE_PATH
 ## progression don't break the signature; the caller stays in charge of
 ## defaulting missing keys on the load side.
 static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory, player_progression: Dictionary = {}) -> bool:
-	var tiles_data: Array = []
-	for tile_key in grid_world.tiles:
+	# v11: serialize ONLY player-modified tiles. The world is reconstructed
+	# from world_seed + worldgen_version on load.
+	var modifications_data: Array = []
+	for tile_key in grid_world.tile_modifications:
 		var pos: Vector2i = tile_key
-		var t: Tile = grid_world.tiles[pos]
-		tiles_data.append([pos.x, pos.y, t.base, t.overlay, t.resource_node])
+		var t: Tile = grid_world.tile_modifications[pos]
+		modifications_data.append([pos.x, pos.y, t.base, t.overlay, t.resource_node])
 
 	var buildings_data: Array = []
 	for anchor_key in grid_world.buildings:
@@ -59,9 +78,11 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
+		"world_seed": grid_world.world_seed,
+		"worldgen_version": WorldGenerator.VERSION,
 		"player": [player.global_position.x, player.global_position.y],
 		"tick": TickSystem.current_tick,
-		"tiles": tiles_data,
+		"tile_modifications": modifications_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
 		"player_progression": player_progression,
@@ -114,20 +135,45 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		OS.alert(msg, "Save incompatible")
 		return result
 
+	# v11: also hard-fail on worldgen_version mismatch. Any change to procgen
+	# logic produces a different world from the same seed — applying old
+	# modifications onto a different terrain would silently corrupt the save.
+	var saved_worldgen_version: int = int(data.get("worldgen_version", 0))
+	if saved_worldgen_version != WorldGenerator.VERSION:
+		var native_path: String = ProjectSettings.globalize_path(save_path)
+		if OS.get_name() == "Windows":
+			native_path = native_path.replace("/", "\\")
+		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, native_path]
+		result.error_message = "Worldgen version mismatch (v%d vs v%d) — see dialog." % [saved_worldgen_version, WorldGenerator.VERSION]
+		push_error(msg)
+		OS.alert(msg, "Save incompatible")
+		return result
+
 	var player_pos: Array = data.get("player", [0, 0])
 	player.global_position = Vector2(float(player_pos[0]), float(player_pos[1]))
 
-	grid_world.tiles.clear()
 	grid_world.buildings.clear()
 	grid_world.occupied.clear()
 	TickSystem.current_tick = int(data.get("tick", 0))
 
-	for entry in data.get("tiles", []):
+	# v11 procgen rehydration: regenerate the canonical world from the seed,
+	# then apply player modifications on top.
+	var saved_seed: int = int(data.get("world_seed", 0))
+	var generator := WorldGenerator.new()
+	generator.generate(grid_world, saved_seed)
+
+	# Apply player modifications. Each entry overwrites the canonical tile
+	# at that position — represents what the player did to that tile.
+	# Also sync resource_state: if a modification cleared the resource_node,
+	# erase any stale richness state; otherwise leave (richness regenerated).
+	for entry in data.get("tile_modifications", []):
 		var pos := Vector2i(int(entry[0]), int(entry[1]))
-		# entry[4] = resource_node (added v8). Use .get-style fallback so a
-		# malformed v8 file with truncated entries still loads the base+overlay.
 		var rnode: int = int(entry[4]) if entry.size() > 4 else ResourceNodes.DEFAULT
-		grid_world.tiles[pos] = Tile.new(int(entry[2]), int(entry[3]), rnode)
+		var modified := Tile.new(int(entry[2]), int(entry[3]), rnode)
+		grid_world.tiles[pos] = modified
+		grid_world.tile_modifications[pos] = modified
+		if modified.resource_node == ResourceNodes.Type.NONE:
+			grid_world.resource_state.erase(pos)
 
 	for bdict in data.get("buildings", []):
 		var b: Building = Building.from_dict(bdict)

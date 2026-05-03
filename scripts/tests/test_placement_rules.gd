@@ -86,20 +86,8 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, not world.place_building(Buildings.Type.PLANTER, Vector2i(0, 0)), "planter on water should fail")
 	_check(failures, not world.place_building(Buildings.Type.PLANTER, Vector2i(99, 99)), "planter on bare grass should fail")
 
-	# --- generate_default_world: lake at exact coordinates ---
-	var fresh = GridWorldScript.new()
-	parent.add_child(fresh)
-	fresh.generate_default_world()
-	# Lake spans (8..11, 4..5), 8 tiles total.
-	for x in range(8, 12):
-		for y in range(4, 6):
-			_check(failures, fresh.is_water_at(Vector2i(x, y)), "lake tile (%d, %d) should be water" % [x, y])
-	# Tile just outside the lake should be grass.
-	_check(failures, not fresh.is_water_at(Vector2i(12, 4)), "tile (12, 4) should NOT be water (outside lake)")
-	_check(failures, not fresh.is_water_at(Vector2i(8, 6)), "tile (8, 6) should NOT be water (outside lake)")
-
 	# Cleanup.
-	for w in [world, fresh]:
+	for w in [world]:
 		if TickSystem.tick.is_connected(w._on_tick):
 			TickSystem.tick.disconnect(w._on_tick)
 		w.queue_free()

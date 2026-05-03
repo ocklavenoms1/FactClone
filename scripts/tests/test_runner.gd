@@ -23,6 +23,10 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_cloth_prefer_dir.gd"),
 	preload("res://scripts/tests/test_bag_cap.gd"),
 	preload("res://scripts/tests/test_chest_paired_view.gd"),
+	preload("res://scripts/tests/test_worldgen_determinism.gd"),
+	preload("res://scripts/tests/test_worldgen_distance_scaling.gd"),
+	preload("res://scripts/tests/test_worldgen_spawn_safety.gd"),
+	preload("res://scripts/tests/test_random_seed_save_roundtrip.gd"),
 ]
 
 func _ready() -> void:

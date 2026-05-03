@@ -9,6 +9,90 @@ Each entry has three sections:
 
 ---
 
+## Worldgen Stage 1 — patch placement, distance gating, procgen rehydration
+
+**Date:** 2026-05-02
+**Tag:** `session-worldgen-stage1`
+
+The first of multiple staged worldgen sessions. Stage 1's scope: seeded deterministic generation of a finite 512×512 world with seven resource types, distance-scaled deposit abundance, and exploration loop via distance-gated resource availability. Stages 2-5 (chunked infinite, biomes, mining, etc.) deferred to their own future sessions.
+
+### What shipped
+
+- **`scripts/world/world_generator.gd`** (NEW, ~370 lines) — patch-placement worldgen. 32×32 region grid (Factorio chunk size, forward-compatible with Stage 3 chunked); per-region rolls for patch presence, type, position, size, with `seed + offset` hash3 for each independent random source. Lakes and forests as separate cluster passes. Spawn safety net (floor + ceiling) clamps spawn-area water to [12, 900] tiles. **Single shape-perturbation noise** for organic boundaries, shared across all patches and lakes. Generation runtime ~80-130ms per fresh world.
+- **`ResourceNodes` enum populated**: `TREE`, `STONE`, `COAL`, `IRON`, `COPPER`, `CLAY`. `is_renewable()`, `is_ore()`, `name_of()`, `color_of()` helpers. Per-design Q1: trees + ore both go through `resource_node` for identity; per-tile state (richness, growth) lives in a parallel sparse `resource_state: Dictionary` on GridWorld. Most tiles have no state entry (defaults).
+- **Distance-gated resource availability** (the exploration loop):
+  - Stone, Clay: `MIN_SPAWN_DISTANCE = 0` — available at spawn
+  - Coal: 30 tiles — early game
+  - Iron: 50 tiles — mid game
+  - Copper: 100 tiles — advanced
+  - Operates on **region-center distance**, not tile distance. Patches whose home region is past the threshold can still have edge tiles spilling slightly inward; this is an organic outcome rather than a half-moon-clipped boundary.
+- **Patch shape**: perturbed circle. Base radius `lerp(MIN, MAX, size_roll)` × distance multiplier. Per-tile shape-noise perturbation gives organic edges (`±SHAPE_PERTURB_AMOUNT * radius`). Within-patch richness `intensity = 1 - (dist/radius)²` (inverse-square fade from center) × `BASE_RICHNESS[type]` × distance multiplier from world origin.
+- **Per-resource BASE_RICHNESS** (Q3 design — differentiated Day 1): Stone 80 (commodity), Coal 60, Iron 50, Copper 50, Clay 40 (rarest). Each resource has a distinct yield-per-tile profile that gives gameplay character without requiring per-resource tuning.
+- **Trees as forest clusters AND ambient scatter** (Path B refinement):
+  - 6-10 forest clusters per world, radius 8-25 tiles, density falls off quadratically from PEAK 0.6 at center
+  - Ambient scattered trees on plains modulated by low-frequency density noise (frequency 0.005, base probability 0.002, multiplier 0.5×–2.0× by density). "Lightly wooded grassland" vs "open plains" regions instead of uniform speckle.
+  - Combined: forest clusters as destinations, ambient trees for visibility-from-spawn and plains variety. ~2400 trees total per world (~0.9% of map).
+- **Save format v10 → v11.** New top-level fields: `world_seed: int`, `worldgen_version: int`. Tile data shape changed: `tiles` → `tile_modifications` (only player-modified tiles persist). Load procedure: read seed → run `WorldGenerator.generate()` to rebuild canonical world → apply `tile_modifications` on top → restore buildings/player/progression.
+  - **Save sizes scale with player effort, not world size.** Pristine map ≈ 1KB save; late-game ≈ tens of KB. Compare to a hypothetical "save every tile" v11 = 1-2 MB even on a fresh world.
+- **`worldgen_version: int`** with policy comment: any change to generation logic requires bumping VERSION; saves hard-fail on mismatch. Forces every change to be deliberate. Currently at v3 (started v1 per-tile-noise, v2 patch placement, v3 added ambient trees).
+- **Spawn safety net** (floor + ceiling): `_ensure_spawn_area_water` adds a 4×4 lake at a seeded-pick eligible grass position if spawn 60×60 box has < 12 water tiles. `_clamp_spawn_area_water_max` removes excess water (edge tiles first, seeded shuffle within ties) if > 900 tiles (25%). 0 violations across 50-seed sample in either direction.
+- **Q-inspect for resources** (`info_panel.gd` extended): hovering a tile with a resource_node and pressing Q shows `Stone @ (pos)` / `Richness: 247` / status, or `Tree @ (pos)` / `Mature (renewable)`. Auto-closes when player paints over the tile or removes the resource. Building inspect takes priority when both apply.
+- **Rendering**: ore deposits as inset filled rectangles (90% of tile, darker outline), trees as canopy circle + brown trunk rect with per-tile color/size jitter. Drawn between terrain overlay and grid lines (so ore visible on grass; player overlay obscures ore visually but data preserved).
+- **Tile struct**: unchanged shape (base / overlay / resource_node). `set_overlay` and `clear_tile` updated to write to `tile_modifications` so saves preserve player edits. Player-paint preserves any existing `resource_node` (overlay obscures visually; RMB-clear reveals).
+- **Tests**: 15/15 passing.
+  - **NEW** `test_worldgen_determinism` — generate seed=42 twice, assert identical tile/resource_state/seed across runs
+  - **NEW** `test_worldgen_distance_scaling` — far-band ore richness must be ≥3× near-band (locks in the exploration loop economic curve)
+  - **NEW** `test_worldgen_spawn_safety` — 20-seed sample, all spawn-area water counts in [12, 900]
+  - **NEW** `test_random_seed_save_roundtrip` — random seed persists through save→load
+  - **UPDATED** `test_save_load_roundtrip` for v11 schema (seed round-trip, tile_modifications shape, procgen rehydration produces identical world)
+  - **UPDATED** `test_placement_rules` — removed hardcoded-lake assertion block (lake is no longer at fixed coords)
+- **Removed**: `GridWorld.generate_default_world()`, `DEFAULT_LAKE_X_RANGE`, `DEFAULT_LAKE_Y_RANGE`. Hardcoded Session-B lake at (8..11, 4..5) is gone.
+
+### Decisions
+
+- **Patch placement, NOT per-tile noise** (architectural rewrite mid-session). First implementation tried per-tile noise threshold checks for ore — produced speckled terrain regardless of threshold tuning. Threshold + frequency tuning could halve density but couldn't change the spatial pattern from "scattered everywhere" to "discrete patches in mostly-empty terrain." The architectural shift to per-region patch placement was the actual fix; tuning thresholds further was pushing on the wrong lever. Documented as a real lesson below.
+- **32×32 regions, not 64×64.** 64×64 regions = 64 patches in a 512×512 world, average 100+ tile spacing — too sparse for the exploration loop. 32×32 = 256 regions, ~128 patches at 50% probability — patches every 30-100 tiles. Matches Factorio's actual chunk granularity. Stage 3 chunked generation will use 32×32 as both region and chunk size — single primitive.
+- **Distance gating on region centers, not tile distance.** Cleaner abstraction: a region either rolls for a resource or doesn't. Patches can extend beyond their home region via shape perturbation, so some tiles spill into the eligible band — accepted as organic rather than half-moon-clipped boundaries. Spillover is small (<5%) and visually invisible.
+- **Lake-before-ore iteration order.** Ore patches abort if their region's center cell is water (avoids half-moon ore patches around lake edges). Forests run after both — they fill remaining grass.
+- **Tie-breaking via highest normalized noise intensity** (Q4 design, applied to per-region weighted-pick). Each region's type roll is over the eligible weighted set; no priority-rank artifacts.
+- **Trees: forest clusters + ambient pass.** Path A (forests only) was tried; player saw zero trees from many spawns because cluster count is low and clusters scatter across 512×512. Path B added a low-density ambient scatter modulated by low-frequency density noise — "lightly wooded grassland vs. open plains" variation. Forest clusters remain destinations; ambient trees give visibility-from-spawn and plains character.
+- **Procgen rehydration save model.** Saves persist `world_seed` + `tile_modifications`; load regenerates canonical world from seed and applies modifications. Directly aligns with Stage 3's chunked-infinite save model — same architecture, different chunk count. Also: save sizes scale with player effort instead of world size.
+- **Cellular noise abandoned with reasoning, not punted.** Original design called for cellular F1 on stone/clay (crisp Voronoi boundaries = "rock formations") vs Perlin on ores. Investigation revealed: (a) `RETURN_CELL_VALUE` works mechanically (the original "doesn't threshold" framing was wrong — that was `RETURN_DISTANCE` having a lopsided range), but (b) cellular cells produce uniform-within-cell noise, which combined with distance scaling would produce ~6M ore per corner cell — 30× over the 200K target. The "crisp rock vs soft ore" visual distinction is actually about visual style, not noise math; that distinction belongs in sprite art when sprite migration lands, not in noise type. Documented in `world_generator.gd` so future-self doesn't re-litigate this when revisiting.
+- **`screen_px()` helper still used selectively** (for hover outline only) — unchanged from camera-zoom session.
+- **`worldgen_version` separate from `SAVE_VERSION`.** Two version axes: save schema (changes when serialized field shape changes) and worldgen logic (changes when noise math / iteration order / parameters change). Both must match on load. Allows tightening worldgen without churning the save format and vice versa.
+
+### Lessons
+
+- **Per-tile noise vs patch placement is an architectural decision, not a tuning knob.** Mid-session pivot from per-tile noise to patch placement was correct but cost ~half a session of tuning effort that produced "less wrong" results without ever producing "right." When the tuning curve flattens but the visual still feels wrong, step back and ask whether you're tuning the right abstraction. Per-tile noise → speckle, no matter the parameters. Per-region rolls → discrete features, naturally.
+- **The "first 30 seconds" of a new world matters disproportionately.** With clusters-only trees, most spawns saw zero trees — felt like a broken world even though it was working as designed. Path B (clusters + ambient) was a small change (~30 lines) with a large UX payoff. Lesson: when a game-feel mechanic is "discrete events that the player must travel to," ALSO add an ambient layer for visibility-from-spawn so the player knows the discrete events exist.
+- **`RETURN_DISTANCE` ≠ `RETURN_CELL_VALUE` in Godot's FastNoiseLite.** The cellular config bug at first looked like "cellular doesn't work for thresholds" — actually was the wrong return type. RETURN_DISTANCE has range -0.90 to -0.17 (lopsided, reverse-thresholdable); RETURN_CELL_VALUE has range -1..1 like Perlin. Empirical probe (10K samples per config) was the cheap way to diagnose. Lesson: when a noise system "doesn't work," sample it before assuming it's broken.
+- **Procgen rehydration is the architecture you ship NOW for Stage 3 reasons.** Even though Stage 1 is finite (512×512), the save format change v10 → v11 implements the model that Stage 3 needs anyway. Doing it later would mean v11 → v12 with migration burden. Doing it now means Stage 3 inherits the architecture for free.
+- **Two version axes (save_version + worldgen_version) is the right shape.** Bundle them and you can't change worldgen without bumping save schema (which is wrong — the schema didn't change, only the procgen output). Independent axes let each evolve at its own cadence with both required to match on load. Both bump 1 → 2+ trivially when the relevant subsystem changes.
+- **The `MIN_SPAWN_DISTANCE` exploration loop took two architectures to land.** First attempt: per-tile distance check inside per-tile noise loop. Worked mechanically but didn't produce the FEEL because resources were still everywhere. Second attempt: per-region distance check (a region either rolls for the resource or doesn't, before any noise is sampled). Same gameplay rule, different abstraction level — the second one produces the actual exploration mechanic. Lesson: gameplay mechanics often don't manifest until the architecture matches the mental model.
+- **Headless smoke iteration was the correct loop.** Pre-rendering smoke (`worldgen_smoke.gd`, deleted before commit) ran in <1s and let us iterate on noise tuning, threshold tuning, density tuning, and architecture choice without ever launching the full game. The "design pass → smoke → architectural pivot → smoke → another pivot" cycle would have been intolerable if every iteration required launching the game and walking around.
+- **The MCP "screenshot live game" capability earned its keep.** The first "I don't see trees" report was visual; data said trees existed, screenshots showed they were 50+ tiles from spawn. Distinguishing "rendering bug" from "they're just over there" required real visual evidence. NOTES.md flagged screenshot as the only confirmed live-state path; this session validated the call.
+
+### Migration
+
+Save format v10 → v11. **All existing v10 saves hard-fail on load** with `OS.alert` per the existing schema-bump policy. Player must delete `%APPDATA%\Godot\app_userdata\Stewardship\save_slot_1.json` and start fresh. The new world is procedurally generated with a random seed at fresh start.
+
+### Stage roadmap (from session brief, for context)
+
+- **Stage 1 (this session):** finite 512×512 deterministic worldgen with patch placement, distance gating, procgen rehydration save model.
+- **Stage 2** (future): seed selection menu / new-game UI. Currently random per fresh start; player can't pick a specific seed without code edit.
+- **Stage 3** (future): chunked infinite generation. World expands beyond 512×512; chunks generate on-demand within view radius; save persists `tile_modifications` per chunk. Architecture in place — `WorldGenerator.generate()` becomes per-chunk; the same patch-placement primitive runs.
+- **Stage 4** (future): biomes. Currently single grassland biome; Stage 4 adds desert/forest/tundra/etc. with biome-specific resource availability and visual themes.
+- **Stage 5** (future): mining mechanics. Quarry/Sawmill/Smelter buildings extract richness from deposits over time. `resource_state.richness` decrements; deposits deplete; tree clusters regrow over time. Hooks already in place via the renewable/finite distinction.
+
+### Known follow-ups (carried forward)
+
+- **Exploration UI: M-key map + fog-of-war** — next session. Modal fullscreen map; tracks explored regions in save; shows terrain/resources/buildings within explored areas; unexplored renders as fog. Future: radar buildings extend exploration radius. Standalone scoped feature, deserves its own design pass.
+- **Sprite migration** — long-term solution to placeholder-rect rendering. When sprites land, the "crisp rock vs soft ore" visual distinction (deferred from Q3 cellular investigation) implements via sprite art rather than noise type.
+- **Chunked save (Stage 3)** — architecture already supports it via `tile_modifications`; needs per-chunk save partitioning + on-demand generation when ready.
+- **Cloth chain `prefer_dir` polish** (still open from Session E): lower priority now that worldgen is in place; cloth-related polish whenever it next bites in playtest.
+
+---
+
 ## Polish session — cloth chain prefer_dir + hover-outline minimum-pixel-floor
 
 **Date:** 2026-05-02

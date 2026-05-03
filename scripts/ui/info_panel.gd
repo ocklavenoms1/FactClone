@@ -1,12 +1,17 @@
 extends Control
 
-## Building Info Panel — primary debugging tool.
+## Info Panel — primary debugging tool.
 ##
 ## Activated by pressing `inspect_building` (Q key or middle mouse) while
-## hovering a tile with a building. Displays per-building info_lines.
+## hovering a tile. Two target kinds:
+##   - BUILDING: shows per-building info_lines (recipe state, port directions,
+##     buffers, etc.). Tracks by anchor; auto-closes if building is removed.
+##   - RESOURCE: shows resource type + richness (ore) or growth state (tree)
+##     from world.resource_state. Auto-closes if the tile loses its
+##     resource_node (e.g., player paints over it).
 ##
-## Tracks the inspected building by its anchor (Vector2i), NOT by Building
-## reference, so we detect deletion/replacement cleanly.
+## Tracks the inspected target by world coordinate (Vector2i), NOT by object
+## reference, so we detect deletion / replacement / paint-over cleanly.
 
 const PANEL_WIDTH: int = 240
 const PADDING: int = 10
@@ -18,8 +23,10 @@ const HEADER_COLOR: Color = Color(1.00, 0.92, 0.55)
 const TEXT_COLOR: Color = Color(0.95, 0.95, 0.85)
 const SUBTEXT_COLOR: Color = Color(0.70, 0.70, 0.65)
 
+enum TargetKind { NONE, BUILDING, RESOURCE }
+
+var target_kind: int = TargetKind.NONE
 var target_anchor: Vector2i = Vector2i.ZERO
-var has_target: bool = false
 var world: Node2D = null
 
 func _ready() -> void:
@@ -34,31 +41,62 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	visible = false
 
-## Set the inspected building. Pass null to close the panel.
+## Set a building target. Pass null to close.
 func set_target(b: Building, w: Node2D) -> void:
 	if b == null:
 		clear_target()
 		return
 	target_anchor = b.anchor
 	world = w
-	has_target = true
+	target_kind = TargetKind.BUILDING
+	visible = true
+
+## Set a resource-tile target.
+func set_resource_target(pos: Vector2i, w: Node2D) -> void:
+	target_anchor = pos
+	world = w
+	target_kind = TargetKind.RESOURCE
 	visible = true
 
 func clear_target() -> void:
-	has_target = false
+	target_kind = TargetKind.NONE
 	visible = false
 
 func _process(_delta: float) -> void:
-	if not has_target:
-		return
-	# Building may have been removed since we set the target — close cleanly.
-	if world == null or not world.has_building_at(target_anchor):
-		clear_target()
-		return
+	match target_kind:
+		TargetKind.NONE:
+			return
+		TargetKind.BUILDING:
+			if world == null or not world.has_building_at(target_anchor):
+				clear_target()
+				return
+		TargetKind.RESOURCE:
+			if world == null:
+				clear_target()
+				return
+			if not world.tiles.has(target_anchor):
+				clear_target()
+				return
+			var t: Tile = world.tiles[target_anchor]
+			if t.resource_node == ResourceNodes.Type.NONE or t.has_overlay():
+				# Resource gone or obscured by player paint — close.
+				clear_target()
+				return
 	queue_redraw()
 
 func _draw() -> void:
-	if not has_target or world == null:
+	match target_kind:
+		TargetKind.BUILDING:
+			_draw_building()
+		TargetKind.RESOURCE:
+			_draw_resource()
+		_:
+			return
+
+# ---------- building draw ----------
+
+func _draw_building() -> void:
+	if world == null:
 		return
 	var b: Building = world.building_at(target_anchor)
 	if b == null:
@@ -73,14 +111,53 @@ func _draw() -> void:
 	draw_rect(rect, BORDER_COLOR, false, 1.5)
 
 	var font: Font = ThemeDB.fallback_font
-
-	# Header: building name + anchor position.
 	var header: String = "%s @ (%d, %d)" % [Buildings.name_of(b.type), target_anchor.x, target_anchor.y]
 	draw_string(font, Vector2(PADDING, PADDING + 14), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, HEADER_COLOR)
 	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
-
-	# Info lines.
 	var y: float = PADDING + HEADER_HEIGHT + 14
 	for line in lines:
 		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
 		y += LINE_HEIGHT
+
+# ---------- resource draw ----------
+
+func _draw_resource() -> void:
+	if world == null or not world.tiles.has(target_anchor):
+		return
+	var t: Tile = world.tiles[target_anchor]
+	var lines: Array = _resource_lines(t)
+	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * lines.size() + 2
+	offset_bottom = offset_top + height
+
+	var rect: Rect2 = Rect2(0, 0, PANEL_WIDTH, height)
+	draw_rect(rect, BG_COLOR, true)
+	draw_rect(rect, BORDER_COLOR, false, 1.5)
+
+	var font: Font = ThemeDB.fallback_font
+	var header: String = "%s @ (%d, %d)" % [ResourceNodes.name_of(t.resource_node), target_anchor.x, target_anchor.y]
+	draw_string(font, Vector2(PADDING, PADDING + 14), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, HEADER_COLOR)
+	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
+	var y: float = PADDING + HEADER_HEIGHT + 14
+	for line in lines:
+		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
+		y += LINE_HEIGHT
+
+func _resource_lines(t: Tile) -> Array:
+	var lines: Array = []
+	var state: Dictionary = world.resource_state.get(target_anchor, {})
+	if t.resource_node == ResourceNodes.Type.TREE:
+		# Trees: growth state. Default = mature; resource_state["growth"] only
+		# present if regrowth is in progress (Stage 4+ when harvest lands).
+		var growth: float = float(state.get("growth", 1.0))
+		if growth >= 1.0:
+			lines.append("Mature (renewable)")
+		else:
+			lines.append("Regrowing: %.0f%%" % (growth * 100.0))
+	elif ResourceNodes.is_ore(t.resource_node):
+		# Ore: finite richness.
+		var richness: int = int(state.get("richness", 0))
+		lines.append("Richness: %d" % richness)
+		lines.append("Status: untouched (mining lands Stage 4+)")
+	else:
+		lines.append("(no extra info)")
+	return lines

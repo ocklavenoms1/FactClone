@@ -1,21 +1,29 @@
 extends RefCounted
 
-## Save/load round-trip test — locks the v10 schema.
+## Save/load round-trip test — locks the v11 schema.
 ##
-## Builds a world with diverse content (water, every overlay type, every
-## building type, items in inventory, mid-tick mill state, NON-EMPTY
-## player progression), saves to a scratch path, loads into a blank
-## world, and asserts every observable piece of state matches.
+## v11 introduces procgen rehydration: world is regenerated from world_seed
+## on load, and only player tile_modifications persist. The test:
+##   1. Generates a world via WorldGenerator with a chosen seed
+##   2. Adds player modifications (paint overlay, place buildings)
+##   3. Saves
+##   4. Loads into a blank world
+##   5. Asserts:
+##      - world_seed round-trips correctly
+##      - regenerated tiles match (procgen produces identical world from seed)
+##      - player modifications were applied on top
+##      - buildings, inventory, tick, progression all match
 ##
-## Catches: tile shape regressions (base/overlay schema), building state
-## losses, inventory shape drifts, footprint occupancy desyncs, progression
-## field drops.
+## Catches: schema regressions, procgen non-determinism, modification
+## not applied, occupancy desyncs.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
+const WorldGenScript  = preload("res://scripts/world/world_generator.gd")
 const TEST_SAVE_PATH: String = "user://test_roundtrip.json"
+const TEST_SEED: int = 12345
 
 static func test_name() -> String:
-	return "save/load round-trip (v10)"
+	return "save/load round-trip (v11)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -28,17 +36,23 @@ static func run(parent: Node) -> Dictionary:
 	if FileAccess.file_exists(TEST_SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
 
-	# --- Build world A with diverse content ---
+	# --- Build world A: generate from seed, then add player modifications ---
 	var world_a = GridWorldScript.new()
 	parent.add_child(world_a)
+	WorldGenScript.new().generate(world_a, TEST_SEED)
 
-	# Water tile (simulating world-gen).
-	world_a.tiles[Vector2i(5, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
-	# Tile with explicit resource_node — Session B only has Type.NONE, but
-	# we set it explicitly to verify the field round-trips even at default.
-	# Once mining lands, this test should set a non-default node here too.
-	world_a.tiles[Vector2i(7, 7)] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.NONE)
-	# One of each overlay.
+	# Pre-clear the building/overlay positions so the test isn't seed-dependent.
+	# (In real play, the player picks an empty spot to build; here we force
+	# the spot to be empty regardless of what procgen placed there.)
+	# Modifications-tracking will record these clears as part of the player's
+	# edit history — exactly what we want to round-trip through the save.
+	for pos in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(4, 0), Vector2i(0, 1)]:
+		world_a.tiles.erase(pos)
+		world_a.resource_state.erase(pos)
+		world_a.tile_modifications[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.NONE)
+
+	# Player modifications (these are what gets persisted; the rest of the
+	# world is rehydrated from seed on load).
 	world_a.set_overlay(Vector2i(0, 0), Terrain.Overlay.SOIL_TILLED)
 	world_a.set_overlay(Vector2i(1, 0), Terrain.Overlay.PATH)
 	world_a.set_overlay(Vector2i(2, 0), Terrain.Overlay.STONE)
@@ -126,10 +140,25 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, abs(player_b.global_position.x - 123.45) < 0.01, "player x mismatch: %f vs 123.45" % player_b.global_position.x)
 	_check(failures, abs(player_b.global_position.y - (-67.89)) < 0.01, "player y mismatch: %f vs -67.89" % player_b.global_position.y)
 
-	# Tile counts match.
+	# v11: world_seed round-trips.
+	_check(failures, world_b.world_seed == TEST_SEED, "world_seed mismatch: expected %d, got %d" % [TEST_SEED, world_b.world_seed])
+
+	# v11: tile counts match (procgen rehydration produced identical world).
 	_check(failures, world_a.tiles.size() == world_b.tiles.size(), "tile count mismatch: %d vs %d" % [world_a.tiles.size(), world_b.tiles.size()])
 
-	# Per-tile base+overlay match.
+	# v11: tile_modifications round-trip.
+	_check(failures, world_a.tile_modifications.size() == world_b.tile_modifications.size(), "tile_modifications count mismatch: %d vs %d" % [world_a.tile_modifications.size(), world_b.tile_modifications.size()])
+	for pos in world_a.tile_modifications:
+		var ma: Tile = world_a.tile_modifications[pos]
+		if not world_b.tile_modifications.has(pos):
+			failures.append("missing modification at %s in world_b" % str(pos))
+			continue
+		var mb: Tile = world_b.tile_modifications[pos]
+		_check(failures, ma.base == mb.base, "modification base mismatch at %s" % str(pos))
+		_check(failures, ma.overlay == mb.overlay, "modification overlay mismatch at %s" % str(pos))
+		_check(failures, ma.resource_node == mb.resource_node, "modification resource_node mismatch at %s" % str(pos))
+
+	# Per-tile content match — procgen-canonical + modifications applied.
 	for pos in world_a.tiles:
 		var ta: Tile = world_a.tiles[pos]
 		if not world_b.tiles.has(pos):
@@ -180,8 +209,8 @@ static func run(parent: Node) -> Dictionary:
 	SaveSystem.save_path = orig_path
 
 	if failures.is_empty():
-		return { "ok": true, "message": "v10 round-trip preserves tiles, buildings, state, inventory, tick, progression" }
-	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures)] }
+		return { "ok": true, "message": "v11 round-trip preserves seed, modifications, regenerated terrain, buildings, state, inventory, tick, progression" }
+	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------
 

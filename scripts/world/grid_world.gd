@@ -1,3 +1,4 @@
+class_name GridWorld
 extends Node2D
 
 ## The world. Source of truth for terrain and buildings.
@@ -10,12 +11,30 @@ const TILE_SIZE: int = 32
 const GRID_COLOR: Color = Color(0.25, 0.35, 0.25, 0.6)
 const VIEW_PADDING_TILES: int = 4
 
-# Default-world lake bounds — exposed so tests and Session B's Pump
-# placement logic can reference these coordinates directly.
-const DEFAULT_LAKE_X_RANGE: Array = [8, 12]   # [start, end_exclusive]
-const DEFAULT_LAKE_Y_RANGE: Array = [4, 6]    # [start, end_exclusive] -> 4×2 = 8 tiles
+# World boundary — Stage 1 generates a finite 512×512 region centered on origin.
+# Stage 3 extends to chunked infinite generation (capped at 1M each direction).
+# Tile coords valid range: [WORLD_MIN, WORLD_MAX-1] inclusive in each axis.
+const WORLD_HALF_EXTENT: int = 256                              # Stage 1: 512×512 = 256 each side
+const WORLD_MIN: int = -WORLD_HALF_EXTENT                       # -256
+const WORLD_MAX: int = WORLD_HALF_EXTENT                        # 256 (exclusive)
 
-var tiles: Dictionary = {}            # Vector2i -> Tile
+# World generation seed. Set by main.gd at startup (random for new game,
+# loaded from save for existing). WorldGenerator uses this to seed every
+# noise instance + the tree-placement hash.
+var world_seed: int = 0
+
+# tile_modifications: Vector2i -> Tile. Sparse storage of tiles that DIFFER
+# from worldgen output. The full world is the procgen-canonical generation
+# of `world_seed` (see WorldGenerator) PLUS these modifications applied on top.
+# Save/load only persists this dict; loaded worlds are reconstructed by
+# regenerating from seed and applying modifications.
+#
+# `tiles` (the rendered/queried dict) holds the FULL post-rehydration view —
+# both procgen output and modifications merged. Reads use `tiles`; writes
+# go through helpers that ALSO update `tile_modifications` so saves stay correct.
+var tiles: Dictionary = {}            # Vector2i -> Tile (post-rehydration view)
+var tile_modifications: Dictionary = {}  # Vector2i -> Tile (player edits only)
+var resource_state: Dictionary = {}   # Vector2i -> Dictionary (richness/growth state, sparse)
 var buildings: Dictionary = {}        # Vector2i (anchor) -> Building
 var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor)
 
@@ -80,6 +99,10 @@ func is_water_at(pos: Vector2i) -> bool:
 
 ## Paint an overlay at pos. Returns true on success.
 ## Sets last_place_error on failure.
+##
+## Player-overlay writes preserve any procgen resource_node — the overlay
+## visually obscures the deposit but the deposit data persists. RMB-clear
+## later reveals it again. Matches "modifications layer over procgen" model.
 func set_overlay(pos: Vector2i, overlay: int) -> bool:
 	last_place_error = ""
 	if has_building_at(pos):
@@ -95,17 +118,24 @@ func set_overlay(pos: Vector2i, overlay: int) -> bool:
 		return false
 	if current_overlay == overlay:
 		return true  # idempotent
-	# Mutate or insert.
+	# Mutate or insert. Preserve resource_node from current tile.
+	var current_resource: int = ResourceNodes.DEFAULT
 	if tiles.has(pos):
+		current_resource = tiles[pos].resource_node
 		tiles[pos].overlay = overlay
 	else:
-		tiles[pos] = Tile.new(Terrain.DEFAULT_BASE, overlay)
+		tiles[pos] = Tile.new(Terrain.DEFAULT_BASE, overlay, current_resource)
+	# Record as modification so save/load preserves the player's edit.
+	tile_modifications[pos] = Tile.new(tiles[pos].base, tiles[pos].overlay, tiles[pos].resource_node)
 	return true
 
 ## RMB action. Returns true on success (or harmless no-op).
 ##   - building present: remove building (always allowed)
 ##   - overlay present:  clear overlay back to NONE (always allowed; player placed it)
 ##   - bare base (grass or water): silent no-op (nothing to remove)
+##
+## Clearing the overlay preserves base + resource_node (the player only
+## removed THEIR overlay; procgen-canonical content underneath is restored).
 func clear_tile(pos: Vector2i) -> bool:
 	last_remove_error = ""
 	if has_building_at(pos):
@@ -116,21 +146,19 @@ func clear_tile(pos: Vector2i) -> bool:
 	var t: Tile = tiles[pos]
 	if t.has_overlay():
 		t.overlay = Terrain.Overlay.NONE
-		# If the entry collapses to pure default, drop it.
-		if t.base == Terrain.DEFAULT_BASE:
+		# Record as modification so save/load preserves the cleared state.
+		# Even if the resulting tile matches procgen-default exactly, we
+		# record it; save-time optimization could prune at serialize time.
+		tile_modifications[pos] = Tile.new(t.base, t.overlay, t.resource_node)
+		# If the entry collapses to pure default AND has no resource_node,
+		# drop from tiles. The modification record stays so save knows the
+		# player explicitly cleared this position.
+		if t.base == Terrain.DEFAULT_BASE and t.resource_node == ResourceNodes.DEFAULT:
 			tiles.erase(pos)
 		return true
 	# Bare base tile (water, or an explicit grass entry — though we don't keep those).
 	return true
 
-## Seed a fresh world with natural features. Called by main.gd ONLY when
-## no save file exists. Currently: a fixed 4×2 water lake at tile coords
-## (8..11, 4..5) — 8 tiles total, 6+ tiles east of player spawn (2, 2).
-## Coordinates exposed via DEFAULT_LAKE_X_RANGE / Y_RANGE for tests.
-func generate_default_world() -> void:
-	for x in range(DEFAULT_LAKE_X_RANGE[0], DEFAULT_LAKE_X_RANGE[1]):
-		for y in range(DEFAULT_LAKE_Y_RANGE[0], DEFAULT_LAKE_Y_RANGE[1]):
-			tiles[Vector2i(x, y)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 
 # ---------- buildings ----------
 
@@ -353,6 +381,58 @@ func screen_px(world_px: float) -> float:
 		return world_px
 	return max(world_px, world_px / camera.zoom.x)
 
+## Draw a resource deposit or tree at the given tile rect.
+##   - Ore (stone, coal, iron, copper, clay): inset filled rectangle with
+##     resource color + 1-px darker outline. Inset shows underlying grass on
+##     all sides so deposits read as "things sitting on the ground" rather
+##     than "the whole tile is colored."
+##   - Tree: dark-brown trunk rectangle + dark-green canopy circle. Trunk
+##     centered, canopy slightly offset upward (visual reading: tree base at
+##     center, foliage above). Per-tree color jitter (deterministic from
+##     position) gives a forest organic variation.
+func _draw_resource(resource_type: int, tile_rect: Rect2) -> void:
+	if resource_type == ResourceNodes.Type.TREE:
+		_draw_tree(tile_rect)
+		return
+	# Ore deposit: inset filled rect.
+	var inset: float = TILE_SIZE * 0.10
+	var inner: Rect2 = Rect2(tile_rect.position + Vector2(inset, inset), tile_rect.size - Vector2(inset * 2, inset * 2))
+	var color: Color = ResourceNodes.color_of(resource_type)
+	draw_rect(inner, color, true)
+	# Subtle darker outline for definition.
+	var outline: Color = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, 1.0)
+	draw_rect(inner, outline, false, 1.0)
+
+## Tree rendering: trunk + canopy. Position-derived jitter keeps each tree
+## slightly distinct without a per-tree resource_state entry.
+func _draw_tree(tile_rect: Rect2) -> void:
+	var center: Vector2 = tile_rect.position + tile_rect.size * 0.5
+	# Position hash for deterministic jitter (size + color + offset).
+	var tx: int = int(tile_rect.position.x / TILE_SIZE)
+	var ty: int = int(tile_rect.position.y / TILE_SIZE)
+	var jitter_h: int = (tx * 73856093) ^ (ty * 19349663)
+	var size_jitter: float = float((jitter_h & 0xFF) - 128) / 1024.0   # ±0.125
+	var color_jitter: float = float(((jitter_h >> 8) & 0xFF) - 128) / 1280.0   # ±0.10
+	# Trunk: small dark-brown rectangle at center.
+	var trunk_w: float = TILE_SIZE * 0.12
+	var trunk_h: float = TILE_SIZE * 0.20
+	var trunk_rect: Rect2 = Rect2(center.x - trunk_w * 0.5, center.y, trunk_w, trunk_h)
+	draw_rect(trunk_rect, Color(0.30, 0.20, 0.10), true)
+	# Canopy: dark-green circle, offset upward so the tree "sits" on the trunk base.
+	var canopy_r: float = TILE_SIZE * (0.32 + size_jitter)
+	var canopy_center: Vector2 = Vector2(center.x, center.y - TILE_SIZE * 0.05)
+	var base_canopy: Color = ResourceNodes.color_of(ResourceNodes.Type.TREE)
+	var canopy: Color = Color(
+		clamp(base_canopy.r + color_jitter, 0.0, 1.0),
+		clamp(base_canopy.g + color_jitter * 0.5, 0.0, 1.0),
+		clamp(base_canopy.b + color_jitter, 0.0, 1.0),
+		1.0,
+	)
+	draw_circle(canopy_center, canopy_r, canopy)
+	# Subtle darker rim.
+	var rim: Color = Color(canopy.r * 0.7, canopy.g * 0.7, canopy.b * 0.7, 1.0)
+	draw_arc(canopy_center, canopy_r, 0.0, TAU, 24, rim, 1.0)
+
 func _draw() -> void:
 	var view_min: Vector2
 	var view_max: Vector2
@@ -367,7 +447,10 @@ func _draw() -> void:
 	var min_tile: Vector2i = world_to_tile(view_min) - Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 	var max_tile: Vector2i = world_to_tile(view_max) + Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 
-	# Terrain tiles — base first, overlay on top.
+	# Terrain + resources, all in one pass over tiles for cache locality.
+	# Layer order per tile: base → overlay → resource_node (if no overlay).
+	# Resource hidden under player overlay paint; revealed on RMB-clear via
+	# set_overlay/clear_tile preserving resource_node through modifications.
 	for tile_key in tiles:
 		var tp: Vector2i = tile_key
 		if tp.x < min_tile.x or tp.x > max_tile.x:
@@ -382,6 +465,10 @@ func _draw() -> void:
 		# Overlay layer: draw if present.
 		if t.overlay != Terrain.Overlay.NONE:
 			draw_rect(rect, Terrain.overlay_color(t.overlay), true)
+		# Resource layer: draw deposit/tree if no overlay obscures it.
+		# (Water tiles never have resource_node; tested via base check too.)
+		if t.overlay == Terrain.Overlay.NONE and t.resource_node != ResourceNodes.Type.NONE and t.base != Terrain.Base.WATER:
+			_draw_resource(t.resource_node, rect)
 
 	# Grid lines — width in world units so the line scales with the tile.
 	# At low zoom this fades the line slightly (sub-pixel anti-aliased),
