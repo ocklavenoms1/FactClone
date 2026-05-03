@@ -5,7 +5,16 @@ const RADIUS: float = 10.0
 const BODY_COLOR: Color = Color(0.9, 0.78, 0.5)
 const OUTLINE_COLOR: Color = Color(0.2, 0.15, 0.1)
 
+# Set by main.gd at _ready. When the inventory grid is open, player input
+# is suspended — grid is modal. velocity is zeroed each tick so a stale
+# movement vector doesn't slide the player while the modal is up.
+var inventory_grid: Control = null
+
 func _physics_process(_delta: float) -> void:
+	if inventory_grid != null and inventory_grid.is_open():
+		velocity = Vector2.ZERO
+		move_and_slide()
+		return
 	var input_vec: Vector2 = Vector2(
 		Input.get_axis("move_left", "move_right"),
 		Input.get_axis("move_up", "move_down")

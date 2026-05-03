@@ -9,6 +9,60 @@ Each entry has three sections:
 
 ---
 
+## Inventory UI session — Factorio-style slot grid + chest paired view
+
+**Date:** 2026-05-02
+**Tag:** `session-inventory-ui`
+
+The deferred UI work captured in `INVENTORY_UI_PLAN.md`. Replaces the aggregated inventory display with a slot grid that surfaces the per-slot reality of `Inventory` storage (which has always been correct internally) and adds two-way item transfer between player and chests via paired-grid view.
+
+### What shipped
+
+- **`InventoryGrid` modal Control** (`scripts/ui/inventory_grid.gd`, ~480 lines) — full-screen dim overlay + centered grid panel, opens with `I`, closes with `I` / `Esc` / click-outside.
+- **4-column grid layout**, +1 row per bag consumed (4×4 base, up to 9×4 at cap). Each bag's reward is **visually obvious** as a new row appears at the bottom.
+- **Slot rendering**: empty/filled/hovered states from the hotbar palette. Item swatch (32px centered in 48px slot). Stack count overlay bottom-right with shadow. Tooltip on hover (`ItemName: count / max_stack`).
+- **Click pick / place / combine / swap** within the player grid. Cursor stack follows mouse position; `Inventory.add()` semantics for combining; swap on cursor-vs-different-item-type.
+- **Auto-return on close** with cursor non-empty: place into player's first empty slot, toast announcing the slot. Falls back to chest if player full and chest paired view is open. If both full, refuse close + toast `Place cursor stack before closing inventory.`
+- **Chest paired view** — `E` adjacent to a chest opens player + chest grids side-by-side. `E`/`I`/`Esc` closes both. Replaces the old "drain all" behavior on chest E (harvesters and other drainables continue to drain on E unchanged).
+- **Edge case**: pressing `E` on chest with cursor stack already held → place cursor into chest first (via `Chest.try_insert`), then open the paired view. Avoids the "open mid-pickup" ambiguity.
+- **Chest view adapter (Path A)** — chest `state.bag` (bulk storage, no per-slot positioning) is split into `max_stack`-sized virtual slots for display. Slot positions don't persist across re-renders (chest reorders after each change). Acceptable per design; migrate to per-slot chest storage later if it becomes painful. View adapter extracted as a static method for unit testability.
+- **Cross-grid transfers**:
+  - Left-click chest slot with empty cursor → pick up that view.
+  - Left-click any chest slot with full cursor → drop cursor into chest bag (with capacity check). Optional swap if slot was already occupied.
+  - Shift-click player slot → entire stack to chest (partial transfer if chest has limited capacity, toast on partial).
+  - Shift-click chest slot → entire view to player via `Inventory.add()` (respects player max_stack across slots; partial transfer + toast if player full).
+- **Modal interaction discipline**: while grid is open, world clicks blocked, player movement frozen (`player.gd` gates on `inventory_grid.is_open()`), hotbar / placement / save / interact / consume input suspended. Only `I` and `Esc` continue to fire (to close). Game tick keeps running — factory continues producing.
+- **Aggregate panel trimmed**: `Slots: A/B used` line dropped (slot count is now implicit in the grid view). `Bags: X / 5 consumed` line stays (the lifetime cap isn't visible in the grid). Panel narrowed from 280px back to 180px.
+- **Tests**: 10 passing. New `test_chest_paired_view.gd` covers view adapter splitting (max_stack-sized chunks, multi-type bags, edge cases) + transfer semantics (player→chest deposit, chest→player pickup with overflow / partial / refuse paths).
+- **No save schema change** (still v10). Path A view adapter doesn't touch chest storage shape. Inventory class unchanged.
+
+### Decisions
+
+- **Modal grid, not persistent.** Factorio's persistent quickbar is analogous to Stewardship's existing hotbar (which holds buildings/terrain). The inventory itself is for occasional management — modal-on-demand fits that frequency. Aggregate corner panel stays for at-a-glance monitoring.
+- **No "Take All" button on chest paired view.** Original design had it as a v1 hedge. Pushed back during design pass: shipping old+new flow simultaneously means half the design fails to land. Committed to E auto-opens paired view + shift-click for transfer-all. Matches Factorio convention exactly.
+- **Auto-return: first empty slot, not original slot.** Naive "return to original" fails when the original slot was modified during pickup (player swapped something into it). First-empty + toast is predictable because the toast always announces what happened. Refuse-close as last resort if inventory genuinely full.
+- **Path A view adapter for chest storage.** Path B (migrate chest to use `Inventory` class) was the right end-state but required a v10→v11 schema bump. Path A is ~30 lines of pure-function conversion code with zero schema impact. If players ever complain about slot-arrangement-not-persisting-in-chests, migrate later.
+- **4-column grid layout.** +4 slots per bag = exactly +1 row. Bag-cap progression becomes visually obvious as the grid grows downward by one row per consumed bag. Layout choice and mechanic alignment are the same shape.
+- **Pick-up-and-place model, not drag-and-drop.** Universal across RPGs / Factorio / Minecraft. Drag adds gesture detection complexity. Defer drag to v2 if pick-up feels clunky; not heard yet.
+
+### Lessons
+
+- **The bug-that-isn't was a vocabulary problem.** "Bag" was used to mean both "openable container item" and "player's inventory slot count," and we built the wrong thing for almost a session before the unstick. Lesson recorded: when scope feels off, re-derive the user-facing problem statement before going deeper.
+- **`draw_string` HORIZONTAL_ALIGNMENT_RIGHT positioning is non-obvious.** First-pass count overlay had the alignment rectangle starting at the slot's right edge, which drew text past the slot boundary. The text was rendered, just off-screen. Caught at smoke test, not at code review. Lesson: when text positioning looks wrong, instrument with a temporary visible bounding box before iterating on numbers.
+- **Pushback on the "Take All" button paid off.** UX hedging would have shipped two flows competing for the same action; either wins out and the unused half gets stripped later anyway. Better to commit to the new flow up front.
+- **Static / pure helpers + scene-tree-free tests.** The view adapter's split logic was extracted as a `static func` so the test could call it with synthetic bags. No `add_child` / scene tree gymnastics. Worth keeping as a pattern for future UI testing — anything pure should be hoisted out.
+- **Modal input gating is small but easy to miss bits of.** `player.gd` gates movement; `main.gd` gates hotbar / placement / interact / save. Each was ~one conditional. The risk was forgetting one and having the player walk off mid-modal. Caught everything in the smoke test on the first try because the test included "press 1-9 with grid open should do nothing."
+
+### Known follow-ups (carried forward, unchanged where applicable)
+
+- **Camera zoom (stashed):** `stash@{0}`, displacement bug unresolved. Pop-and-debug session.
+- **Cloth chain ergonomic wart:** no `prefer_dir` on cloth recipes. Polish session.
+- **v2 inventory grid features (deferred):** right-click for half-stack pickup, drag-and-drop, ctrl-click for "transfer one," selected-source highlight on cursor pickup, hotbar item slots (place from hotbar). Each lands when a real need surfaces.
+- **Chest storage Path B (per-slot persistence):** migrate `state.bag` to `Inventory` class if "I can't leave a gap in my chest" becomes a real complaint. Schema bump v10 → v11 at that point.
+- **Session F:** premium feedback loop (Trough, Coop, premium bread, configurable Oven, score/value system). Score/value is the second `player_progression` field — slots in cleanly without further refactor.
+
+---
+
 ## Session E final — Bag-cap progression mechanic
 
 **Date:** 2026-05-02

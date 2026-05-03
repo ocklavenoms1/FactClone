@@ -18,6 +18,7 @@ const BAG_CONFIRM_WINDOW: float = 3.0   # seconds; "press B again to confirm"
 @onready var hotbar: Control = $HUD/Hotbar
 @onready var inventory_panel: Control = $HUD/InventoryPanel
 @onready var info_panel: Control = $HUD/InfoPanel
+@onready var inventory_grid: Control = $HUD/InventoryGrid
 
 var player_inventory: Inventory
 var toast_timer: float = 0.0
@@ -58,6 +59,12 @@ func _ready() -> void:
 	# Inventory panel reads progression by reference — Dictionary is shared,
 	# panel re-reads on every redraw to display "Bags: X/5 consumed".
 	inventory_panel.player_progression = player_progression
+	# Inventory grid (modal) — same Inventory ref so changes are live.
+	# Toast callback so auto-return events surface in the HUD.
+	inventory_grid.inventory = player_inventory
+	inventory_grid.toast_callback = _show_toast
+	# Player gates its movement on inventory_grid.is_open() — wire the ref.
+	player.inventory_grid = inventory_grid
 
 	if SaveSystem.save_exists():
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
@@ -78,6 +85,29 @@ func _apply_loaded_progression(loaded: Dictionary) -> void:
 		player_progression[key] = loaded[key]
 
 func _process(delta: float) -> void:
+	# Inventory toggle (I) — always handled, even while grid is open
+	# (lets I close the grid).
+	if Input.is_action_just_pressed("toggle_inventory"):
+		inventory_grid.toggle()
+	# Esc closes the grid if it's open. We still handle close_info_panel
+	# below for the info panel; this branch comes first so Esc-while-grid-
+	# open closes the grid in preference to the info panel.
+	if inventory_grid.is_open() and Input.is_action_just_pressed("close_info_panel"):
+		inventory_grid.toggle()
+
+	# When the inventory grid is open: skip world / hotbar / placement /
+	# inspect / save / consume input. Game tick still runs (factory keeps
+	# producing); player movement gated separately in player.gd via the
+	# inventory_grid.is_open() check.
+	if inventory_grid.is_open():
+		# Toast timer still ticks so auto-return / "place cursor" toasts
+		# still surface and fade.
+		if toast_timer > 0.0:
+			toast_timer -= delta
+			if toast_timer <= 0.0:
+				toast_label.text = ""
+		return
+
 	var mouse_world: Vector2 = get_global_mouse_position()
 	var hover_tile: Vector2i = grid_world.world_to_tile(mouse_world)
 	var player_tile: Vector2i = grid_world.world_to_tile(player.global_position)
@@ -230,6 +260,12 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 func _try_interact(player_tile: Vector2i) -> void:
 	var b: Building = grid_world.find_adjacent_drainable(player_tile)
 	if b == null:
+		return
+	# Chests open the paired inventory view — replaces the old drain-all
+	# behavior with a richer player↔chest grid. Harvesters and other
+	# drainables continue to drain on E (no slot grid for them).
+	if b.type == Buildings.Type.CHEST:
+		inventory_grid.open_chest_paired_view(b)
 		return
 	var moved: int = Buildings.drain_into_player(b, player_inventory)
 	if moved > 0:

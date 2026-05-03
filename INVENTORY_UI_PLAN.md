@@ -43,22 +43,79 @@ The underlying storage is already correct (slot-by-slot, max_stack-enforced per 
 - No automatic-sort, search, filter, or other inventory-management features beyond what the six bullets specify. Defer to a polish session if the grid lands and feels incomplete.
 - The `inventory_panel.gd` aggregate display can either be **retired** (replaced by the grid as the primary view) or **kept** (as a quick-glance summary in the corner alongside the openable grid). Pick during design.
 
-## Open questions for the session's design pass
+## Locked design decisions (post design pass)
 
-- **Modal vs. persistent grid.** Factorio uses both: a persistent hotbar/quickbar always visible AND a modal main inventory toggled by E. Should Stewardship match that two-tier model, or pick one? Tradeoffs:
-  - Persistent grid eats screen real estate but always shows state.
-  - Modal-only is cleaner but adds a key-press friction.
-  - Hybrid (current aggregate panel stays as glance-summary, grid opens on demand) is reasonable.
-- **Does chest E auto-open both grids, or are they separate triggers?** Options:
-  - E always opens both grids (chest + player) when adjacent to a chest.
-  - E drains as today; a different trigger (Shift+E, click on chest) opens the two-grid view.
-  - Auto-open is more discoverable; separate trigger preserves current "tap E to grab" muscle memory.
-- **How does slot grid layout scale at 16, 20, 24, 28, 32, 36 slots?** Options:
-  - Fixed columns (e.g., 8 wide), rows grow as slot count grows. Simple, predictable.
-  - Fixed grid size (e.g., always 6×6 = 36 slots), unused slots show as "locked" until earned. Communicates progression visually.
-  - Aspect-ratio adaptive (4 wide for 16, 5 wide for 20-25, etc.). More complex.
-- **Cursor item rendering.** When the player has picked up a stack and is moving it between slots, where does it render? Options: follow cursor as a floating swatch, or live in a "hand" slot above the grid. Factorio uses follow-cursor.
-- **Hotbar / quickbar interaction.** Today's hotbar holds buildings + terrain overlays, not items. Once items are clickable, does the hotbar gain item slots too (Factorio-style place-from-hotbar)? Possibly out of scope for this first pass — capture as a follow-up.
+### Modal vs. persistent
+**Modal, key `I`, closes with `I` or `Esc`.** Modal-only — the world is the primary view; persistent grid eats real estate when not actively managing items. Aggregate panel in top-right stays for at-a-glance monitoring.
+
+### Chest E behavior
+**E adjacent to a chest auto-opens paired view (player grid + chest grid side-by-side). E or Esc closes both. Shift-click is the only transfer mechanism — no "Take All" button.** Hedging with both flows would mean half the design fails to land. Commits to Factorio convention exactly.
+
+**Edge case:** if player presses E with cursor stack already held, **place cursor stack into chest's first empty slot first**, then open paired view. Avoids the "open paired view mid-pickup with cursor full" confusion.
+
+### Layout
+**Fixed 4-column grid, +1 row per bag consumed.**
+- 16 slots = 4×4 (base, 0 bags consumed)
+- 20 slots = 5×4 (1 bag)
+- 24 slots = 6×4 (2 bags)
+- 28 slots = 7×4 (3 bags)
+- 32 slots = 8×4 (4 bags)
+- 36 slots = 9×4 (5 bags, cap)
+
+Each bag grants exactly +4 slots = exactly one new row. Bag consumption is **visually obvious** — new row appears at the bottom of the grid. Slot size 48px.
+
+### Slot rendering
+- **Empty:** dark fill (slightly lighter than panel bg), 1px gray border. Reuses hotbar's `SLOT_BG` / `SLOT_BORDER` palette.
+- **Filled:** centered colored swatch (32px inside the 48px slot frame, leaves visible margin). Stack count overlay in bottom-right with white text + 1px black shadow.
+- **Hovered:** yellow border (`SLOT_BORDER_SELECTED`). **Tooltip** near cursor: `ItemName: count / max_stack` (e.g., `Grain: 47 / 100`). v1 includes tooltip.
+
+### Click interactions
+
+**v1 (must-haves):**
+
+| Action | Cursor empty | Cursor full |
+|---|---|---|
+| **Left-click filled slot** | Pick up entire stack to cursor. Slot becomes empty. | Slot has same item type → top-up to max_stack; remainder stays on cursor. Different item type → swap. |
+| **Left-click empty slot** | No-op. | Place entire cursor stack into slot. |
+| **Shift-click filled slot** | If chest grid open → transfer entire stack to other grid. If chest grid NOT open → no-op (defer reorder behavior to v2). | No-op. |
+| **Press `I` / `Esc` / click outside** | Close grid. | **Auto-return cursor** — see below. |
+
+**v2 (deferred):** right-click for half-stack pickup; drag-and-drop; ctrl-click for "transfer one"; selected-source highlight on cursor pickup.
+
+### Auto-return on close — locked semantics
+
+**Find first empty slot, place cursor stack there, toast `ItemName ×N returned to slot M`. If no empty slot exists, refuse close — toast `Place cursor stack before closing inventory.`**
+
+The naive "return to original slot" fails when the original slot was modified during pickup (player swapped something into it). Three outcomes possible: lose the stack (unacceptable), find first empty slot (predictable IF announced), or refuse close (acceptable as last resort). First empty + toast + last-resort refuse = predictable enough because the toast always announces what happened.
+
+### Cursor stack model
+
+Lives on `InventoryGrid` controller as a single `ItemStack` field. Renders on a top CanvasLayer with `mouse_filter = IGNORE` so it doesn't intercept clicks. Drawn as a 32×32 swatch + count, follows mouse position each frame.
+
+### Hotbar relationship
+**Stays separate.** Hotbar = building/terrain placement. Inventory grid = held items. Different purposes; different keyboard mappings. Future "assign item to hotbar slot for quick placement" feature noted but not in v1.
+
+### Drag-and-drop
+**Pick-up-and-place v1; drag deferred.** Pick-up is universal; drag adds gesture detection complexity. Revisit if pick-up feels clunky in playtest.
+
+### Aggregate panel — keep, partial trim
+- **Keep** the aggregate panel in the top-right corner.
+- **Drop** the `Slots: A/B used` line (slot count is implicit in the grid view).
+- **Keep** the `Bags: X/5 consumed` line (lifetime cap is not visible in the grid).
+- **Keep** the aggregated item rows for at-a-glance "do I have grain" without opening the modal.
+
+### Chest internal storage — Path A (view adapter)
+Chest's `state.bag = [[item_type, count], ...]` stays as-is. The chest grid renderer reads the bag and presents it as a 24-slot view (TOTAL_CAPACITY 2400 / 100 max_stack ≈ 24 slots equivalent). Each bag entry → one or more slots (split if exceeds max_stack). On commit, update the chest bag.
+
+No schema bump. v10 saves stay valid. If players ever complain about slot-arrangement-not-persisting-in-chests, migrate later.
+
+### Modal interaction with game state
+While the inventory grid is open:
+- Game tick continues (factory keeps running).
+- Mouse clicks on world disabled (modal dim overlay intercepts).
+- Player movement (WASD) disabled — `player.gd` gates on `inventory_grid.visible`.
+- Hotbar / building placement input disabled — `main.gd` gates the relevant input handlers on `inventory_grid.visible`.
+- `I` and `Esc` always handled (to close).
 
 ## Retirement trigger
 

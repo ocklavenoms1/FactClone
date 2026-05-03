@@ -9,9 +9,7 @@ extends Control
 const ROW_HEIGHT: int = 24
 const SWATCH_SIZE: int = 16
 const PADDING: int = 8
-# Widened from 180 to 280 to fit the combined Bags + Slots header line.
-# Item rows just have more horizontal space; no other layout impact.
-const PANEL_WIDTH: int = 280
+const PANEL_WIDTH: int = 180
 const BG_COLOR: Color = Color(0.10, 0.10, 0.10, 0.85)
 const BORDER_COLOR: Color = Color(0.6, 0.6, 0.6, 0.9)
 const TEXT_COLOR: Color = Color(0.95, 0.95, 0.85)
@@ -59,14 +57,11 @@ func _draw() -> void:
 
 	var y: float = PADDING + 22
 	if has_bags_row:
-		# Combined progression line: bags consumed + slot occupancy. Slot
-		# count is what makes the bag reward VISIBLE — capacity grows by
-		# SLOTS_PER_BAG (4) every consume, and "Slots: A/B" surfaces the B.
-		# Without this line, aggregated display ("Grain: 200") hides the
-		# fact that the player has more slots to fill.
+		# Bags line — surfaces the lifetime cap (5), which the slot grid
+		# can't show. Slot occupancy used to live here too but is now
+		# implicit in the inventory grid view; line trimmed when grid shipped.
 		var n: int = int(player_progression.get("bags_consumed", 0))
-		var used: int = inventory.slots_used()
-		var label: String = "Bags: %d/5 consumed | Slots: %d/%d used" % [n, used, inventory.capacity]
+		var label: String = "Bags: %d / 5 consumed" % n
 		draw_string(font, Vector2(PADDING, y + 16), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.7, 0.5))
 		y += ROW_HEIGHT
 	if agg.is_empty():
