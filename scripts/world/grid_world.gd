@@ -266,6 +266,11 @@ func can_place_building(t: int, pos: Vector2i) -> bool:
 	if t == Buildings.Type.PUMP and not Pump.is_valid_placement(self, pos):
 		last_building_place_error = "Pump must be placed adjacent to water"
 		return false
+	if t == Buildings.Type.MINING_DRILL:
+		var err: String = MiningDrill.validate_placement(self, pos)
+		if err != "":
+			last_building_place_error = err
+			return false
 	return true
 
 ## `extra` is forwarded to Buildings.make for type-specific payload
@@ -276,11 +281,28 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 	var b: Building = Buildings.make(t, pos, dir, extra)
 	if b == null:
 		return false
+	# Cancel any active tree regrowth in footprint cells. Player committed
+	# to this build site — same rule as set_overlay (overlay-cancels-regrowth);
+	# generalized to building placement so future 2×2+ buildings (Mixer,
+	# Oven, MiningDrill, etc.) consistently nullify regrowth where they sit.
+	# Defensive: only cancels for "regrowth_remaining" specifically; doesn't
+	# touch ore richness or other resource_state fields.
+	for cell in _footprint_cells(t, pos):
+		if resource_state.has(cell):
+			var rs: Dictionary = resource_state[cell]
+			if rs.has("regrowth_remaining"):
+				resource_state.erase(cell)
+				resource_state_modifications.erase(cell)
 	buildings[pos] = b
 	for cell in _footprint_cells(t, pos):
 		occupied[cell] = pos
 	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
+	# Post-make placement hooks: building types that need world context to
+	# finish their initial state populate it here. (make() runs before the
+	# building is registered, so it can't see the world via has_building_at.)
+	if t == Buildings.Type.MINING_DRILL:
+		MiningDrill.refresh_covered_deposits(b, self)
 	return true
 
 func remove_building_at(pos: Vector2i) -> bool:

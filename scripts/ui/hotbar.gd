@@ -70,6 +70,8 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.RETTER },
 			{ "kind": "building", "value": Buildings.Type.LOOM },
 			{ "kind": "building", "value": Buildings.Type.TAILOR },
+			# Mining automation (session-mining-drill).
+			{ "kind": "building", "value": Buildings.Type.MINING_DRILL },
 		],
 		"selected": 0,
 	})

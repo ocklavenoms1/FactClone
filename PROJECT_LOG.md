@@ -9,6 +9,84 @@ Each entry has three sections:
 
 ---
 
+## Burner mining drill — first automation tier (save v14, no bump)
+
+**Date:** 2026-05-03
+**Tag:** `session-mining-drill`
+
+The first slice of mining automation: player places a 2×2 drill on top of an ore patch, feeds it fuel from an adjacent belt or chest, and ore flows out the prefer_dir port. Same `deplete_resource` primitive the manual-mining tier uses; same Burner-fuel mechanic that future smelters and charcoal kilns will reuse. No save bump — drill state lives entirely on `Building.state` (Dict-shaped, JSON-clean) and rides through the existing v14 building round-trip with zero schema changes.
+
+### What shipped
+
+**`scripts/world/burner.gd`** — generic fuel infrastructure (~130 lines)
+- Static helpers: `try_pull_fuel(b, world, fuel_edge_dir=-1)`, `consume_tick(b, ticks_per_unit)`, `info_lines(b)`, `make_state()`.
+- Fuel item → energy unit table: `WOOD: 1, COAL: 4, FUEL_BRIQUETTE: 8`. Tunable per item by editing one dict entry; future fuels (CHARCOAL, etc.) are append-only.
+- `FUEL_BUFFER_CAPACITY: int = 16` — units, not item count. Items convert via `FUEL_VALUES` on pull. A coal item in a buffer of 13 doesn't pull (would overfill).
+- State convention on the burner building: `fuel_buffer: int` (units), `fuel_burn_progress: int` (ticks toward next unit consumption).
+- `consume_tick(b, ticks_per_unit)` returns `false` when the buffer is empty — the building's tick handler sets its own NO_FUEL state on this signal. Burner doesn't know what state means; the consumer interprets.
+
+**`scripts/world/mining_drill.gd`** (~340 lines)
+- 2×2 footprint covering up to 4 ore deposits.
+- Fuel input: any of 4 edges (no fuel prefer_dir for v1; pulls from belts/chests indiscriminately).
+- Output port: prefer_dir, rotates with `b.state.dir` via `Buildings.world_dir(b, recipe_dir)`. Default canonical-East.
+- **DRILL_TICKS_PER_ORE = 40** (0.5 ore/sec at 20 sim tps). Slower than manual stone/coal/clay (2/sec) but faster than manual iron/copper (1/sec). Factorio-style automation-not-speed.
+- **DRILL_ORE_PER_FUEL = 8** (1 wood = 8 ore = 16 sec; 1 coal = 32 ore = 64 sec).
+- State machine: `IDLE / DRILLING / NO_FUEL / BLOCKED_OUTPUT / DEPLETED`. Body+head visual tinted by state (red for no fuel, yellow for blocked, gray for depleted).
+- **Highest-richness-wins deposit selection** (per Q7 design pass) — each tick scans `covered_deposits`, picks max richness, tiebreaks topmost-leftmost. Zero state, no save burden, no edge cases. Player UX: drill goes for the rich stuff first; transitions to lesser deposits as the prime ones drain.
+- `covered_deposits: Array of [x, y]` — populated once at placement (in `GridWorld.place_building` via `MiningDrill.refresh_covered_deposits` post-hook), persists in state across save/load. `make()` can't see the world, so the post-hook bridges that.
+- Q-inspect (`info_lines`) shows: Status, **prominent "Currently producing: <ore>"** (per Q11 pushback), fuel buffer, output buffer, covered deposits sorted by richness desc with per-deposit coords + remaining richness, and Facing.
+
+**Building-placement-cancels-regrowth (generic, all buildings)**
+- Pushback 1 from the design pass: building placement now cancels active tree regrowth in footprint cells. Same logic as `set_overlay`'s overlay-cancels-regrowth rule, but triggered by any building placement in any 2×2+ footprint.
+- Defensive: only cancels for `regrowth_remaining` specifically; doesn't touch ore richness or other resource_state fields.
+- Generic: applies to every building type (Mixer, Oven, drill — anything that physically occupies a tile).
+- Player intuition: if you've placed a building, the tree won't pop back through it.
+
+**Wired into existing dispatch**
+- `Buildings.Type.MINING_DRILL` enum slot appended (save-stable).
+- DATA entry: 2×2 footprint, gray-brown swatch, `requires_overlay: [NONE, STONE]` (drill can sit on bare grass OR stone industrial floor; soil/path don't make sense).
+- `make()` / `tick_one()` / `draw_one()` / `info_lines_for()` dispatch added.
+- `GridWorld.can_place_building` calls `MiningDrill.validate_placement` for Q9 rules: ≥1 ore in footprint, no water, no trees. Errors surface via existing toast.
+- Hotbar Production category, slot 9 (now full at 9/9).
+
+**Tests: 19/19 passing** (was 18; added 1)
+- **NEW** `test_mining_drill` — covers: placement validation (4 sub-cases: valid, no-ore reject, water reject, tree reject), single-cycle production with highest-richness-wins assertion, fuel decrement at the 8-ore boundary, NO_FUEL state, save round-trip preserving drill_progress + fuel_buffer + covered_deposits, and the generic building-placement-cancels-regrowth rule.
+
+### Decisions
+
+- **Path (b) generic Burner over Path (a) drill-specific.** Forecast: ~80 lines shared infrastructure; pays off the moment we add a second burner (smelter, charcoal kiln). Bug fixes happen in one place. Fuel-type extension is a single dict edit. Q-inspect "Fuel: 3 / 16 units" is uniform across all burners. Cost is ~10 lines of indirection that the next burner saves us 60+ on.
+- **Path (e) highest-richness-wins over (a) round-robin.** Round-robin needs cursor state, has tiebreak edge cases, requires save round-trip, and feels arbitrary to the player ("why is the drill ignoring the rich tile?"). Highest-richness needs zero state, no edge cases, no save burden — and matches the player's instinct ("drill goes for the rich stuff first"). Tiebreak is topmost-leftmost (sort by y, then x); deterministic.
+- **Drill produces ore at uniform 0.5/sec across all ore types.** Factorio model: automation isn't faster than manual; it's *unattended*. Iron/copper drilling at 0.5/sec is half the manual rate (1/sec) but gains the player back their attention. Stone/coal/clay drilling at 0.5/sec is a quarter of manual (2/sec); a single drill is unambiguously slower than a player crouched over a stone patch — but a *bank* of drills is a different game.
+- **`covered_deposits` cached at placement, refreshed via post-hook in `place_building`.** The alternative — recomputing every tick — was rejected: cheap per drill, but for 50+ drills it's a real cost AND the deposit list never changes after placement (depletion is handled via `richness_at(pos) > 0` filter). The post-hook in `place_building` (rather than passing world to `make()`) keeps `Buildings.make` signatures uniform.
+- **`requires_overlay: [NONE, STONE]`.** Bare grass is fine for drill placement (industrial machinery in the wilderness; matches mining-camp aesthetic). Stone overlay is the formal industrial floor. Soil/path don't make sense semantically and are rejected.
+- **No save bump.** Drill state is pure Dict (ints, arrays, strings) — rides through `Building.from_dict` round-trip with the existing v14 schema. Adding the new building type doesn't change save layout.
+- **Building-placement-cancels-regrowth pushback was right.** The `set_overlay` rule already cancels regrowth; same physical reality applies to building placement. Generalizing the existing rule to a new trigger is mechanical, not architectural — ~5 lines in `place_building`. Future 2×2+ buildings inherit it for free.
+
+### Lessons
+
+- **The "1-2 sessions ahead" forecast for Path (b) was the right framing.** Abstract "extensible vs simple" debates produce hand-wavy answers. Concrete projection ("here's the smelter's `_try_pull_fuel`; here's the charcoal kiln's") forces the comparison to be honest. Both paths look the same at session 1; Path (b) starts winning at session 2. The forecast was the difference between a confident decision and a coin-flip.
+- **Save model has hidden assumptions.** First test draft tried to verify ore richness round-trip after save/load. Failed because the save/load model is procgen-rehydration: WorldGenerator regenerates the canonical world from seed, then `resource_state_modifications` applies player deltas on top. Test world used `_set_ore` to manually place tiles — those tiles aren't in worldgen, so the modifications applied to nothing. Resource round-trip is already covered by `test_resource_state_modifications_roundtrip` (which uses WorldGenerator). Lesson: when writing a test that touches save/load, either go through worldgen (full faithful round-trip) or scope the test to verify only the new state shape (drill state in our case). Don't reach across system boundaries unless the boundary itself is the test target.
+- **`make()` can't see the world.** Standard pattern in this codebase: `Buildings.make(t, pos, dir, extra)` returns a Building before `place_building` registers it. Drill's `covered_deposits` needs the world's tile dict to populate; the post-hook in `place_building` (after `Buildings.make` returns, before `buildings[pos] = b`) is the natural seam. This pattern will recur for any future building that needs a world-context-aware initial state.
+
+### Roadmap implications
+
+- **Smelter** (likely next mining-tier session): `Burner` is ready. Smelter `make` calls `Burner.make_state()`, smelter tick calls `Burner.try_pull_fuel` + `Burner.consume_tick(b, RECIPE_TICKS_PER_FUEL_UNIT)`. Recipe-driven via existing `Processor` infrastructure. Combined estimate: ~30 lines of smelter glue + recipe entries.
+- **Charcoal kiln** (parallel): same shape; consumes WOOD as both input AND fuel. Output CHARCOAL becomes a higher-tier fuel (8 units? to be tuned). Burner's `FUEL_VALUES` already designed for the addition.
+- **Tier-2 burner drill / electric drill**: speed multiplier on `DRILL_TICKS_PER_ORE`. Out of scope for this session per spec.
+- **Lumber camp**: not a burner; calls `chop_tree` directly on adjacent trees with built-in scheduling. Unrelated to Burner architecture; mentioned for completeness.
+- **Ore depletion at drill scale**: a single drill fully drains a typical 100-richness patch in 200 seconds (3.3 min). Several drills clustered will drain a region quickly. Future "find new patches" exploration loop becomes a real game pressure once drills proliferate.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers, click-to-pan-from-minimap — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Production category at 9/9.** No room to add a 10th building. Next building added to Production triggers either splitting into a new category ("Mining" comes to mind) or rebalancing Refining (currently also 9/9). Layout choice deferred to next placement session.
+
+---
+
 ## Tree harvesting — manual tier + variable yield (save v13 → v14)
 
 **Date:** 2026-05-04

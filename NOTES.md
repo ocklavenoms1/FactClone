@@ -149,33 +149,33 @@ R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`)
 
 ---
 
-## Resource harvesting roadmap (manual tier shipped, drill/lumber tiers next)
+## Resource harvesting roadmap (manual + ore-drill tiers shipped, lumber camp + processing next)
 
-**Status update:** **MANUAL TIER for both ore and trees has shipped.**
-- Ore mining at `session-mining-manual`: walk adjacent → hold Space → drain richness → tile reverts at 0. 5 ore items.
-- Tree chopping at `session-tree-harvest`: walk adjacent → hold Space → 2-second chop → wood (1-4 yield, varies with visible size) → 5-minute regrowth.
-- Save v14 persists per-tile state (richness, regrowth_remaining) via generic Dict-shape `resource_state_modifications`. Future state types (crops, berries, etc.) are config-only additions.
+**Status update:**
+- **Manual tier shipped** for both ore and trees.
+  - Ore mining at `session-mining-manual`: walk adjacent → hold Space → drain richness → tile reverts at 0. 5 ore items.
+  - Tree chopping at `session-tree-harvest`: walk adjacent → hold Space → 2-second chop → wood (1-4 yield) → 5-minute regrowth.
+- **Burner mining drill shipped** at `session-mining-drill`. 2×2 building, fed fuel from adjacent belt/chest, produces ore at 0.5/sec into prefer_dir output port. Highest-richness-wins deposit selection across the 4-tile footprint. Generic `Burner` module (`scripts/world/burner.gd`) ready for smelter / charcoal kiln reuse.
+- Save v14 persists per-tile state (richness, regrowth_remaining) via generic Dict-shape `resource_state_modifications`. Drill state lives on `Building.state` (no schema change at session-mining-drill).
 
-**What remains: building-tier automation + processing chains.**
+**What remains: lumber-camp tier + processing chains.**
 
-**Drill tier + lumber camp (next likely sessions):** placeable buildings that automate ore mining and tree chopping. Architecture supports this directly:
-- `HARVEST_TICK_INTERVAL` is a per-resource dict on `main.gd`. Drills/lumber can use their own intervals or multipliers.
-- `GridWorld.deplete_resource(pos, amount)` already takes an amount parameter — drills extract more per tick.
-- `GridWorld.chop_tree(pos)` is a one-shot primitive — lumber camp calls it on a schedule.
-- `GridWorld.wood_yield_for_tree(pos)` static helper — lumber camp calls to compute output.
-- Resource_node + richness + regrowth_remaining model is in place.
-- Buildings just need new entries in `Buildings.tick_one`.
+**Lumber camp (next likely):** placeable building that automates tree chopping. Calls `GridWorld.chop_tree(pos)` on a schedule, reads `GridWorld.wood_yield_for_tree(pos)` for output count. Not a Burner (manual chopping is "free"; lumber camp could be Burner-fed for speed, or could be passive — design TBD). Less urgent than smelter; processing chains unlock more gameplay than a second harvester.
 
-Manual harvest stays as the fallback / early-game tool. Building upgrades feel like meaningful automation gain (10-20× faster, no manual button-holding, scales beyond walking radius).
+**Tier-2 drill (deferred indefinitely):** electric drill upgrade per spec. Out of scope until electricity infrastructure lands (very late). Architecturally trivial — speed multiplier on `DRILL_TICKS_PER_ORE`.
 
-**Hooks already in place (as of session-tree-harvest):**
+Manual harvest stays as the fallback / early-game tool. Drill is unambiguously slower than manual for stone/coal/clay (0.5 vs 2/sec) but unattended — a *bank* of drills is a different game.
+
+**Hooks already in place (as of session-mining-drill):**
 
 - `ResourceNodes.is_renewable(t)` distinguishes ore from trees in behavior.
-- `GridWorld.deplete_resource(pos, amount)` — canonical ore extraction primitive.
+- `GridWorld.deplete_resource(pos, amount)` — canonical ore extraction primitive (used by manual mining AND mining drill).
 - `GridWorld.chop_tree(pos)` — canonical tree chop primitive (single-shot, starts regrowth).
 - `GridWorld.wood_yield_for_tree(pos)` — deterministic yield helper.
 - `resource_state[pos]` — per-tile dict; `{richness, original_richness}` for ore, `{regrowth_remaining}` for chopped trees, future fields for future types.
 - Save format v14 — `resource_state_modifications` is generic Dict; future state types add keys without schema bump.
+- `Burner` static helpers (`scripts/world/burner.gd`) — fuel buffer, fuel pull from belt/chest, per-tick consumption. First consumer was the mining drill; second consumer (smelter or charcoal kiln) will reuse without extension.
+- Building-placement-cancels-regrowth (`GridWorld.place_building`) — generic to all building types. Future 2×2+ buildings inherit it for free.
 
 **Stage 5 (processing chains)** — still the plan:
 - `stone_crusher`: `raw_stone × N → stone_block × 1` (the existing stone overlay becomes a consumable item).

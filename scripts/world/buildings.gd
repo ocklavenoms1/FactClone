@@ -45,6 +45,8 @@ enum Type {
 	RETTER,
 	LOOM,
 	TAILOR,
+	# Mining automation (session-mining-drill).
+	MINING_DRILL,
 }
 
 const DATA: Dictionary = {
@@ -192,6 +194,17 @@ const DATA: Dictionary = {
 		"supports_direction": true,
 		"player_drainable": false,
 	},
+	Type.MINING_DRILL: {
+		"name": "Mining Drill",
+		"swatch_color": Color(0.45, 0.40, 0.32),    # gray-brown industrial body
+		"footprint": Vector2i(2, 2),                 # 2x2 covers up to 4 ore tiles
+		# Goes on bare grass OR stone overlay (industrial floor). Custom
+		# placement check (in mining_drill.can_place) additionally enforces
+		# >=1 covered ore tile, no water, no trees in footprint.
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE],
+		"supports_direction": true,                  # output port rotates
+		"player_drainable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -315,6 +328,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Loom.make(pos, dir)
 		Type.TAILOR:
 			return Tailor.make(pos, dir)
+		Type.MINING_DRILL:
+			return MiningDrill.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -333,6 +348,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
 		Type.RETTER, Type.LOOM, Type.TAILOR:
 			Processor.tick(b, world)
+		Type.MINING_DRILL:
+			MiningDrill.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -378,6 +395,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Loom.draw(b, canvas, world_pos, tile_size)
 		Type.TAILOR:
 			Tailor.draw(b, canvas, world_pos, tile_size)
+		Type.MINING_DRILL:
+			MiningDrill.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -574,6 +593,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
 		Type.RETTER, Type.LOOM, Type.TAILOR:
 			return Processor.info_lines(b, world)
+		Type.MINING_DRILL:
+			return MiningDrill.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():
