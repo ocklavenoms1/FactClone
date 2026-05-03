@@ -338,6 +338,18 @@ func find_adjacent_drainable(center: Vector2i) -> Building:
 func _process(_delta: float) -> void:
 	queue_redraw()
 
+## Convert "I want N pixels on screen" to "this many world units, given the
+## current camera zoom." For draw_line widths and hover/port outlines that
+## should look the same size at any zoom, pass the result here.
+func screen_px(world_px: float) -> float:
+	if camera == null:
+		return world_px
+	# Floor at the requested base width so things never get thinner than
+	# they would be at zoom = 1; just stops the line from disappearing
+	# when zoomed in close. (Looks fine to overshoot the fixed size at
+	# high zoom — makes outlines emphatic.)
+	return max(world_px, world_px / camera.zoom.x)
+
 func _draw() -> void:
 	var view_min: Vector2
 	var view_max: Vector2
@@ -368,7 +380,11 @@ func _draw() -> void:
 		if t.overlay != Terrain.Overlay.NONE:
 			draw_rect(rect, Terrain.overlay_color(t.overlay), true)
 
-	# Grid lines.
+	# Grid lines — width in world units so the line scales with the tile.
+	# At low zoom this fades the line slightly (sub-pixel anti-aliased),
+	# but keeps the line visually flush with tile boundaries instead of
+	# overshooting them at low zoom (the trade-off the "overlay matches
+	# tile" verification criterion picks).
 	for x in range(min_tile.x, max_tile.x + 1):
 		var x_pos: float = x * TILE_SIZE
 		draw_line(Vector2(x_pos, min_tile.y * TILE_SIZE), Vector2(x_pos, max_tile.y * TILE_SIZE), GRID_COLOR, 1.0)
@@ -407,6 +423,7 @@ func _draw() -> void:
 			if blocked:
 				break
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
+		# Outline width in world units so it scales with the tile.
 		draw_rect(hover_rect, hover_color, false, 2.0)
 		# Direction preview arrow for directional placements (belts and every
 		# rotatable processor). Centered on the footprint, not the anchor

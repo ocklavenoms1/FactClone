@@ -70,15 +70,30 @@ That's the verifiable scope. Everything beyond that — reading state programmat
 
 ---
 
-## ⚠ Active git stash: zoom feature (WIP)
+## Camera zoom — shipped, known limitations
 
-**There is an uncommitted-but-stashed zoom implementation.** Don't forget about it.
+**Status:** mouse-wheel zoom + smooth-lerp shipped at `session-camera-zoom`. The stash's displacement bug was diagnosed (sub-pixel jitter from non-integer zoom × fractional camera position) and fixed via project-level pixel-snap rendering. The zoom spec previously in `SESSION_E_PLAN.md` is now history; this entry replaces the stash reminder.
 
-- **Stash:** `stash@{0}` — message `WIP: zoom feature, displacement bug unresolved, return to fresh later`.
-- **What it touches:** `scripts/main.gd` (wheel input + smooth-lerp zoom toward target), `scripts/world/grid_world.gd` (added `screen_px()` helper, scaled grid lines / hover preview / arrow widths), `scripts/world/buildings.gd` (scaled multi-tile border + port indicators).
-- **Why stashed:** at low zoom, the user reported a "squares are displaced" visual bug. The repro was unclear (screenshot showed grid only, no visible buildings/player). Investigation paused; we pivoted to other work.
-- **When returning:** restore with `git stash pop` (or `git stash apply` if you want to keep the entry), launch, place a recognizable building (e.g. Mill on stone), zoom out to the displacement state, screenshot it, and debug from there. Likely culprits: sub-pixel rounding in `screen_px()`-scaled draw widths, or camera position not snapped to integer pixels at low zoom.
-- **Spec reference:** the camera-zoom spec section in `SESSION_E_PLAN.md` (current at the time the stash was made — may have moved by the time you read this).
+### Known limitation: outlines fade at extreme zoom-out
+
+Hover indicator, grid lines, building borders, port dots, and direction arrows all use **world-unit widths** so they scale with the tile. The trade-off chosen during the session: at zoom 0.85, a 2-world-unit outline = 1.7 screen pixels (sub-pixel anti-aliased — visible but thin). At default zoom 1.5, 3 px (clear). At max zoom 6.75, 13.5 px (chunky but proportional).
+
+The alternative was screen-fixed outline widths via a `screen_px()` helper. That made outlines overshoot small tiles at low zoom — the hover box looked larger than the tile beneath it. The "outline matches tile exactly" verification criterion took priority over "outlines stay readable at any zoom."
+
+**Future fix option (deferred):** minimum-pixel-floor for hover outline only. Pseudocode:
+
+```gdscript
+var width: float = max(world_units, 2.0 / camera.zoom.x)  # at least 2 screen px
+draw_rect(rect, color, false, width)
+```
+
+This keeps world-unit widths above default zoom (preserving exact tile alignment when zoomed in) but adds a floor at low zoom so the outline stays at least 2 screen pixels visible. Add only if it bites in playtest. ~30 minutes of work — small, scoped, easy to layer in later.
+
+The wider concern (outlines fading on placeholder art) is solved long-term by **moving from colored rectangles to actual sprites** — sprite outlines are inside the sprite texture, not draw_line/draw_rect calls, so they don't have the screen/world dimension question. Sprite migration is its own future session.
+
+### `screen_px()` helper kept but unused
+
+`grid_world.gd::screen_px(world_px)` exists for future in-world overlays that genuinely need constant screen-pixel size. No current callers. Cheap to keep; removing later if dead code accumulates is trivial.
 
 ---
 

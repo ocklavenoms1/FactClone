@@ -395,12 +395,14 @@ const _PORT_OUTLINE: Color = Color(0.05, 0.04, 0.03)
 
 ## Draw an unmistakable 2px border around the entire footprint of a multi-
 ## tile building. Single-tile buildings get nothing extra (their own draw
-## already paints a tile-bound trim border).
+## already paints a tile-bound trim border). Width scales inversely with
+## zoom at overview so the border stays visible at ~40-tile factory views.
 static func _draw_multitile_border(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	var fp: Vector2i = footprint_of(b.type)
 	if fp.x <= 1 and fp.y <= 1:
 		return
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size * fp.x, tile_size * fp.y))
+	# Width in world units so the border scales with the building footprint.
 	canvas.draw_rect(rect, _MULTITILE_BORDER_COLOR, false, _MULTITILE_BORDER_WIDTH)
 
 ## Draw small filled / hollow circles on each edge cell that hosts a recipe
@@ -473,6 +475,9 @@ static func _draw_port_dot(canvas: CanvasItem, cell: Vector2i, port_dir: int, ti
 	# step in port_dir from the building, so subtract to nudge inward).
 	var nudge: Vector2 = -Vector2(Belt.DIR_VECS[port_dir]) * (tile_size * 0.40)
 	var dot_pos: Vector2 = center + nudge
+	# Radius and outline widths in world units — port dots scale with the
+	# tile they sit on. At low zoom the dots become small; flagged in
+	# INVENTORY_UI_PLAN-style follow-up if visibility becomes a real issue.
 	if active:
 		canvas.draw_circle(dot_pos, _PORT_RADIUS, color)
 		canvas.draw_arc(dot_pos, _PORT_RADIUS, 0.0, TAU, 16, _PORT_OUTLINE, 1.0)

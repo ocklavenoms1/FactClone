@@ -10,6 +10,17 @@ const SLOTS_PER_BAG: int = 4
 const BAG_CAP: int = 5
 const BAG_CONFIRM_WINDOW: float = 3.0   # seconds; "press B again to confirm"
 
+# Camera zoom range. Computed against the 1080-px viewport short axis:
+#   ZOOM_MIN = 1080 / (TILE_SIZE * 40 tiles) ≈ 0.84   → ~40-tile overview
+#   ZOOM_MAX = 1080 / (TILE_SIZE * 5 tiles)  ≈ 6.75   → ~5-tile detail
+# Each wheel notch multiplies target_zoom by ZOOM_STEP (or 1/ZOOM_STEP).
+# Smoothing lerps actual camera.zoom toward target_zoom each frame.
+const ZOOM_MIN: float = 0.85
+const ZOOM_MAX: float = 6.75
+const ZOOM_STEP: float = 1.15
+const ZOOM_SMOOTH_RATE: float = 12.0
+var target_zoom: float = 1.0
+
 @onready var player: CharacterBody2D = $Player
 @onready var camera: Camera2D = $Player/Camera
 @onready var grid_world: Node2D = $GridWorld
@@ -65,6 +76,9 @@ func _ready() -> void:
 	inventory_grid.toast_callback = _show_toast
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.
 	player.inventory_grid = inventory_grid
+	# Initialize zoom from whatever the camera was authored at, so target
+	# tracking starts in lockstep instead of snapping on first wheel input.
+	target_zoom = camera.zoom.x
 
 	if SaveSystem.save_exists():
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
@@ -94,6 +108,14 @@ func _process(delta: float) -> void:
 	# open closes the grid in preference to the info panel.
 	if inventory_grid.is_open() and Input.is_action_just_pressed("close_info_panel"):
 		inventory_grid.toggle()
+
+	# Smooth-zoom: lerp camera.zoom toward target_zoom each frame.
+	# Pure visual update — runs regardless of modal state so an in-flight
+	# zoom-out animation completes even if the player opens inventory
+	# mid-scroll. Wheel input updates target_zoom in _unhandled_input
+	# below; that path IS gated when modal is open.
+	var z: float = lerp(camera.zoom.x, target_zoom, clamp(delta * ZOOM_SMOOTH_RATE, 0.0, 1.0))
+	camera.zoom = Vector2(z, z)
 
 	# When the inventory grid is open: skip world / hotbar / placement /
 	# inspect / save / consume input. Game tick still runs (factory keeps
@@ -223,6 +245,25 @@ func _process(delta: float) -> void:
 		grid_world.buildings.size(),
 		TickSystem.current_tick, hotbar.current_label(), dir_indicator
 	]
+
+## Mouse-wheel zoom. Wheel up zooms in (closer), wheel down zooms out
+## (farther). Updates `target_zoom`; the lerp in _process smooths the
+## actual camera.zoom toward it. Clamped to [ZOOM_MIN, ZOOM_MAX] so the
+## player can't zoom past the spec'd range.
+##
+## Modal gating: the InventoryGrid uses MOUSE_FILTER_STOP, so when it's
+## visible Godot's input routing intercepts wheel events at the Control
+## level and they don't propagate here. The explicit is_open() guard
+## below is belt-and-suspenders — keeps the design intent visible if
+## the InventoryGrid's mouse_filter ever changes.
+func _unhandled_input(event: InputEvent) -> void:
+	if inventory_grid != null and inventory_grid.is_open():
+		return
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			target_zoom = clamp(target_zoom * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			target_zoom = clamp(target_zoom / ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
 
 func _try_place(pos: Vector2i) -> void:
 	match hotbar.current_kind():

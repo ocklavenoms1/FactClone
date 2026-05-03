@@ -9,6 +9,46 @@ Each entry has three sections:
 
 ---
 
+## Camera zoom session — pop the stash, diagnose displacement, ship
+
+**Date:** 2026-05-02
+**Tag:** `session-camera-zoom`
+
+The deferred zoom feature from late Session D, stashed when the displacement bug couldn't be characterized at the time. Popped, conflict-resolved against three intervening sessions of main.gd churn, diagnosed (sub-pixel jitter from non-integer zoom × fractional camera position), fixed.
+
+### What shipped
+
+- **Mouse wheel zoom in/out**, smooth-lerped via `target_zoom` toward `camera.zoom` at 12/sec convergence rate.
+- **Zoom range:** `[0.85, 6.75]` clamped per wheel notch (×1.15 multiplier). Range computed against the 1080-px viewport short axis: 0.85 ≈ ~40-tile factory overview, 6.75 ≈ ~5-tile detail.
+- **Modal input gating:** wheel zoom suspended while the inventory grid is open. Implicit via `MOUSE_FILTER_STOP` on the InventoryGrid Control catching all mouse events; explicit guard in `main.gd::_unhandled_input` makes the design intent visible if the mouse_filter ever changes.
+- **Smooth-lerp loop runs regardless of modal state** — pure visual update, so an in-flight zoom-out animation completes even if the player opens inventory mid-scroll. Placed before the modal early-return in `_process`.
+- **Pixel-snap rendering settings** added to `project.godot`:
+  - `rendering/2d/snap/snap_2d_transforms_to_pixel = true`
+  - `rendering/2d/snap/snap_2d_vertices_to_pixel = true`
+  Both required — transforms-only wasn't enough; per-vertex snapping closed the remaining sub-pixel jitter.
+- **Outline widths reverted to world-unit literals.** Earlier stash version used `screen_px(N)` to keep outlines at constant screen-pixel size. At low zoom, that overshot small tiles by a relatively large proportion, looking like overlay-doesn't-match-tile. Reverted to plain world-unit widths so outlines scale with the tile and stay visually flush at every zoom level. Trade-off: at extreme zoom-out, outlines fade to sub-pixel anti-aliased lines (visible but thin); see "Known limitations" in NOTES.md.
+- **Tests:** 10 passing throughout. No new tests added (zoom is pure render-layer; can't be unit-tested without scene-tree instrumentation).
+
+### Decisions
+
+- **Pixel-snap globally via project setting, not manual camera snap.** Considered manually snapping `camera.position` each frame to keep `camera.global_position * camera.zoom.x` integer. Rejected: that would jitter the player's screen position relative to the camera (player follows world coords, camera would snap to fractional offsets). Project-level pixel snap is the cleaner Godot-native fix.
+- **Outline widths in world units, not screen pixels.** Per the user's verification spec: "hover box exactly matches tile at every zoom level." Screen-fixed outlines overshoot small tiles. World-unit outlines scale correctly. Outline readability at extreme zoom-out is the secondary concern; documented as a known limitation.
+- **`screen_px()` helper kept (unused).** Future in-world overlays that genuinely need constant screen-pixel size could call it. Cheap to keep; removing it later if dead-code accumulates is trivial.
+
+### Lessons
+
+- **Stash conflicts after multi-session intervening work were small but non-trivial.** The zoom stash was created mid-Session-D, popped after Session E final + Inventory UI shipped. main.gd had two purely-additive conflict regions (constants + _ready init); buildings.gd and grid_world.gd applied cleanly. Bounded conflict + decision-rule worked: "1-2 small hunks → resolve in place." Concatenating both sides was the fix.
+- **Stale Godot processes are a real problem on Windows.** Two zombie Godot processes from earlier sessions held the file system lock and showed pre-fix code despite multiple kill+relaunch attempts. The user's "2-tile-wide hover" report turned out to be stale-build display, not a code bug. Lesson: when a fix isn't reflected in the live game, force-kill ALL Godot PIDs (not just by image name; PID-specific) before relaunching. `taskkill /PID N /F` works after `taskkill /IM ... /F` doesn't if the process is in a hung state.
+- **Outline widths and overlay sizes are different concerns.** First instinct was "scale outline width with zoom for readability" → led to overshoot bug. Correct framing: overlay POSITION + SIZE in world coords (so they match world objects), outline WIDTH same dimensional space as overlay (so they don't visually drift). Mixing screen-fixed and world-fixed dimensions in the same draw is where the bug hid.
+- **NOTES.md predicted the displacement cause exactly.** "Likely culprits: sub-pixel rounding in screen_px()-scaled draw widths, or camera position not snapped to integer pixels at low zoom." Both turned out to be involved. Worth keeping the diagnosis-while-you-stash discipline going for future stashes.
+
+### Known limitations
+
+- **Outlines fade at extreme zoom-out.** At zoom 0.85, a 2-world-unit hover outline = 1.7 screen pixels (sub-pixel anti-aliased). At default zoom 1.5, 3 px (clear). At max zoom 6.75, 13.5 px (chunky but proportional). Trade-off accepted in this commit; documented in NOTES.md with "minimum-pixel-floor" as a future fix option.
+- **Player movement at low zoom feels less smooth.** Pixel-snap rounds the player avatar's screen position to whole pixels each frame. At zoom 0.85 this can produce a slight 1-pixel "stairstep" when moving diagonally. Acceptable; consistent with the rest of the visual style.
+
+---
+
 ## Inventory UI session — Factorio-style slot grid + chest paired view
 
 **Date:** 2026-05-02
