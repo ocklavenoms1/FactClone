@@ -6,43 +6,88 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Building Interaction UI (next session — captured at session-smelter)
+## Click-handling duplication (BuildingPanel ↔ inventory_grid)
 
-**Status:** designed-but-deferred. Session-smelter scope was the smelter mechanic; UI is its own architectural slice deserving a dedicated design pass.
+**Status:** captured at session-building-ui-1. Both `inventory_grid._handle_left_click_player` and `BuildingPanel._handle_player_slot_click` implement the same pick/place/combine/swap semantics on player inventory slots — ~30 lines of nearly-identical code in each. CursorStack is already shared; the click LOGIC isn't.
 
-**Scope:** Factorio-style building inventory access. Click a building (or press a key), modal opens showing the building's internal slots; player drags items between own inventory and building slots.
+**Why duplicated for now:**
+- Two consumers; the abstraction cost > duplication cost at N=2.
+- Modal-specific click routing differs: inventory_grid has paired-chest grid logic, BuildingPanel has slot-kind dispatch. Extracting prematurely would lock in a shape that doesn't fit.
 
-### Specific features
+**When to revisit:** Session 3 (cloth chain UIs). By then we'll have 4+ consumers (inventory_grid, BuildingPanel + per-building subclasses Mill, Mixer, Oven, etc.). At that point either:
+- Extract to a static helper in `CursorStack.click_swap(slot, cursor) -> void`.
+- Or extract to `SlotWidget.handle_click(slot_provider, cursor)` if rendering and click logic want to share a tighter interface.
 
-- **Free mouse / neutral cursor mode.** Player can clear the held hotbar item to get a normal pointer that doesn't hover-preview placements. Trigger: right-click on hotbar? Dedicated key (Q to clear)? TBD in design pass.
-- **Click-to-open building modal.** Click a building (or press E on it) to open its internal inventory view. Modal shows:
-  - Input slot(s) — where ore / raw materials feed in
-  - Output slot(s) — where products come out
-  - Fuel slot (for burner buildings) — separate from input/output
-  - Buffer state — current contents visible
-- **Drag-drop between player inventory and building slots.** Same drag mechanics as the future inventory-v2 polish item (right-click half-stack, drag-drop between slots). Two-grid display: player inventory on bottom, building slots on top.
-- **Slot abstraction across buildings.** Every interactive building exposes a `slot_layout` describing its slots (which are inputs, which are outputs, which are fuel). UI renders generically based on this. Drill, smelter, and future buildings all participate.
-- **Modal input gating.** Building modal blocks world inputs while open (same pattern as inventory grid, M-map).
+Mark as smell now so it doesn't get forgotten when the third consumer lands.
 
-### Why deferred
+---
 
-These are substantial UI features. Smelter session focused on the smelter mechanic and the multi-recipe + Burner-reuse architecture; UI is its own architectural slice. Mixing them into one session would have meant 2× scope and a fuzzier verification surface.
+## Building Interaction UI — multi-session arc (Session 1 shipped at session-building-ui-1)
 
-### Estimated scope
+**Status:** **Session 1 SHIPPED** at `session-building-ui-1`. Foundation infrastructure (slot_layout registry, BuildingPanel base, CursorStack shared across modals, Esc priority chain, NEUTRAL cursor mode, adjacency-gated click-to-open) plus specialized UIs for **smelter and mining drill**. Sessions 2–4 add specialized UIs for remaining buildings tier by tier.
 
-1–2 sessions. Real design pass needed for cursor states, slot abstraction, drag mechanics. Cursor-state design alone (hotbar item held vs. free pointer vs. modal open) is non-trivial because it touches every input handler currently gated on "is the player holding something."
+### What's shipped (session-building-ui-1)
 
-### Buildings affected
+- `scripts/ui/cursor_stack.gd` — shared cursor object, persists across modals, serializes to `player_progression["cursor"]`.
+- `scripts/ui/slot_widget.gd` — extracted slot rendering (used by inventory_grid + every building panel for visual uniformity).
+- `scripts/ui/building_panel.gd` — base class with modal lifecycle, drag-drop, kind-validation (input/output/fuel/output_multi), lossy fuel take-back, player inventory render at bottom.
+- `scripts/ui/smelter_panel.gd` + `scripts/ui/drill_panel.gd` — specialized layouts (progress bar, coverage 2×2, multi-output sub-slots).
+- `Buildings.slot_layout_for(t)` + `has_interaction_ui(t)` data registry.
+- `Buildings.DATA[SMELTER].slot_layout` + `Buildings.DATA[MINING_DRILL].slot_layout`.
+- Hotbar `has_selection()` / `clear_selection()` + neutral visual (dim brackets, no border).
+- `main.gd` Esc priority chain + click-to-open dispatch + Manhattan-1 adjacency check + cursor save/load via `_capture_cursor_in_progression()`.
+- Multi-tile hover rect (clicks any cell of a 2×2 building → highlights the full footprint).
+- Tests: 21/21 passing (added `test_building_ui` covering 7 sub-suites).
 
-- **Retroactive:** Mining Drill, Smelter — both currently expose state via Q-inspect (info panel, read-only) but have no drag-in/drag-out interaction.
-- **Future:** all interactive buildings should participate via `slot_layout`. Defining the slot_layout schema is the first architectural deliverable of that session.
+### Session 2 (next): Chest + food chain
 
-### Hooks already in place
+**Specialized UIs to add:**
+- Chest — replaces the existing inventory_grid paired-view hack with a BuildingPanel subclass. Slot layout: N output_multi sub-slots (chest is bulk; sub-slots ≈ TOTAL_CAPACITY / max_stack). Migration concern: existing `Chest.try_insert`/`bag` API stays; just the rendering layer changes. Inventory_grid's chest-paired-view code can be deleted once chest_panel.gd is wired.
+- Mill — single input + single output + (no fuel — Mill is currently fuel-less). Layout: input → progress bar → output, like smelter minus the fuel slot. ~120 lines (smaller than smelter).
+- Mixer — 2 solid inputs (flour W, yeast N) + fluid input (water, no slot — pipe-driven) + 1 output. Layout has 2 input slots side-by-side, fluid indicator, output. Slot_layout shape extension may be needed for the fluid indicator (display-only, not drag-droppable).
+- Oven — 1 input (risen dough) + 1 fuel (briquette) + 1 output (bread). Mirrors smelter exactly. ~150 lines.
+- Proofer — 1 input + 1 output, no fuel. ~110 lines.
+- Packager — 1 input (bread, count 4) + 1 output (loaf pack). ~110 lines.
 
-- `Buildings.info_lines_for(b, world)` — read-only state introspection. The slot_layout is the natural extension: same dispatch, structured-data return instead of strings.
-- `Inventory.has_room_for(item_type, count)` — supports drag-in capacity checks.
-- `Chest.try_insert` / `try_pull` and `Belt.try_insert` / `try_pull_matching` — generalized drag-in/out primitives that the modal can call per-slot.
-- Modal-gating pattern: inventory grid and M-map already implement "consume input while modal is open." Reuse the pattern.
+**Architectural concerns:**
+- Fluid input visualization in slot_layout. Add `kind: "fluid"` slots that render as a non-droppable indicator showing connection status (similar to Q-inspect's "Fluid in: Water (via adjacent pipe network)").
+- Recipe-progress display generalizes to all Processor-class buildings. Smelter's progress bar is essentially universal — extract into a `ProcessorPanel` intermediate class? Decide at start of Session 2.
+
+### Session 3 (after Session 2): Cloth chain + remaining processors
+
+**Specialized UIs to add:**
+- Retter — 1 input + 1 fluid + 1 output. Same shape as Mixer but smaller.
+- Loom — 1 input + 1 output, no fuel. Mirrors Proofer.
+- Tailor — 1 input + 1 output, no fuel. Mirrors Loom.
+- Briquetter — 1 input + 1 output, no fuel. Mirrors Loom.
+- Sugar Press — 1 input + 1 output, no fuel. Mirrors Loom.
+- Yeast Culture — 1 input + 1 fluid + 1 output. Mirrors Retter.
+
+**At this point (4+ panel subclasses sharing ~80% of layout):** revisit click-handling duplication smell + processor-panel intermediate class. The "Mill/Loom/Tailor are all the same shape" pattern is cargo-cult duplication if we don't extract.
+
+### Session 4: Extraction tier
+
+**Specialized UIs to add:**
+- Harvester — 1 input slot (auto-populated from adjacent crop tile? Or just shows what was harvested?) + N output (multi-item buffer like drill). Depends on architecture decisions during the session.
+- Planter (Wheat/Sugar Beet/Flax variants) — single seed slot? Or no slot at all (seeds are in inventory only)? Planter may not need a panel; if it doesn't have buffers, the existing Q-inspect read-only view is enough.
+
+**Architectural concern:** Planter and Harvester are extraction-tier; they don't have the input-buffer / output-buffer / fuel shape that Processor-derived buildings share. If their UIs don't fit the BuildingPanel mold cleanly, that's a signal that BuildingPanel is over-fitted to processors. Plan to revisit the slot_layout schema if/when extraction UIs feel forced.
+
+### Cross-cutting follow-ups (across all 4 sessions)
+
+- **Right-click half-stack** in building slots — defer to building UI v2 polish.
+- **Animations / transitions** for modal open/close — defer.
+- **Per-slot stack max validation** — currently `max_stack` in slot_layout is a hint; enforcement is per-slot in `_drop_into_input`. Confirm the validation handles edge cases (e.g., dropping a partial stack that overflows).
+- **Drag-and-drop visual** — currently click-to-pickup, click-to-place. Real drag (button-down + move + button-up) may feel more natural; defer until playtest confirms the click pattern is unwieldy.
+
+### Hooks shipped this session (other sessions can reuse)
+
+- `Buildings.slot_layout_for(t)` — data registry; future sessions add entries.
+- `Buildings.has_interaction_ui(t)` — bool flag for click-to-open dispatch.
+- `BuildingPanel` base class with modal lifecycle + drag-drop + kind-validation.
+- `CursorStack` shared object (one instance, all modals).
+- `SlotWidget` static helper for uniform slot rendering.
+- Esc priority chain in main.gd — extending it for Session 2 panels is mechanical.
 
 ---
 

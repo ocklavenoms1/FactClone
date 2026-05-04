@@ -167,20 +167,45 @@ func _emit_changed() -> void:
 
 func current_slot() -> Dictionary:
 	var slots: Array = categories[current_category]["slots"]
-	return slots[int(categories[current_category]["selected"])]
+	var idx: int = int(categories[current_category].get("selected", NO_SELECTION))
+	if idx < 0 or idx >= slots.size():
+		return {}     # NEUTRAL — no slot selected (Esc-cleared or out of range)
+	return slots[idx]
 
 func current_kind() -> String:
-	return current_slot()["kind"]
+	# NEUTRAL → empty string. main.gd's match-statement falls through, no
+	# placement, hover preview suppressed.
+	var slot: Dictionary = current_slot()
+	return str(slot.get("kind", "")) if not slot.is_empty() else ""
 
 func current_value() -> int:
-	return current_slot()["value"]
+	var slot: Dictionary = current_slot()
+	return int(slot.get("value", -1)) if not slot.is_empty() else -1
 
 ## Per-slot free-form payload, forwarded to Buildings.make. null when absent.
 func current_extra():
-	return current_slot().get("extra", null)
+	var slot: Dictionary = current_slot()
+	return slot.get("extra", null) if not slot.is_empty() else null
 
 func current_label() -> String:
-	return _label_for(current_slot())
+	var slot: Dictionary = current_slot()
+	return _label_for(slot) if not slot.is_empty() else "(neutral)"
+
+# ---------- selection clear (session-building-ui-1) ----------
+#
+# Esc-with-no-modal-open → clear hotbar selection → enter NEUTRAL cursor mode.
+# Once cleared, current_kind() returns "" (main.gd's match-statement
+# falls through, no placement happens). Click on a slot or press a number
+# key to re-enter selection.
+const NO_SELECTION: int = -1
+
+func has_selection() -> bool:
+	return int(categories[current_category].get("selected", NO_SELECTION)) >= 0
+
+func clear_selection() -> void:
+	categories[current_category]["selected"] = NO_SELECTION
+	queue_redraw()
+	_emit_changed()
 
 # ---------- visual ----------
 
@@ -198,10 +223,19 @@ func _draw() -> void:
 	var w: int = _max_row_width()
 
 	# Header — single centered string, no overlap risk for any category name length.
+	# In NEUTRAL mode (no slot selected), brackets dim out so the player sees
+	# something changed when Esc was pressed.
 	var header_rect: Rect2 = Rect2(0, 0, w, HEADER_HEIGHT)
 	draw_rect(header_rect, HEADER_BG, true)
-	var header_text: String = "◀  [ %s ]  ▶" % categories[current_category]["name"]
-	draw_string(font, Vector2(0, HEADER_HEIGHT - 6), header_text, HORIZONTAL_ALIGNMENT_CENTER, w, 14, HEADER_TEXT)
+	var header_text: String
+	var header_color: Color
+	if has_selection():
+		header_text = "◀  [ %s ]  ▶" % categories[current_category]["name"]
+		header_color = HEADER_TEXT
+	else:
+		header_text = "◀  %s  (neutral — click building to interact)  ▶" % categories[current_category]["name"]
+		header_color = HEADER_DIM
+	draw_string(font, Vector2(0, HEADER_HEIGHT - 6), header_text, HORIZONTAL_ALIGNMENT_CENTER, w, 14, header_color)
 
 	# Slots row — center the row within the panel width.
 	var slots: Array = categories[current_category]["slots"]

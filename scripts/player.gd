@@ -5,11 +5,15 @@ const RADIUS: float = 10.0
 const BODY_COLOR: Color = Color(0.9, 0.78, 0.5)
 const OUTLINE_COLOR: Color = Color(0.2, 0.15, 0.1)
 
-# Set by main.gd at _ready. When any modal UI is open (inventory grid OR
-# map panel), player input is suspended. velocity is zeroed each tick so a
-# stale movement vector doesn't slide the player while the modal is up.
+# Set by main.gd at _ready. When any modal UI is open (inventory grid,
+# map panel, or any building panel), player input is suspended. velocity
+# is zeroed each tick so a stale movement vector doesn't slide the player
+# while the modal is up.
 var inventory_grid: Control = null
 var map_panel: Control = null
+# Building panels (session-building-ui-1). Array of references; movement
+# gates if ANY is_open(). main.gd populates after _ready.
+var building_panels: Array = []
 # Set by main.gd at _ready. Used for tile-based passability checks
 # (water blocks movement; future obstacles via Tile.is_passable()).
 var grid_world: GridWorld = null
@@ -17,6 +21,11 @@ var grid_world: GridWorld = null
 func _physics_process(delta: float) -> void:
 	var modal_open: bool = (inventory_grid != null and inventory_grid.is_open()) \
 		or (map_panel != null and map_panel.is_open())
+	if not modal_open:
+		for bp in building_panels:
+			if bp != null and bp.is_open():
+				modal_open = true
+				break
 	if modal_open:
 		velocity = Vector2.ZERO
 		return

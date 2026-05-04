@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=14 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -9,6 +9,9 @@
 [ext_resource type="Script" path="res://scripts/ui/inventory_grid.gd" id="7_invgrid"]
 [ext_resource type="Script" path="res://scripts/ui/map_panel.gd" id="8_mappanel"]
 [ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="9_minimap"]
+[ext_resource type="Script" path="res://scripts/ui/building_panel.gd" id="10_bpanel"]
+[ext_resource type="Script" path="res://scripts/ui/smelter_panel.gd" id="11_smpanel"]
+[ext_resource type="Script" path="res://scripts/ui/drill_panel.gd" id="12_drpanel"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -96,3 +99,27 @@ anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
+
+[node name="BuildingPanel" type="Control" parent="HUD"]
+script = ExtResource("10_bpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="SmelterPanel" type="Control" parent="HUD"]
+script = ExtResource("11_smpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="DrillPanel" type="Control" parent="HUD"]
+script = ExtResource("12_drpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0

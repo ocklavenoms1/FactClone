@@ -38,9 +38,11 @@ const TOOLTIP_BORDER: Color = Color(0.55, 0.55, 0.55)
 const TOOLTIP_TEXT: Color = Color(0.95, 0.95, 0.85)
 
 # Cursor stack — items the player has picked up, follows the mouse, drawn
-# above slot grid. Empty when item_type < 0.
-var _cursor_item_type: int = -1
-var _cursor_count: int = 0
+# above slot grid. Shared object owned by main.gd, set via setter; same
+# instance is also bound to BuildingPanel subclasses so the cursor persists
+# across modal switches (player picks up wood here, closes inventory, opens
+# smelter, drops wood into fuel slot — single object tracks the held stack).
+var cursor: CursorStack = null
 
 # Hover state — encoded as (grid_id, slot_idx). grid_id 0 = player, 1 =
 # chest. -1 slot_idx means no slot under cursor.
@@ -97,12 +99,12 @@ func open_chest_paired_view(chest: Building) -> void:
 	if chest == null or chest.type != Buildings.Type.CHEST:
 		return
 	# Cursor full → place into chest first.
-	if _cursor_item_type >= 0 and _cursor_count > 0:
-		if not Chest.try_insert(chest, _cursor_item_type, _cursor_count):
+	if cursor.item_type >= 0 and cursor.count > 0:
+		if not Chest.try_insert(chest, cursor.item_type, cursor.count):
 			_toast("Chest is full — clear cursor stack before opening.")
 			return
-		_cursor_item_type = -1
-		_cursor_count = 0
+		cursor.item_type = -1
+		cursor.count = 0
 	_chest_building = chest
 	_open()
 
@@ -115,30 +117,13 @@ func _open() -> void:
 	queue_redraw()
 
 func _close() -> void:
-	# Cursor stack non-empty → auto-return per locked design.
-	# First-empty-slot in player inventory + toast. If chest paired view is
-	# open AND player inventory is full, fall back to placing in the chest
-	# (always-available bulk storage unless TOTAL_CAPACITY exceeded).
-	# If neither has room, refuse close.
-	if _cursor_item_type >= 0 and _cursor_count > 0:
-		var first_empty: int = _find_first_empty_slot()
-		if first_empty >= 0:
-			inventory.slots[first_empty].item_type = _cursor_item_type
-			inventory.slots[first_empty].count = _cursor_count
-			_toast("%s ×%d returned to slot %d" % [
-				Items.name_of(_cursor_item_type), _cursor_count, first_empty + 1
-			])
-			_cursor_item_type = -1
-			_cursor_count = 0
-		elif _chest_building != null and Chest.try_insert(_chest_building, _cursor_item_type, _cursor_count):
-			_toast("%s ×%d returned to chest (inventory full)" % [
-				Items.name_of(_cursor_item_type), _cursor_count
-			])
-			_cursor_item_type = -1
-			_cursor_count = 0
-		else:
-			_toast("Place cursor stack before closing inventory.")
-			return
+	# Cursor stack persists across modal close (session-building-ui-1).
+	# Player can pick up wood here, close, open the smelter, drop into fuel
+	# slot. The cursor is shared across modals via the CursorStack object.
+	#
+	# (Old behavior: auto-returned cursor to first-empty-slot or chest, refused
+	# close if neither had room. That created a UX trap when the player wanted
+	# to drag from inventory directly into a building. Removed.)
 	visible = false
 	_chest_building = null
 	_hover_grid = -1
@@ -235,36 +220,36 @@ func _handle_left_click_player(slot_idx: int) -> void:
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
 	# Cursor empty → pick up slot's stack (if any).
-	if _cursor_item_type < 0:
+	if cursor.item_type < 0:
 		if slot.is_empty():
 			return
-		_cursor_item_type = slot.item_type
-		_cursor_count = slot.count
+		cursor.item_type = slot.item_type
+		cursor.count = slot.count
 		slot.clear()
 		queue_redraw()
 		return
 	# Cursor full → place / combine / swap.
 	if slot.is_empty():
-		slot.item_type = _cursor_item_type
-		slot.count = _cursor_count
-		_cursor_item_type = -1
-		_cursor_count = 0
-	elif slot.item_type == _cursor_item_type:
+		slot.item_type = cursor.item_type
+		slot.count = cursor.count
+		cursor.item_type = -1
+		cursor.count = 0
+	elif slot.item_type == cursor.item_type:
 		var max_stack: int = Items.max_stack_of(slot.item_type)
 		var space: int = max_stack - slot.count
-		var moved: int = min(space, _cursor_count)
+		var moved: int = min(space, cursor.count)
 		slot.count += moved
-		_cursor_count -= moved
-		if _cursor_count <= 0:
-			_cursor_item_type = -1
-			_cursor_count = 0
+		cursor.count -= moved
+		if cursor.count <= 0:
+			cursor.item_type = -1
+			cursor.count = 0
 	else:
 		var tmp_type: int = slot.item_type
 		var tmp_count: int = slot.count
-		slot.item_type = _cursor_item_type
-		slot.count = _cursor_count
-		_cursor_item_type = tmp_type
-		_cursor_count = tmp_count
+		slot.item_type = cursor.item_type
+		slot.count = cursor.count
+		cursor.item_type = tmp_type
+		cursor.count = tmp_count
 	queue_redraw()
 
 ## Chest-grid left click: simpler than player because chest is bulk
@@ -279,35 +264,35 @@ func _handle_left_click_chest(slot_idx: int) -> void:
 	var views: Array = _chest_slot_views()
 	var view_present: bool = slot_idx < views.size()
 	# Cursor empty → pick up the view's stack if present.
-	if _cursor_item_type < 0:
+	if cursor.item_type < 0:
 		if not view_present:
 			return
 		var v = views[slot_idx]
 		var item_type: int = int(v["item_type"])
 		var count: int = int(v["count"])
 		Chest._bag_remove(_chest_building.state["bag"], item_type, count)
-		_cursor_item_type = item_type
-		_cursor_count = count
+		cursor.item_type = item_type
+		cursor.count = count
 		queue_redraw()
 		return
 	# Cursor full → drop into chest, optionally swapping with the view.
 	# Capacity check: chest TOTAL_CAPACITY is honored; if full, refuse drop.
-	if Chest.free_capacity(_chest_building) < _cursor_count:
-		_toast("Chest full — cannot deposit (need %d more capacity)" % (_cursor_count - Chest.free_capacity(_chest_building)))
+	if Chest.free_capacity(_chest_building) < cursor.count:
+		_toast("Chest full — cannot deposit (need %d more capacity)" % (cursor.count - Chest.free_capacity(_chest_building)))
 		return
 	# Drop cursor into chest first.
-	Chest._bag_add(_chest_building.state["bag"], _cursor_item_type, _cursor_count)
+	Chest._bag_add(_chest_building.state["bag"], cursor.item_type, cursor.count)
 	if view_present:
 		# Swap path — pick up the view's stack onto the now-empty cursor.
 		var v2 = views[slot_idx]
 		var item_type2: int = int(v2["item_type"])
 		var count2: int = int(v2["count"])
 		Chest._bag_remove(_chest_building.state["bag"], item_type2, count2)
-		_cursor_item_type = item_type2
-		_cursor_count = count2
+		cursor.item_type = item_type2
+		cursor.count = count2
 	else:
-		_cursor_item_type = -1
-		_cursor_count = 0
+		cursor.item_type = -1
+		cursor.count = 0
 	queue_redraw()
 
 ## Shift-click: transfer entire stack to the OTHER grid (no cursor pickup).
@@ -434,7 +419,7 @@ func _draw() -> void:
 		_draw_panel(font, GRID_CHEST, "Chest", _row_count_chest())
 
 	# Cursor stack — always drawn last so it floats above slots.
-	if _cursor_item_type >= 0 and _cursor_count > 0:
+	if cursor.item_type >= 0 and cursor.count > 0:
 		_draw_cursor_stack(font)
 
 	# Hover tooltip — slot under cursor with non-empty content.
@@ -527,9 +512,9 @@ func _draw_cursor_stack(font: Font) -> void:
 	# left-alignment (no rectangle math) so it always reads near the cursor.
 	var mouse_pos: Vector2 = get_local_mouse_position()
 	var swatch_rect: Rect2 = Rect2(mouse_pos - Vector2(16, 16), Vector2(32, 32))
-	draw_rect(swatch_rect, Items.color_of(_cursor_item_type), true)
+	draw_rect(swatch_rect, Items.color_of(cursor.item_type), true)
 	draw_rect(swatch_rect, Color.BLACK, false, 1.0)
-	var count_str: String = str(_cursor_count)
+	var count_str: String = str(cursor.count)
 	var count_pos: Vector2 = mouse_pos + Vector2(8, 18)
 	draw_string(font, count_pos + Vector2(1, 1), count_str,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, COUNT_SHADOW)

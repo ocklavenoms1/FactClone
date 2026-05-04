@@ -9,6 +9,140 @@ Each entry has three sections:
 
 ---
 
+## Building Interaction UI — Session 1 of multi-session arc (save v14, no bump)
+
+**Date:** 2026-05-03
+**Tag:** `session-building-ui-1`
+
+The first slice of click-to-open building modals: Esc clears the hotbar selection, click on a building (when adjacent) opens its specialized UI panel, drag-drop between player inventory and building slots. Two specialized UIs ship: smelter and drill. The architectural foundation (slot_layout registry, BuildingPanel base class, shared CursorStack across modals) is designed to scale to all 16 buildings; future sessions add UIs for chest/food chain (Session 2), cloth chain (Session 3), and extraction (Session 4).
+
+### What shipped
+
+**Cursor state machine — three modes derived from existing state:**
+- `BUILDING_SELECTED`: hotbar has a selection AND no modal open. Held-LMB places. Existing behavior preserved.
+- `NEUTRAL`: Esc-cleared hotbar (no selection). LMB on building → opens its UI; LMB on empty tile → silent no-op.
+- `MODAL_OPEN`: any modal (inventory_grid, map_panel, building_panel, smelter_panel, drill_panel) up. Movement gated.
+
+**Esc priority chain (in `main.gd`):**
+1. inventory_grid open → close it
+2. building panel open → close it
+3. map panel open → close it
+4. info panel has target → clear
+5. hotbar has selection → clear (enter NEUTRAL with toast)
+6. else → no-op
+
+**`scripts/ui/cursor_stack.gd`** — shared cursor object (~70 lines)
+- `pick(t, c)`, `clear()`, `has_item()`, `return_to_inventory(inv)`.
+- `to_dict()` / `from_dict()` for serialization through `player_progression["cursor"]` (additive field, no save schema bump).
+- One instance owned by main.gd, passed by reference to inventory_grid + every BuildingPanel subclass. Player picks up wood in inventory, closes it, opens smelter, drops into fuel slot — single object tracks the held stack.
+- Cursor persists across modal close (was: auto-return on close; that pattern created friction for cross-modal drag).
+
+**`scripts/ui/slot_widget.gd`** — extracted slot rendering (~80 lines)
+- `draw_slot(canvas, font, rect, item_type, count, hovered, kind_border_tint)` — single source of truth for slot visuals.
+- `draw_cursor_stack(canvas, font, mouse_pos, cursor)` — floating swatch + count.
+- `border_for_kind(kind)` returns kind-tinted borders: input (cool blue), output (green), fuel (orange).
+- Used by inventory_grid AND every building panel. Visual identity uniform across all modals.
+
+**`Buildings.slot_layout_for(t)` registry**
+- New `slot_layout` field on `Buildings.DATA[type]` — Array of slot descriptors.
+- Slot shape: `{id, kind, accepts, max_stack, state_field}`.
+  - `kind`: `"input"`, `"output"`, `"fuel"`, `"output_multi"` (for drill's per-ore-type sub-stacks).
+  - `accepts`: list of valid `Items.Type` values for drag-in validation.
+  - `state_field`: which `b.state` field this slot reads/writes (lets the rendering layer be data-driven instead of per-building hardcoded).
+- Smelter: 3 slots (input/output/fuel). Drill: 2 slots (output_multi with 5 sub-slots, fuel).
+- `Buildings.has_interaction_ui(t)` flag — true when slot_layout is non-empty. Used by main.gd's click-to-open dispatch to fall back to "(no UI yet)" toast for buildings without a registered layout.
+
+**`scripts/ui/building_panel.gd`** — base class for all building modals (~340 lines)
+- Modal lifecycle: `open(b, w)`, `close()`, `is_open()`, `MOUSE_FILTER_STOP` blocks world clicks.
+- Player inventory grid rendered at the bottom of every panel (slot_widget reuse).
+- Drag-drop with kind-validation:
+  - `_drop_into_slot(slot_def, sub_idx)` — routes to `_drop_into_input` / `_drop_into_fuel` / rejects output.
+  - Wrong-type drop → toast `"This slot accepts: <list>"`.
+  - Output drop → toast `"Output slot is read-only"`.
+  - Fuel drop converts items to units atomically: 1 wood = 1 unit, 1 coal = 4, 1 briquette = 8. Won't split items (drops 5 coal but only 3 fit → 3 deposited, 2 stay on cursor).
+  - **Lossy fuel take-back** (per Q7 user pushback): clicking fuel slot with empty cursor returns `WOOD ×N` where N = current `fuel_buffer` units. Player who loaded coal accepts efficiency loss on retrieval. Simpler than tracking loaded items, no UX trap from auto-conversion accidents.
+- `output_multi` sub-slot resolution: each rendered sub-slot maps to `output_buffer[sub_idx]`; click takes that entry; remaining entries shift up via `Array.remove_at`.
+- Subclass override hooks: `_draw_building_specific(area, font)` and `_building_slot_rects()`.
+
+**`scripts/ui/smelter_panel.gd`** — specialized smelter UI (~180 lines)
+- Layout: input slot (large 64×64) ━━ progress bar with X/40 ticks + arrow ━▶ output slot (large 64×64). Fuel slot below. Status text + currently-smelting line.
+- Progress bar fills orange when SMELTING, gray when IDLE. Status text color-coded per state (Smelting/NO FUEL/Output blocked/Idle).
+- Slot labels show actual recipe item names (e.g., "Iron Ore" / "Iron Ingot") when a recipe is selected.
+
+**`scripts/ui/drill_panel.gd`** — specialized drill UI (~210 lines)
+- Layout: 2×2 coverage panel (top-left, ore-tinted cells with name + richness) + currently-mining + active-deposits list (top-right). Output row of 5 sub-slots. Fuel slot below. Status row.
+- Coverage cells show per-tile ore type and remaining richness in real time.
+- Active deposits sorted by richness descending (matches drill's `_pick_best_deposit` order). Top entry is the one currently being mined.
+
+**Multi-tile hover-rect resolution**
+- When in NEUTRAL mode and hovering any cell of an existing building's footprint, the hover indicator now highlights the full footprint at the building's anchor (instead of the 1×1 cursor cell).
+- Implemented in `grid_world._draw`: `if occupied.has(hover_tile): rect_anchor = occupied[hover_tile]; fp_size = footprint of building at that anchor`.
+
+**Adjacency requirement (per Q4 user pushback)**
+- Click-to-open requires Manhattan ≤ 1 from any cell of the building's footprint. Consistent with E-drain, manual mining, manual chopping. Click on remote building → toast `"Move closer to interact with <name>."`.
+- `main.gd::_is_adjacent_to_building(b, player_tile)` static helper.
+
+**Cursor save/load** (per Q4 user pushback)
+- Cursor serialized as `player_progression["cursor"] = {item_type, count}`. Additive field; old saves without it leave cursor empty on load.
+- `_capture_cursor_in_progression()` runs before save; `_apply_loaded_progression()` restores after load.
+
+**Tests: 21/21 passing** (was 20; added 1)
+- **NEW** `test_building_ui` — 7 sub-suites:
+  1. CursorStack pure ops (pick, clear, has_item, return_to_inventory, to_dict/from_dict round-trip, malformed-dict guard).
+  2. `Buildings.slot_layout_for` returns expected shape for SMELTER/MINING_DRILL; empty for MILL.
+  3. Hotbar `has_selection` / `clear_selection` / `current_kind() == ""` sentinel.
+  4. Click resolution via `grid_world.occupied` for multi-tile (all 4 cells of 2×2 smelter resolve to anchor (0,0)).
+  5. Adjacency check (Manhattan ≤ 1 from any footprint cell, including diagonals NOT counting as adjacent for 1-tile-distance rule).
+  6. BuildingPanel drag-drop semantics: drop into input (accepted), drop wrong-type (rejected), drop into output (rejected), drop into fuel (converted to units), lossy take from fuel (1 unit → 1 wood), output_multi sub-slot take (entries shift up).
+  7. Save/load round-trip preserves cursor through `player_progression["cursor"]`. Backward-compat: old save without cursor key → cursor stays empty.
+
+**Tangential fix:** `Recipes.get_recipe("")` now silently returns `{}` instead of warning. Empty-string is the smelter's "no recipe selected yet" sentinel; warning was log-spam.
+
+### Decisions
+
+- **(a) Inheritance over (b) composition for the BuildingPanel framework.** Each specialized UI gets its own file (smelter_panel.gd, drill_panel.gd), inheriting modal lifecycle + drag-drop from BuildingPanel. Subclasses override `_draw_building_specific(area, font)` and `_building_slot_rects()`. Per the user's "specialized layouts per building" decision (Q3), inheritance naturally expresses the "shared chassis + per-building cabin" pattern. Composition was rejected because all-building-render-in-one-file would grow to 1500+ lines by Session 4.
+- **Slot layout as data, not code.** Rendering, drag-drop, validation, and capacity checks all read from `Buildings.DATA[type].slot_layout`. Adding a new building UI = (1) add slot_layout entry, (2) write a *_panel.gd subclass with custom layout. Renaming `b.state.in_buffer` to `b.state.inputs` would be a one-line DATA edit, not a per-panel rewrite.
+- **CursorStack shared across modals.** Picked over per-modal cursor + auto-return-on-close because cross-modal drag is a real player flow (open chest, take item, close, walk to smelter, drop in). Auto-return created a UX trap. Cursor persistence + serialization is ~70 lines; auto-return logic was ~30 lines that didn't compose with multi-modal flows.
+- **Save cursor instead of force-return-on-save.** Per Q4 user pushback. Force-return creates "can't save" UX trap when inventory is full. Serializing the cursor is ~5 lines, no schema bump (additive field), matches expected save behavior. If load happens with an inventory-full + cursor-held save, the cursor is still held on load — player can drop wherever.
+- **Lossy fuel take-back.** Per Q7+Q8 user pushback. The cursor-persists + fuel-one-way combination would create accidental-loss UX traps (player picks up wood, accidentally clicks fuel slot, wood auto-converts, can't retrieve). Allowing take-back as `1 unit → 1 wood` accepts efficiency loss for coal-loaders but eliminates the trap. Simpler than tracking loaded items per-slot; no confirm dialogs.
+- **Adjacency required.** Per Q4 user pushback. The game has a physically-present player avatar; consistency with E-drain, manual mining, and manual chopping matters more than minor layout-iteration friction. Factorio's no-adjacency cursor model assumes a spectator-cursor; this game doesn't.
+- **Specialized panels live in `scripts/ui/`, not `scripts/ui/panels/`.** Single namespace. Other UI modules (info_panel, map_panel, inventory_panel) already live there; consistent location.
+- **Output_multi sub-slot index is the array index, not a stable slot ID.** Drill's `output_buffer = [[IRON,5],[COPPER,3]]` renders as sub-slot 0 (Iron) + sub-slot 1 (Copper). Clicking sub-slot 0 takes Iron and shifts Copper up to slot 0. The visual reorders mid-session. This matches chest paired view's behavior (entries reorder after takes); player learns the pattern once. Stable IDs would require per-ore-type slot mapping in state, which is more state to persist.
+- **NEUTRAL mode hotbar visual: dim header brackets, no slot border.** Subtle but discoverable. The toast on Esc-clear ("Hotbar cleared — click a building to interact, or press 1-9 to re-select.") is the discovery affordance for first-time encounter.
+- **Click-handling duplicated between inventory_grid and BuildingPanel** (per user-approved option 1). Captured in NOTES.md as smell to revisit at Session 3 (4+ consumers exist).
+
+### Lessons
+
+- **The hover-rect issue surfaced exactly at PAUSE 1.** Visual verification caught what the design pass missed: 1×1 hover rect doesn't communicate "this whole 2×2 smelter is what I'd click on." Fix was 8 lines in `grid_world._draw` (use `occupied[hover_tile]` to find the building's anchor + footprint). Surfaced before specialized UIs landed = trivial to fix; would have been obscured by panel layout work if we'd skipped the pause.
+- **`current_kind() == ""` sentinel as the NEUTRAL signal.** Using empty-string as the "no selection" sentinel let main.gd's existing match-statement (`match hotbar.current_kind(): "terrain": ...`) fall through naturally. No new branches in `_try_place`; the place_tile path simply does nothing in NEUTRAL mode. The only new branch was the click-to-open at the call site. **Pattern: reuse sentinel values to avoid match-statement explosions.**
+- **Silent failures in `Recipes.get_recipe("")` were log-spam.** Smelter-with-empty-recipe-id is a normal state, not an error. The warning only fired this session because smelter is the first building that legitimately has a transient empty recipe. Adding `if id == "": return {}` early-out at the top of get_recipe was 2 lines, removed all spurious warnings.
+- **Modal gating chains add up.** `if inventory_grid.is_open() or map_panel.is_open() or _any_building_panel_open(): return` — the chain grows linearly with each modal type. At 5+ modals, an `is_any_modal_open()` helper would be cleaner. Captured implicitly via `_any_building_panel_open()` already extracted; if the inventory_grid + map_panel checks accumulate further, they'll join the helper.
+- **Auto-return-on-close was the right call to remove.** Pre-session, `inventory_grid._close()` had ~30 lines of "stash cursor in first-empty-slot" logic. Removing it (making cursor persist) was simpler AND made cross-modal drag possible. Lesson: when a feature was added because of a constraint that no longer exists, remove the feature, don't preserve it for "compatibility."
+- **`@onready` references to scene nodes that don't exist yet** required creating stub `*_panel.gd` files at scene-wire time. The scene loader fails fast if a referenced script doesn't exist. Workflow: write the scene wiring in step 8, but have stub scripts ready (extends BuildingPanel with no overrides) so the scene loads. Specialized rendering lands in the next step. Avoided a "broken scene during step 8" hour-long debugging session.
+
+### Roadmap implications
+
+This is **Session 1 of a 4-session arc**. The slot_layout abstraction + BuildingPanel base + shared CursorStack are the foundation; the next 3 sessions add specialized UIs for the remaining buildings:
+
+- **Session 2 — Chest + food chain processors.** Chest UI (replaces existing paired-view inventory grid hack), Mill, Mixer, Oven, Proofer, Packager. ~6 new panel subclasses; main architectural concern is whether the existing chest paired-view migrates to a BuildingPanel subclass or stays as an inventory_grid mode (likely migrate for uniformity).
+- **Session 3 — Cloth chain + remaining processors.** Retter, Loom, Tailor, Briquetter, Sugar Press, Yeast Culture. ~6 panel subclasses. Click-handling-duplication smell revisits here per the NOTES follow-up.
+- **Session 4 — Extraction.** Harvester, Planter (3 variants?). Architectural concern: planter has no input/output buffer in the conventional sense (crops grow on the tile itself); UI shape may diverge enough to warrant a non-Processor-shaped slot_layout.
+
+Cross-cutting throughout: every new panel subclass is ~150-250 lines of layout. The expensive code (drag-drop, validation, modal lifecycle) was paid this session; future panels are mostly visual layout.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers, click-to-pan-from-minimap — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry. Next building added joins Mining.
+- **Click-handling duplication** between inventory_grid + BuildingPanel — captured in NOTES.md, revisit at Session 3 (4+ consumers).
+- **Specialized building UIs for remaining 14 buildings** — Sessions 2-4 (captured in NOTES.md as multi-session arc).
+
+---
+
 ## Burner smelter — first multi-recipe processor + Burner reusability validation (save v14, no bump)
 
 **Date:** 2026-05-03

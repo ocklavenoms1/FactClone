@@ -65,6 +65,12 @@ func clear_target() -> void:
 	target_kind = TargetKind.NONE
 	visible = false
 
+## True if any target (building or resource) is currently set.
+## Used by the Esc priority chain so Esc clears the info panel before
+## clearing the hotbar selection.
+func has_target() -> bool:
+	return target_kind != TargetKind.NONE
+
 func _process(_delta: float) -> void:
 	match target_kind:
 		TargetKind.NONE:

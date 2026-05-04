@@ -61,6 +61,14 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 @onready var info_panel: Control = $HUD/InfoPanel
 @onready var inventory_grid: Control = $HUD/InventoryGrid
 @onready var map_panel: MapPanel = $HUD/MapPanel
+# Building Interaction UI (session-building-ui-1). Three panel nodes; main.gd
+# routes click-to-open to the right one based on b.type. building_panel is
+# the generic fallback for buildings whose slot_layout is registered but
+# don't yet have a specialized panel (everything except smelter + drill in
+# Session 1; future sessions add specialized panels).
+@onready var building_panel: Control = $HUD/BuildingPanel
+@onready var smelter_panel: Control = $HUD/SmelterPanel
+@onready var drill_panel: Control = $HUD/DrillPanel
 @onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
@@ -94,6 +102,13 @@ var player_progression: Dictionary = {
 	"bags_consumed": 0,
 }
 
+# Shared cursor stack — passed by reference to inventory_grid + every building
+# panel so picked-up items survive modal switches (player picks up wood in the
+# inventory grid, closes it, opens the smelter panel, drops into fuel slot).
+# Persists across save/load via player_progression["cursor"] (additive field;
+# no save schema bump).
+var cursor: CursorStack = CursorStack.new()
+
 # Two-press confirm state for bag consumption. First B press shows a
 # prompt and arms the confirm window; second press within the window
 # consumes the bag. Window expires silently. See _process loop for the
@@ -112,6 +127,16 @@ func _ready() -> void:
 	# Toast callback so auto-return events surface in the HUD.
 	inventory_grid.inventory = player_inventory
 	inventory_grid.toast_callback = _show_toast
+	# Shared cursor — same instance used by every building panel.
+	inventory_grid.cursor = cursor
+	# Building panels share the same cursor + player inventory + toast.
+	for panel in [building_panel, smelter_panel, drill_panel]:
+		if panel != null:
+			panel.cursor = cursor
+			panel.inventory = player_inventory
+			panel.toast_callback = _show_toast
+	# Player gates movement on any building panel being open.
+	player.building_panels = [building_panel, smelter_panel, drill_panel]
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.
 	player.inventory_grid = inventory_grid
 	# Map panel needs world + player references for rendering and the
@@ -169,6 +194,16 @@ func _ready() -> void:
 func _apply_loaded_progression(loaded: Dictionary) -> void:
 	for key in loaded.keys():
 		player_progression[key] = loaded[key]
+	# Restore cursor stack (additive field, session-building-ui-1).
+	# Old saves don't have this key → cursor stays empty.
+	if loaded.has("cursor") and loaded["cursor"] is Dictionary:
+		cursor.from_dict(loaded["cursor"])
+
+## Pre-save hook — fold the live cursor stack into player_progression so
+## SaveSystem captures it. Missing items (cursor.has_item() == false) still
+## serialize as {-1, 0}; load_dict normalizes to clear().
+func _capture_cursor_in_progression() -> void:
+	player_progression["cursor"] = cursor.to_dict()
 
 ## Forward GridWorld.resource_changed signal to the map panel's dirty
 ## tracking so M-map / minimap re-render the affected region next frame.
@@ -226,9 +261,10 @@ func _process(delta: float) -> void:
 	# at 60fps = ~0.5 sec; per-frame cost ~0.8ms (invisible).
 	map_panel.tick_background_build()
 
-	# Minimap visibility: hide when a fullscreen modal is open (M-map or
-	# inventory grid). Cheap conditional, polled per frame.
-	minimap.visible = not (map_panel.is_open() or inventory_grid.is_open())
+	# Minimap visibility: hide when a fullscreen modal is open (M-map,
+	# inventory grid, or any building panel). Cheap conditional, polled per
+	# frame.
+	minimap.visible = not (map_panel.is_open() or inventory_grid.is_open() or _any_building_panel_open())
 
 	# Inventory toggle (I) — always handled, even while grid is open
 	# (lets I close the grid).
@@ -237,11 +273,25 @@ func _process(delta: float) -> void:
 	# Map toggle (M) — always handled. M while open also closes (matches I/inventory).
 	if Input.is_action_just_pressed("toggle_map"):
 		map_panel.toggle()
-	# Esc closes the grid if it's open. We still handle close_info_panel
-	# below for the info panel; this branch comes first so Esc-while-grid-
-	# open closes the grid in preference to the info panel.
-	if inventory_grid.is_open() and Input.is_action_just_pressed("close_info_panel"):
-		inventory_grid.toggle()
+	# Esc priority chain (session-building-ui-1):
+	#   1. inventory_grid open  → close it
+	#   2. building panel open  → close it
+	#   3. map panel open       → close it
+	#   4. info panel has target → clear target
+	#   5. hotbar has selection → clear (enter NEUTRAL)
+	#   6. else                  → no-op (future: pause menu)
+	if Input.is_action_just_pressed("close_info_panel"):
+		if inventory_grid.is_open():
+			inventory_grid.toggle()
+		elif _any_building_panel_open():
+			_close_active_building_panel()
+		elif map_panel.is_open():
+			map_panel.toggle()
+		elif info_panel.has_target():
+			info_panel.clear_target()
+		elif hotbar.has_selection():
+			hotbar.clear_selection()
+			_show_toast("Hotbar cleared — click a building to interact, or press 1-9 to re-select.")
 
 	# Smooth-zoom: lerp camera.zoom toward target_zoom each frame.
 	# Pure visual update — runs regardless of modal state so an in-flight
@@ -251,10 +301,11 @@ func _process(delta: float) -> void:
 	var z: float = lerp(camera.zoom.x, target_zoom, clamp(delta * ZOOM_SMOOTH_RATE, 0.0, 1.0))
 	camera.zoom = Vector2(z, z)
 
-	# When inventory grid OR map panel is open: skip world / hotbar / placement /
-	# inspect / save / consume input. Game tick still runs (factory keeps
-	# producing); player movement gated separately in player.gd.
-	if inventory_grid.is_open() or map_panel.is_open():
+	# When inventory grid OR map panel OR building panel is open: skip
+	# world / hotbar / placement / inspect / save / consume input. Game tick
+	# still runs (factory keeps producing); player movement gated separately
+	# in player.gd.
+	if inventory_grid.is_open() or map_panel.is_open() or _any_building_panel_open():
 		# Toast timer still ticks so auto-return / "place cursor" toasts
 		# still surface and fade.
 		if toast_timer > 0.0:
@@ -305,8 +356,17 @@ func _process(delta: float) -> void:
 			else:
 				_show_toast("%s has no directional ports" % Buildings.name_of(hovered.type))
 
-	if Input.is_action_pressed("place_tile"):
-		_try_place(hover_tile)
+	# NEUTRAL cursor mode (Esc-cleared hotbar): single LMB click on a
+	# building tile opens its interaction UI. Adjacency-gated (Manhattan ≤ 1
+	# from any footprint cell) per session-building-ui-1 design — consistent
+	# with E-drain, manual mining, manual chopping. Held-LMB doesn't fire
+	# here (use just_pressed) since modals are single-shot opens.
+	if hotbar.current_kind() == "":
+		if Input.is_action_just_pressed("place_tile"):
+			_try_open_building_ui(hover_tile, player_tile)
+	else:
+		if Input.is_action_pressed("place_tile"):
+			_try_place(hover_tile)
 	if Input.is_action_pressed("remove_tile"):
 		_try_remove(hover_tile)
 
@@ -345,6 +405,7 @@ func _process(delta: float) -> void:
 			_demo_origin = player_tile
 
 	if Input.is_action_just_pressed("quick_save"):
+		_capture_cursor_in_progression()
 		if SaveSystem.save_game(grid_world, player, player_inventory, player_progression):
 			_show_toast("Saved")
 		else:
@@ -540,6 +601,74 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 			info_panel.set_resource_target(hover_tile, grid_world)
 			return
 	info_panel.clear_target()
+
+# ---------- Building Interaction UI (session-building-ui-1) ----------
+
+## True if any specialized building panel (or the generic fallback) is open.
+func _any_building_panel_open() -> bool:
+	for panel in [building_panel, smelter_panel, drill_panel]:
+		if panel != null and panel.is_open():
+			return true
+	return false
+
+## Close whichever building panel is currently open. Called by the Esc chain.
+func _close_active_building_panel() -> void:
+	for panel in [building_panel, smelter_panel, drill_panel]:
+		if panel != null and panel.is_open():
+			panel.close()
+			return
+
+## Click-to-open dispatch. Called when in NEUTRAL cursor mode (no hotbar
+## selection) and player LMB-clicks a tile. Resolves the click to its
+## owning building (multi-tile aware via grid_world.occupied), checks
+## adjacency, then routes to the right specialized panel.
+##
+## Adjacency rule (per Q4 user pushback): Manhattan ≤ 1 from any cell of
+## the building's footprint. Consistent with E-drain, manual mining,
+## manual chopping. Click on a remote building → toast "Move closer".
+func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
+	if not grid_world.has_building_at(hover_tile):
+		return    # silent no-op — clicked empty tile
+	var b: Building = grid_world.building_at(hover_tile)
+	if b == null:
+		return
+	# Adjacency check: Manhattan distance from player_tile to ANY cell of
+	# the footprint must be ≤ 1.
+	if not _is_adjacent_to_building(b, player_tile):
+		_show_toast("Move closer to interact with %s." % Buildings.name_of(b.type))
+		return
+	# Dispatch to specialized panel by type. Buildings without a slot_layout
+	# (mill, chest, etc.) toast — UI lands in future sessions.
+	if not Buildings.has_interaction_ui(b.type):
+		_show_toast("(No interaction UI yet for %s — coming in a future session.)" % Buildings.name_of(b.type))
+		return
+	match b.type:
+		Buildings.Type.SMELTER:
+			if smelter_panel != null:
+				smelter_panel.open(b, grid_world)
+			elif building_panel != null:
+				building_panel.open(b, grid_world)
+		Buildings.Type.MINING_DRILL:
+			if drill_panel != null:
+				drill_panel.open(b, grid_world)
+			elif building_panel != null:
+				building_panel.open(b, grid_world)
+		_:
+			# Future buildings whose slot_layout exists but specialized panel
+			# doesn't: open the generic fallback.
+			if building_panel != null:
+				building_panel.open(b, grid_world)
+
+## Manhattan ≤ 1 from any cell of building b's footprint (any direction
+## including the building tile itself).
+static func _is_adjacent_to_building(b: Building, player_tile: Vector2i) -> bool:
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	for dx in fp.x:
+		for dy in fp.y:
+			var cell: Vector2i = Vector2i(b.anchor.x + dx, b.anchor.y + dy)
+			if abs(player_tile.x - cell.x) + abs(player_tile.y - cell.y) <= 1:
+				return true
+	return false
 
 func _try_interact(player_tile: Vector2i) -> void:
 	var b: Building = grid_world.find_adjacent_drainable(player_tile)

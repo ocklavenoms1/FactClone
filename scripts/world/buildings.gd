@@ -206,6 +206,28 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE],
 		"supports_direction": true,                  # output port rotates
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-1):
+		# Drill has no input slot — ore comes from terrain via deposit
+		# coverage. Output is a multi-stack widget (one per ore type).
+		# Fuel slot is one-way write but allows lossy take-back as wood-equiv.
+		"slot_layout": [
+			{
+				"id": "output",
+				"kind": "output_multi",
+				"accepts": [Items.Type.RAW_STONE, Items.Type.COAL, Items.Type.IRON_ORE,
+				             Items.Type.COPPER_ORE, Items.Type.CLAY],
+				"max_stack": 16,                       # OUTPUT_BUFFER_CAPACITY per type
+				"state_field": "output_buffer",
+				"multi_count": 5,                      # max simultaneous ore types
+			},
+			{
+				"id": "fuel",
+				"kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16,                       # Burner.FUEL_BUFFER_CAPACITY (units)
+				"state_field": "fuel_buffer",
+			},
+		],
 	},
 	Type.SMELTER: {
 		"name": "Smelter",
@@ -214,6 +236,32 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,                  # all 3 ports rotate together
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-1):
+		# Smelter has discrete in/out slots tied to whichever recipe is
+		# active. Slots accept either ore type (multi-recipe smelter).
+		"slot_layout": [
+			{
+				"id": "input",
+				"kind": "input",
+				"accepts": [Items.Type.IRON_ORE, Items.Type.COPPER_ORE],
+				"max_stack": 8,                        # recipe input_capacity
+				"state_field": "in_buffer",
+			},
+			{
+				"id": "output",
+				"kind": "output",
+				"accepts": [Items.Type.IRON_INGOT, Items.Type.COPPER_INGOT],
+				"max_stack": 8,                        # recipe output_capacity
+				"state_field": "out_buffer",
+			},
+			{
+				"id": "fuel",
+				"kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16,                       # Burner.FUEL_BUFFER_CAPACITY (units)
+				"state_field": "fuel_buffer",
+			},
+		],
 	},
 }
 
@@ -234,6 +282,20 @@ static func supports_direction(t: int) -> bool:
 
 static func is_player_drainable(t: int) -> bool:
 	return DATA[t].get("player_drainable", false)
+
+## Slot layout for the Building Interaction UI (session-building-ui-1).
+## Returns an Array of slot descriptors (see Buildings.DATA[type].slot_layout
+## for shape). Empty array = building has no interaction UI yet (chest, mill,
+## etc. — added in future sessions). Click-to-open detection uses
+## `not slot_layout.is_empty()` to decide whether to open a panel.
+static func slot_layout_for(t: int) -> Array:
+	return DATA[t].get("slot_layout", [])
+
+## True if this building type has a registered interaction UI (slot_layout
+## is non-empty). Used by main.gd to decide whether click-to-open should
+## fire or fall through to "(no UI yet)" toast.
+static func has_interaction_ui(t: int) -> bool:
+	return not slot_layout_for(t).is_empty()
 
 ## Cells immediately outside a building's footprint along a given edge.
 ## For a 1×1 building, returns one cell (= anchor + DIR_VECS[dir]).

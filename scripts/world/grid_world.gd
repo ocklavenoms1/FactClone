@@ -887,22 +887,36 @@ func _draw() -> void:
 
 	# Hover indicator.
 	if show_hover:
-		# Footprint width/height: defaults to 1×1 tile, expanded if main.gd
-		# is previewing a multi-tile building placement.
+		# Three cases for the hover rect:
+		# 1. Holding a building (hover_building_type >= 0): show that building's
+		#    footprint at hover_tile (placement preview).
+		# 2. Hover_building_type < 0 AND tile has an existing building: show the
+		#    existing building's full footprint, anchored at its actual anchor.
+		#    Lets the player see the whole 2×2 smelter when hovering any of its
+		#    cells in NEUTRAL mode.
+		# 3. Neither: 1×1 hover at hover_tile.
 		var fp_size: Vector2i = Vector2i(1, 1)
+		var rect_anchor: Vector2i = hover_tile
 		if hover_building_type >= 0:
 			fp_size = Buildings.footprint_of(hover_building_type)
-		var hover_rect: Rect2 = Rect2(hover_tile.x * TILE_SIZE, hover_tile.y * TILE_SIZE, TILE_SIZE * fp_size.x, TILE_SIZE * fp_size.y)
-		# Blocked if any footprint cell is occupied.
+		elif occupied.has(hover_tile):
+			rect_anchor = occupied[hover_tile]
+			var existing: Building = buildings.get(rect_anchor, null)
+			if existing != null:
+				fp_size = Buildings.footprint_of(existing.type)
+		var hover_rect: Rect2 = Rect2(rect_anchor.x * TILE_SIZE, rect_anchor.y * TILE_SIZE, TILE_SIZE * fp_size.x, TILE_SIZE * fp_size.y)
+		# Blocked if any footprint cell is occupied. Skipped when we're
+		# highlighting an existing building (that's not a placement intent).
 		var blocked: bool = false
-		for dx in fp_size.x:
-			for dy in fp_size.y:
-				var cell: Vector2i = Vector2i(hover_tile.x + dx, hover_tile.y + dy)
-				if tiles.has(cell) or has_building_at(cell):
-					blocked = true
+		if hover_building_type >= 0:
+			for dx in fp_size.x:
+				for dy in fp_size.y:
+					var cell: Vector2i = Vector2i(rect_anchor.x + dx, rect_anchor.y + dy)
+					if tiles.has(cell) or has_building_at(cell):
+						blocked = true
+						break
+				if blocked:
 					break
-			if blocked:
-				break
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
 		# Hover outline width: 2 world units AT zoom >= 1 (so it scales
 		# with the tile and stays exactly aligned with tile boundaries),
@@ -921,7 +935,7 @@ func _draw() -> void:
 		# rotatable processor). Centered on the footprint, not the anchor
 		# cell — for a 2×2 building this puts the arrow at the visual middle.
 		if hover_arrow_dir >= 0 and hover_arrow_dir < Belt.DIR_VECS.size():
-			var center: Vector2 = Vector2(hover_tile.x * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.x, hover_tile.y * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.y)
+			var center: Vector2 = Vector2(rect_anchor.x * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.x, rect_anchor.y * TILE_SIZE + TILE_SIZE * 0.5 * fp_size.y)
 			var dir_vec: Vector2 = Vector2(Belt.DIR_VECS[hover_arrow_dir])
 			var perp: Vector2 = Vector2(-dir_vec.y, dir_vec.x)
 			var tip: Vector2 = center + dir_vec * (TILE_SIZE * 0.32)

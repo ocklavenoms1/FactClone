@@ -211,6 +211,11 @@ const DATA: Dictionary = {
 static var _warned_unknown: Dictionary = {}
 
 static func get_recipe(id: String) -> Dictionary:
+	# Empty-string is the smelter's "no recipe selected yet" sentinel —
+	# silent miss, not a typo. Buildings call this each tick during
+	# IDLE-with-empty-buffer, and we don't want to spam the log.
+	if id == "":
+		return {}
 	if not DATA.has(id):
 		if not _warned_unknown.has(id):
 			push_warning("Recipes.get_recipe: unknown recipe id '%s' (warning shown once)" % id)
