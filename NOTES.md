@@ -6,6 +6,46 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Building Interaction UI (next session — captured at session-smelter)
+
+**Status:** designed-but-deferred. Session-smelter scope was the smelter mechanic; UI is its own architectural slice deserving a dedicated design pass.
+
+**Scope:** Factorio-style building inventory access. Click a building (or press a key), modal opens showing the building's internal slots; player drags items between own inventory and building slots.
+
+### Specific features
+
+- **Free mouse / neutral cursor mode.** Player can clear the held hotbar item to get a normal pointer that doesn't hover-preview placements. Trigger: right-click on hotbar? Dedicated key (Q to clear)? TBD in design pass.
+- **Click-to-open building modal.** Click a building (or press E on it) to open its internal inventory view. Modal shows:
+  - Input slot(s) — where ore / raw materials feed in
+  - Output slot(s) — where products come out
+  - Fuel slot (for burner buildings) — separate from input/output
+  - Buffer state — current contents visible
+- **Drag-drop between player inventory and building slots.** Same drag mechanics as the future inventory-v2 polish item (right-click half-stack, drag-drop between slots). Two-grid display: player inventory on bottom, building slots on top.
+- **Slot abstraction across buildings.** Every interactive building exposes a `slot_layout` describing its slots (which are inputs, which are outputs, which are fuel). UI renders generically based on this. Drill, smelter, and future buildings all participate.
+- **Modal input gating.** Building modal blocks world inputs while open (same pattern as inventory grid, M-map).
+
+### Why deferred
+
+These are substantial UI features. Smelter session focused on the smelter mechanic and the multi-recipe + Burner-reuse architecture; UI is its own architectural slice. Mixing them into one session would have meant 2× scope and a fuzzier verification surface.
+
+### Estimated scope
+
+1–2 sessions. Real design pass needed for cursor states, slot abstraction, drag mechanics. Cursor-state design alone (hotbar item held vs. free pointer vs. modal open) is non-trivial because it touches every input handler currently gated on "is the player holding something."
+
+### Buildings affected
+
+- **Retroactive:** Mining Drill, Smelter — both currently expose state via Q-inspect (info panel, read-only) but have no drag-in/drag-out interaction.
+- **Future:** all interactive buildings should participate via `slot_layout`. Defining the slot_layout schema is the first architectural deliverable of that session.
+
+### Hooks already in place
+
+- `Buildings.info_lines_for(b, world)` — read-only state introspection. The slot_layout is the natural extension: same dispatch, structured-data return instead of strings.
+- `Inventory.has_room_for(item_type, count)` — supports drag-in capacity checks.
+- `Chest.try_insert` / `try_pull` and `Belt.try_insert` / `try_pull_matching` — generalized drag-in/out primitives that the modal can call per-slot.
+- Modal-gating pattern: inventory grid and M-map already implement "consume input while modal is open." Reuse the pattern.
+
+---
+
 ## Tile passability system (post-mining-manual)
 
 **Status:** shipped at `session-mining-manual`. `Tile.is_passable() -> bool` is the generic blocker check. Today only water blocks; player movement uses per-axis sliding via `Player._move_with_passability(delta)`.
@@ -149,24 +189,31 @@ R-key rotates a placed building IN PLACE when hand is empty (`main.gd::167-171`)
 
 ---
 
-## Resource harvesting roadmap (manual + ore-drill tiers shipped, lumber camp + processing next)
+## Resource harvesting + smelting roadmap (manual + drill + smelter shipped; lumber-camp + kilns next)
 
 **Status update:**
 - **Manual tier shipped** for both ore and trees.
   - Ore mining at `session-mining-manual`: walk adjacent → hold Space → drain richness → tile reverts at 0. 5 ore items.
   - Tree chopping at `session-tree-harvest`: walk adjacent → hold Space → 2-second chop → wood (1-4 yield) → 5-minute regrowth.
-- **Burner mining drill shipped** at `session-mining-drill`. 2×2 building, fed fuel from adjacent belt/chest, produces ore at 0.5/sec into prefer_dir output port. Highest-richness-wins deposit selection across the 4-tile footprint. Generic `Burner` module (`scripts/world/burner.gd`) ready for smelter / charcoal kiln reuse.
-- Save v14 persists per-tile state (richness, regrowth_remaining) via generic Dict-shape `resource_state_modifications`. Drill state lives on `Building.state` (no schema change at session-mining-drill).
+- **Burner mining drill shipped** at `session-mining-drill`. 2×2 building, fed fuel from adjacent belt/chest, produces ore at 0.5/sec into prefer_dir output port. Highest-richness-wins deposit selection across the 4-tile footprint. Generic `Burner` module ready for smelter / kiln reuse — **validated this session.**
+- **Burner smelter shipped** at `session-smelter`. 2×2 building, fed iron or copper ore from W edge + fuel from S edge, produces ingots out E edge at 0.5/sec. **Multi-recipe runtime selection** via FIFO over input buffer (`_maybe_select_recipe`); recipe switches automatically when input changes. Burner module reusability validated: ~13–15 fuel lines vs drill's ~11, parity.
+- Save v14 persists per-tile state (richness, regrowth_remaining) via generic Dict-shape `resource_state_modifications`. Drill + smelter state lives on `Building.state` (no schema change at either session).
 
-**What remains: lumber-camp tier + processing chains.**
+**What remains: lumber-camp tier + ore→ingot consumers + clay/stone processing.**
 
-**Lumber camp (next likely):** placeable building that automates tree chopping. Calls `GridWorld.chop_tree(pos)` on a schedule, reads `GridWorld.wood_yield_for_tree(pos)` for output count. Not a Burner (manual chopping is "free"; lumber camp could be Burner-fed for speed, or could be passive — design TBD). Less urgent than smelter; processing chains unlock more gameplay than a second harvester.
+**Lumber camp (likely next-after-UI):** placeable building that automates tree chopping. Calls `GridWorld.chop_tree(pos)` on a schedule, reads `GridWorld.wood_yield_for_tree(pos)` for output count. Could be Burner-fed for speed or passive (design TBD).
 
-**Tier-2 drill (deferred indefinitely):** electric drill upgrade per spec. Out of scope until electricity infrastructure lands (very late). Architecturally trivial — speed multiplier on `DRILL_TICKS_PER_ORE`.
+**Charcoal Kiln (next likely burner consumer):** WOOD → CHARCOAL. CHARCOAL becomes a higher-tier fuel (~8 units?) — single FUEL_VALUES dict entry. Validates Burner module's third consumer.
 
-Manual harvest stays as the fallback / early-game tool. Drill is unambiguously slower than manual for stone/coal/clay (0.5 vs 2/sec) but unattended — a *bank* of drills is a different game.
+**Brick Kiln:** CLAY → BRICK (building material). Same shape as Charcoal Kiln; different recipe.
 
-**Hooks already in place (as of session-mining-drill):**
+**Stone Crusher:** RAW_STONE → STONE_BLOCK. Stone overlay becomes a consumable (no longer free-paint).
+
+**Tier-2 drill / electric smelter:** deferred until electricity. Architecturally trivial — speed multiplier on `time_ticks` / `DRILL_TICKS_PER_ORE`.
+
+Manual harvest stays as the fallback / early-game tool. Drill is unambiguously slower than manual for stone/coal/clay (0.5 vs 2/sec) but unattended — a *bank* of drills is a different game. Smelter at 1:1 with drill output makes the "1 drill + 1 smelter" the basic ore-tier unit.
+
+**Hooks already in place (as of session-smelter):**
 
 - `ResourceNodes.is_renewable(t)` distinguishes ore from trees in behavior.
 - `GridWorld.deplete_resource(pos, amount)` — canonical ore extraction primitive (used by manual mining AND mining drill).
@@ -174,8 +221,9 @@ Manual harvest stays as the fallback / early-game tool. Drill is unambiguously s
 - `GridWorld.wood_yield_for_tree(pos)` — deterministic yield helper.
 - `resource_state[pos]` — per-tile dict; `{richness, original_richness}` for ore, `{regrowth_remaining}` for chopped trees, future fields for future types.
 - Save format v14 — `resource_state_modifications` is generic Dict; future state types add keys without schema bump.
-- `Burner` static helpers (`scripts/world/burner.gd`) — fuel buffer, fuel pull from belt/chest, per-tick consumption. First consumer was the mining drill; second consumer (smelter or charcoal kiln) will reuse without extension.
+- `Burner` static helpers (`scripts/world/burner.gd`) — fuel buffer, fuel pull from belt/chest, per-tick consumption. **Validated reusable at session-smelter** (~13–15 fuel lines in smelter vs drill's ~11). Charcoal Kiln + Brick Kiln are next consumers; will reuse without extension.
 - Building-placement-cancels-regrowth (`GridWorld.place_building`) — generic to all building types. Future 2×2+ buildings inherit it for free.
+- **Multi-recipe Processor pattern** (`smelter.gd::_maybe_select_recipe`): pre-tick recipe selection wrapping `Processor` helpers. Foundation for any future building that needs runtime recipe switching (configurable Oven via UI, refinery, etc.). Smelter calls `Processor._try_pull_inputs / _has_all_inputs / _has_room_for_outputs / _consume_inputs / _emit_outputs / _try_push_outputs` directly — Processor's helpers double as building blocks for non-Processor.tick state machines.
 
 **Stage 5 (processing chains)** — still the plan:
 - `stone_crusher`: `raw_stone × N → stone_block × 1` (the existing stone overlay becomes a consumable item).

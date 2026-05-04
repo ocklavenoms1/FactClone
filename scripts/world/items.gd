@@ -43,6 +43,9 @@ enum Type {
 	CLAY,
 	# --- tree harvesting (session-tree-harvest) ---
 	WOOD,
+	# --- smelting (session-smelter) ---
+	IRON_INGOT,
+	COPPER_INGOT,
 }
 
 const DATA: Dictionary = {
@@ -70,6 +73,11 @@ const DATA: Dictionary = {
 	Type.CLAY:           { "name": "Clay",           "color": Color(0.68, 0.50, 0.36), "max_stack": 200 },
 	# --- tree harvesting (color matches tree trunk, not canopy — the produced item is wood) ---
 	Type.WOOD:           { "name": "Wood",           "color": Color(0.50, 0.32, 0.18), "max_stack": 200 },
+	# --- smelted ingots (refined materials; cooler/warmer than their ore counterparts
+	# to visually signal "post-furnace transformation"). Stack 100 matches refined
+	# materials (CLOTH, BREAD, FUEL_BRIQUETTE), not bulk raw (RAW_STONE/CLAY 200).
+	Type.IRON_INGOT:     { "name": "Iron Ingot",     "color": Color(0.55, 0.55, 0.62), "max_stack": 100 },
+	Type.COPPER_INGOT:   { "name": "Copper Ingot",   "color": Color(0.78, 0.55, 0.40), "max_stack": 100 },
 }
 
 static func name_of(t: int) -> String:

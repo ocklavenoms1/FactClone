@@ -173,6 +173,35 @@ const DATA: Dictionary = {
 		"output_capacity": 8,
 		"display_name": "4× Cloth (W) → Bag (E)",
 	},
+	# --- smelting chain (session-smelter) ---
+	# Smelter is the first MULTI-RECIPE building: which recipe is active is
+	# decided at runtime by smelter.gd's _maybe_select_recipe based on what
+	# ore arrives. Both recipes share port layout (W in, E out) and timing
+	# (40 ticks = 2s = 0.5 ingot/sec, matching the drill's 0.5 ore/sec rate
+	# for 1:1 drill→smelter pairing). Fuel goes in via S edge (handled by
+	# Burner module — NOT a recipe field; see smelter.gd FUEL_PORT_DIR).
+	"smelt_iron": {
+		"id": "smelt_iron",
+		"building_type": Buildings.Type.SMELTER,
+		"inputs_solid":  [[Items.Type.IRON_ORE, 1, Belt.DIR_W]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.IRON_INGOT, 1, Belt.DIR_E]],
+		"time_ticks": 40,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Iron Ore (W) → Iron Ingot (E)",
+	},
+	"smelt_copper": {
+		"id": "smelt_copper",
+		"building_type": Buildings.Type.SMELTER,
+		"inputs_solid":  [[Items.Type.COPPER_ORE, 1, Belt.DIR_W]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COPPER_INGOT, 1, Belt.DIR_E]],
+		"time_ticks": 40,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Copper Ore (W) → Copper Ingot (E)",
+	},
 }
 
 ## Look up a recipe by id. Returns {} (empty dict) if not found.

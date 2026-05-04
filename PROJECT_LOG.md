@@ -9,6 +9,108 @@ Each entry has three sections:
 
 ---
 
+## Burner smelter — first multi-recipe processor + Burner reusability validation (save v14, no bump)
+
+**Date:** 2026-05-03
+**Tag:** `session-smelter`
+
+The first ore-refining tier: a 2×2 furnace that smelts iron ore → iron ingot or copper ore → copper ingot, fed fuel by the same Burner module shipped one session ago in the mining drill. Two architectural firsts:
+1. **Multi-recipe Processor.** Mill, Mixer, etc. each have one recipe. Smelter has two and picks at runtime based on what arrives — the architectural foundation for future configurable processors (Oven via UI, kiln, refinery).
+2. **Burner module's second consumer.** This session was the validation: did the Burner abstraction pay off? Result: **yes — ~13–15 lines of fuel-related code in smelter vs ~11 in drill, rough parity**. The module's reusability is real.
+
+### What shipped
+
+**`scripts/world/smelter.gd`** (~280 lines)
+- 2×2 footprint, three rotating ports + one unused: ore in (W), ingot out (E), fuel in (S), N idle.
+- 4-state machine: IDLE / SMELTING / NO_FUEL / BLOCKED_OUTPUT. Fuel committed up-front at IDLE→SMELTING (1 fuel unit per ingot via `Burner.consume_tick(b, 1)`). NO_FUEL has explicit recovery branch — when fuel arrives mid-stall, smelter resumes immediately without waiting for the next batch boundary.
+- 40 ticks (2 sec) per ingot at 20 sim tps → 0.5 ingot/sec. Matches drill's 0.5 ore/sec rate, giving a clean 1:1 drill→smelter pairing.
+- Fuel cost asymmetry: 1 wood = 1 ingot (vs drill's 1 wood = 8 ore). Smelting is 8× more fuel-intensive than mining, reflecting the reality of sustained heat vs. mechanical extraction. Briquettes (made from wheat-chain straw) become high-value: 1 briquette = 8 ingots ties bread chain into iron production.
+- Visual: anthracite body, lighter chimney top-center, dim ember mouth bottom-center that brightens to orange-red when SMELTING. State-tinted body (cool blue for NO_FUEL, yellow for BLOCKED, orange overlay for SMELTING).
+- Q-inspect: prominent "Currently smelting: <recipe display name>" line, progress bar, in/out buffers, fuel via `Burner.info_lines`, port assignments, fuel port direction (rotated), facing.
+
+**Multi-recipe runtime selection (`_maybe_select_recipe`)**
+- The architectural meat. At IDLE, smelter scans:
+  1. **`in_buffer` first** — FIFO via array order. First-arrived ore wins. If iron is at index 0 and copper at index 1, recipe = `smelt_iron`.
+  2. **Input port peek** — if buffer is empty, scan adjacent W-edge belts for any recipe-eligible ore. First found wins.
+  3. **Else** — leave recipe_id unchanged.
+- Once SMELTING, recipe is pinned for the duration of that batch. Switching only happens at IDLE with empty in_buffer.
+- Hardcoded `_INPUT_TO_RECIPE` map (IRON_ORE → smelt_iron, COPPER_ORE → smelt_copper). At >5 entries, derive from `Recipes.for_building(SMELTER)` — for v1 (2 recipes), explicit is clearer.
+
+**`Recipes.DATA`: 2 new recipes**
+- `smelt_iron`: IRON_ORE (W) → IRON_INGOT (E), 40 ticks, capacity 8/8.
+- `smelt_copper`: COPPER_ORE (W) → COPPER_INGOT (E), 40 ticks, capacity 8/8.
+
+**`Items` registry: 2 new ingots**
+- IRON_INGOT (gunmetal gray, max_stack 100) — refined materials convention.
+- COPPER_INGOT (warm copper-orange, max_stack 100). The ore→ingot color shift (rust→gunmetal, verdigris→copper) is intentional player feedback: visibly different post-furnace.
+
+**Hotbar reorganization: new "Mining" category**
+- Previous: Production at 9/9 with no thematic home for the smelter.
+- Now: Mining category contains drill (moved from Production) + smelter. Production drops to 8/9 with a free slot for cloth-chain expansion.
+- 6 categories total (Terrain · Logistics · Production · Refining · Mining · Storage). Tab cycle still snappy.
+- Future kilns, lumber camp, charcoal kiln, drill tiers all land in Mining. If the category grows past 9, split into "Mining" + "Smelting" — captured as future-work note.
+
+**Tests: 20/20 passing** (was 19; added 1)
+- **NEW** `test_smelter` — covers basic iron production, copper production, **explicit FIFO recipe-switching contract** (4 iron in_buffer + 2 copper in_buffer → produces exactly 4 iron ingots first, then 2 copper, recipe switches at the right moment, no copper produced before iron exhausted), fuel decrement at 1-fuel-per-ingot, NO_FUEL state with refuel recovery, BLOCKED_OUTPUT state (recipe doesn't start when output at cap), save round-trip mid-batch (progress + fuel + state + recipe_id + in_buffer all preserved).
+
+### Burner integration line-count audit (architectural verification of session-mining-drill investment)
+
+| Category | Drill | Smelter |
+|---|---|---|
+| Fuel constants | 1 | 3 |
+| `Burner.make_state` merge in make() | 2 | 2 |
+| `Burner.try_pull_fuel` call | 1 | 1 |
+| `Burner.consume_tick` + NO_FUEL branch | 4 | 5 |
+| `Burner.info_lines` forwarding | 2 | 2 |
+| Fuel port display | 0 | 2 |
+| **Total fuel-mechanic lines** | **~11** | **~13–15** |
+
+**Verdict: parity. Burner architecture validated.** The ~2–4 line delta in smelter is building-specific tuning:
+- Directed fuel port (S edge) vs drill's any-edge → +2 lines (constant + display).
+- Explicit NO_FUEL recovery branch (smelter resumes mid-stall without waiting for batch boundary) → +1–2 lines.
+
+~80% of fuel logic shared via Burner module. **Charcoal Kiln (next burner building) projected at similar line count without Burner expansion.**
+
+### Decisions
+
+- **Auto-select recipe (option a) over player-set lock (option b) or hybrid (option c).** The deciding argument: belt routing IS the recipe selector. A smelter that "smelts whatever arrives" is a feature, not a limitation, because the player has full control over what arrives. Want iron-only? Build an iron-only feed line. This matches Factorio's smelter model — single-recipe-at-a-time auto-select, no per-machine config. Option (b) creates worse failure modes (wrong-ore arrives at locked smelter, sits on belt blocking the line; invisible-by-default cause). Option (c) builds UI for a 5%-of-players feature.
+- **FIFO via array order.** `in_buffer` is `Array of [type, count]` — insertion order naturally preserved across JSON round-trip. First-arrived-ore wins gives the player a deterministic mental model and survives save/load without extra state.
+- **Fuel committed up-front at IDLE→SMELTING.** With 1 fuel per ingot and 1 ingot per batch, paying fuel at the start of a batch (not mid-progress) is the simplest semantics and avoids "consumed fuel mid-batch but couldn't finish" failure modes. `Burner.consume_tick(b, 1)` = "pay 1 fuel; if fuel_buffer is 0, return false." Returning false transitions to NO_FUEL without any state mutation — clean check-and-commit idiom.
+- **2×2 footprint matches drill.** "Industrial 2×2 = mining-tier" visual identity. Pack-density cost (4 tiles per smelter) is real but minor. Matches drill so player sees consistent industrial language across the mining→smelting chain.
+- **NO_FUEL has its own state with explicit recovery, not a passive substate of IDLE.** Drill's "stay-at-threshold" pattern works for drill because drilling is incremental. Smelter is batch-based — without an explicit NO_FUEL state, the smelter would have to re-evaluate IDLE→SMELTING transition every tick, paying fuel-check overhead each time. Explicit NO_FUEL with one-direction recovery is cleaner and matches the player UX ("the smelter is stalled because it has no fuel, refuel it").
+- **Recipes registered separately, not as a "recipe family."** Each recipe is its own DATA entry. `Recipes.for_building(SMELTER)` returns both. The smelter's `_INPUT_TO_RECIPE` map is the runtime selector. This keeps the Recipes registry shape uniform — no special "polymorphic input" recipe shape.
+- **Fuel port is NOT in Recipes.DATA.** Burner is generic infrastructure, not recipe-aware. Smelter declares `FUEL_PORT_DIR` as a building-level constant. Future smelter variants (electric tier) might have different fuel concepts; keeping fuel out of Recipes.DATA preserves Burner's reusability boundary.
+- **New "Mining" hotbar category.** Two new categories (Mining + Smelting) for 1 building each was over-investment. Single "Mining" category covers the whole heavy-industry tier. Drill + smelter feels coherent. Future kilns join here. If the category exceeds 9 slots, split — flagged as future work.
+- **Recipe pre-selector wraps Processor instead of replacing it.** Smelter calls `Processor._try_pull_inputs`, `Processor._has_all_inputs`, `Processor._has_room_for_outputs`, `Processor._consume_inputs`, `Processor._emit_outputs`, `Processor._try_push_outputs` directly (calling underscore-prefixed methods). The state machine is smelter-owned; the *helpers* are shared. This validates Processor's helpers as building blocks even when the state machine itself diverges.
+
+### Lessons
+
+- **The "1-2 sessions ahead" forecast bore out exactly.** Last session's design pass projected: "Path (b) Burner module pays off the moment we add a second burner — ~80 lines saved vs Path (a) drill-specific." This session's audit: ~13–15 fuel lines in smelter vs ~50+ if we'd duplicated drill's fuel logic. Net savings ~35–40 lines on this session alone, plus a Burner module that's now battle-tested. The forecast was the difference between confident architectural choice and hand-wavy "extensible." Worth doing again for the next reusability call.
+- **Test the FIFO contract explicitly.** The "auto-select" recipe model has a subtle invariant: 4 iron + 2 copper in buffer must produce 4 iron then 2 copper, never interleaved. Without an explicit test, a future array-shuffle in some pull/sort path could break this silently. The session-smelter test_smelter test asserts batch-by-batch progression (`[1, 2, 3, 4]` iron, then `[1, 2]` copper), catching ordering regressions. Pattern worth applying to any "ordering matters" contract.
+- **Save round-trip test needed correction.** First draft asserted `in_buffer` iron count was 3 (the pre-tick value). Wrong — at the moment of save, the smelter had already transitioned IDLE→SMELTING and consumed 1 iron, so the saved value was 2. Lesson: when testing save round-trip mid-operation, capture the pre-save value and compare to post-load, don't hardcode the expected. Same trap I almost hit in the drill test (resource_state).
+- **Calling `Processor._helper` from outside Processor is fine.** GDScript's underscore is convention, not enforcement. The helpers (`_try_pull_inputs`, `_consume_inputs`, etc.) are pure static functions taking explicit arguments — they're naturally reusable. The convention violation is documented with one comment in smelter.tick. If reuse grows beyond smelter, rename to drop the underscore (or add public passthrough wrappers). For now, calling underscore methods is the pragmatic answer.
+- **Two extra lines for "fuel port display" in info_lines is worth it.** Drill doesn't show a fuel port direction because drill accepts fuel from any edge. Smelter has a directed S port — players need to know that to plumb fuel correctly. Two lines of UI for one building-specific UX detail is the right level of investment.
+
+### Roadmap implications
+
+- **Charcoal Kiln** (likely next burner building): WOOD → CHARCOAL, where CHARCOAL is a higher-tier fuel (8 units? to be tuned). Burner already supports adding CHARCOAL to the FUEL_VALUES dict — single line. Kiln itself is ~30 lines of building-specific code on top of Processor + Burner. Multi-recipe selection isn't needed (one recipe). Estimated total: similar to smelter at ~250 lines.
+- **Brick Kiln**: CLAY → BRICK. Same shape as Charcoal Kiln but different recipe. Output BRICK becomes a building material (future Stone Crusher gets RAW_STONE → STONE_BLOCK; brick fits the same materials category).
+- **Tier-2 / electric smelter**: deferred until electricity infrastructure lands. Architecturally trivial — speed multiplier on `time_ticks`.
+- **Module slots / smelter upgrades**: deferred. The Building.state Dict is extensible — adding a `modules` field is non-structural.
+- **Building Interaction UI** (captured separately in NOTES.md): drag-drop between player inventory and building slots. Retroactive on drill + smelter; foundational for all future interactive buildings.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers, click-to-pan-from-minimap — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — plenty of room. If it exceeds 9, split into Mining + Smelting.
+- **Building Interaction UI** — new this session, captured in NOTES.md as next-session candidate.
+
+---
+
 ## Burner mining drill — first automation tier (save v14, no bump)
 
 **Date:** 2026-05-03

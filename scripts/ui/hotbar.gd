@@ -70,8 +70,18 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.RETTER },
 			{ "kind": "building", "value": Buildings.Type.LOOM },
 			{ "kind": "building", "value": Buildings.Type.TAILOR },
-			# Mining automation (session-mining-drill).
+		],
+		"selected": 0,
+	})
+
+	# Mining tier — extraction + smelting + (future) kilns and lumber camp.
+	# Drill moved here from Production at session-smelter; Production was at
+	# 9/9 with no thematic home for the smelter.
+	categories.append({
+		"name": "Mining",
+		"slots": [
 			{ "kind": "building", "value": Buildings.Type.MINING_DRILL },
+			{ "kind": "building", "value": Buildings.Type.SMELTER },
 		],
 		"selected": 0,
 	})

@@ -47,6 +47,8 @@ enum Type {
 	TAILOR,
 	# Mining automation (session-mining-drill).
 	MINING_DRILL,
+	# Smelting (session-smelter) — first multi-recipe processor.
+	SMELTER,
 }
 
 const DATA: Dictionary = {
@@ -205,6 +207,14 @@ const DATA: Dictionary = {
 		"supports_direction": true,                  # output port rotates
 		"player_drainable": false,
 	},
+	Type.SMELTER: {
+		"name": "Smelter",
+		"swatch_color": Color(0.30, 0.28, 0.25),    # anthracite / brick-furnace dark
+		"footprint": Vector2i(2, 2),                 # matches drill: industrial 2x2
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": true,                  # all 3 ports rotate together
+		"player_drainable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -330,6 +340,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Tailor.make(pos, dir)
 		Type.MINING_DRILL:
 			return MiningDrill.make(pos, dir)
+		Type.SMELTER:
+			return Smelter.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -350,6 +362,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Processor.tick(b, world)
 		Type.MINING_DRILL:
 			MiningDrill.tick(b, world)
+		Type.SMELTER:
+			Smelter.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -397,6 +411,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Tailor.draw(b, canvas, world_pos, tile_size)
 		Type.MINING_DRILL:
 			MiningDrill.draw(b, canvas, world_pos, tile_size)
+		Type.SMELTER:
+			Smelter.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -595,6 +611,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Processor.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)
+		Type.SMELTER:
+			return Smelter.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():
