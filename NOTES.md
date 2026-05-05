@@ -8,23 +8,28 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ## Click-handling duplication (BuildingPanel ↔ inventory_grid)
 
-**Status:** captured at session-building-ui-1. Both `inventory_grid._handle_left_click_player` and `BuildingPanel._handle_player_slot_click` implement the same pick/place/combine/swap semantics on player inventory slots — ~30 lines of nearly-identical code in each. CursorStack is already shared; the click LOGIC isn't.
+**Status:** still 2 implementations after session-building-ui-3. Audit verified at session 3 design pass: ChestPanel overrides `_gui_input` for hit-test routing only; calls `_handle_player_slot_click` from BuildingPanel base unchanged. No third copy exists.
 
-**Why duplicated for now:**
-- Two consumers; the abstraction cost > duplication cost at N=2.
-- Modal-specific click routing differs: inventory_grid has paired-chest grid logic, BuildingPanel has slot-kind dispatch. Extracting prematurely would lock in a shape that doesn't fit.
+**Why still NOT extracted:**
+- True duplication count is 2, hasn't grown since Session 1. The 14 BuildingPanel subclasses (after Sessions 1+2+3) all *inherit* one implementation; they don't duplicate it.
+- Extracting now produces a 25-line static helper that saves ~50 lines. Modest. Risk: an abstraction that doesn't fit a future divergence (e.g., right-click half-stack might want different player-slot vs building-slot behavior).
 
-**When to revisit:** Session 3 (cloth chain UIs). By then we'll have 4+ consumers (inventory_grid, BuildingPanel + per-building subclasses Mill, Mixer, Oven, etc.). At that point either:
-- Extract to a static helper in `CursorStack.click_swap(slot, cursor) -> void`.
-- Or extract to `SlotWidget.handle_click(slot_provider, cursor)` if rendering and click logic want to share a tighter interface.
+**Refined trigger criteria** (replacing the original "4+ consumers" wording):
+- **Third *implementation* of the click logic appears** (not a subclass — a genuine new copy of pick/place/combine/swap).
+- **New behavior added that requires both call sites to be updated identically** (e.g., right-click half-stack, shift-click bulk transfer in modals).
+- **Player-slot click logic genuinely diverges between modals** (one modal needs different semantics, current logic is identical).
 
-Mark as smell now so it doesn't get forgotten when the third consumer lands.
+When any one fires: extract to `CursorStack.click_swap(slot, cursor) -> void` or `SlotWidget.handle_click(slot_provider, cursor)`.
 
 ---
 
-## Building Interaction UI — multi-session arc (Sessions 1+2 shipped)
+## Building Interaction UI — multi-session arc (Sessions 1+2+3 shipped)
 
-**Status:** **Sessions 1 + 2 SHIPPED.** Foundation infrastructure + 8 specialized UIs (smelter, drill, chest, mill, oven, proofer, packager, mixer). Sessions 3–4 add specialized UIs for remaining buildings.
+**Status:** **Sessions 1 + 2 + 3 SHIPPED.** Foundation infrastructure + 14 specialized UIs (smelter, drill, chest, mill, oven, proofer, packager, mixer, loom, tailor, briquetter, sugar press, retter, yeast culture). Session 4 adds extraction-tier UIs (harvester, planters).
+
+**ProcessorPanel reuse milestone:** 10 consumers post-Session-3 (Mill, Oven, Proofer, Packager, Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture). All extend with no overrides — pure 5-line subclass files. ~280 line savings vs naive plan (specialized panels per building). See PROJECT_LOG session-building-ui-3 for the architectural-investment-pays-off log.
+
+**Shared `BuildingPanel.draw_fluid_indicator`:** 3 consumers (Mixer, Retter, Yeast Culture). Single source of truth for "how a fluid input looks."
 
 ### What's shipped (sessions 1+2)
 
@@ -50,23 +55,12 @@ Mark as smell now so it doesn't get forgotten when the third consumer lands.
 
 **Tests: 22/22 passing.** New tests cover: cursor stack, slot_layout shapes, hotbar selection, click resolution, drag-drop semantics, ChestPanel pick/drop, multi-input dispatch (oven), mixer fluid indicator, E-key adjacency scan.
 
-### Session 3 (next): Cloth chain + remaining processors
-
-**Specialized UIs to add:**
-- Retter — 1 input + 1 fluid + 1 output. Same shape as Mixer but smaller.
-- Loom — 1 input + 1 output, no fuel. Mirrors Proofer.
-- Tailor — 1 input + 1 output, no fuel. Mirrors Loom.
-- Briquetter — 1 input + 1 output, no fuel. Mirrors Loom.
-- Sugar Press — 1 input + 1 output, no fuel. Mirrors Loom.
-- Yeast Culture — 1 input + 1 fluid + 1 output. Mirrors Retter.
-
-**At this point (4+ panel subclasses sharing ~80% of layout):** revisit click-handling duplication smell + processor-panel intermediate class. The "Mill/Loom/Tailor are all the same shape" pattern is cargo-cult duplication if we don't extract.
-
-### Session 4: Extraction tier
+### Session 4 (next): Extraction tier
 
 **Specialized UIs to add:**
 - Harvester — 1 input slot (auto-populated from adjacent crop tile? Or just shows what was harvested?) + N output (multi-item buffer like drill). Depends on architecture decisions during the session.
 - Planter (Wheat/Sugar Beet/Flax variants) — single seed slot? Or no slot at all (seeds are in inventory only)? Planter may not need a panel; if it doesn't have buffers, the existing Q-inspect read-only view is enough.
+- **Thresher** (carry from sessions 2-3 oversight) — basic Processor (wheat → grain + straw). Likely just 5-line `extends ProcessorPanel` like other simple processors. Small add-on this session.
 
 **Architectural concern:** Planter and Harvester are extraction-tier; they don't have the input-buffer / output-buffer / fuel shape that Processor-derived buildings share. If their UIs don't fit the BuildingPanel mold cleanly, that's a signal that BuildingPanel is over-fitted to processors. Plan to revisit the slot_layout schema if/when extraction UIs feel forced.
 
@@ -74,17 +68,17 @@ Mark as smell now so it doesn't get forgotten when the third consumer lands.
 
 - **Right-click half-stack** in building slots — defer to building UI v2 polish.
 - **Animations / transitions** for modal open/close — defer.
-- **Per-slot stack max validation** — currently `max_stack` in slot_layout is a hint; enforcement is per-slot in `_drop_into_input`. Confirm the validation handles edge cases (e.g., dropping a partial stack that overflows).
 - **Drag-and-drop visual** — currently click-to-pickup, click-to-place. Real drag (button-down + move + button-up) may feel more natural; defer until playtest confirms the click pattern is unwieldy.
 
-### Hooks shipped this session (other sessions can reuse)
+### Hooks shipped this arc so far (sessions 1-3)
 
-- `Buildings.slot_layout_for(t)` — data registry; future sessions add entries.
-- `Buildings.has_interaction_ui(t)` — bool flag for click-to-open dispatch.
-- `BuildingPanel` base class with modal lifecycle + drag-drop + kind-validation.
+- `Buildings.slot_layout_for(t)` + `has_interaction_ui(t)` — data registry.
+- `BuildingPanel` base class with modal lifecycle + drag-drop + kind-validation + `draw_fluid_indicator` helper.
+- `ProcessorPanel` intermediate class (input → progress → output ± fuel ± fluid_indicator). 10 consumers.
 - `CursorStack` shared object (one instance, all modals).
-- `SlotWidget` static helper for uniform slot rendering.
-- Esc priority chain in main.gd — extending it for Session 2 panels is mechanical.
+- `SlotWidget` static helper for uniform slot rendering + chest-bag adapter.
+- Esc priority chain in main.gd — extending for new panels is mechanical.
+- E-key unified dispatch — opens building UI for any adjacent building with `has_interaction_ui`.
 
 ---
 

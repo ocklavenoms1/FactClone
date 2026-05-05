@@ -64,7 +64,9 @@ func _building_slot_rects() -> Array:
 	var layout: Array = Buildings.slot_layout_for(building.type)
 	var rects: Array = []
 
-	# Categorize.
+	# Categorize. fluid_indicator is render-only (not click-targetable);
+	# it's not added to rects. Subclasses inheriting ProcessorPanel get
+	# fluid-input rendering for free via _draw_building_specific below.
 	var inputs: Array = []
 	var outputs: Array = []
 	var fuels: Array = []
@@ -102,8 +104,9 @@ func _building_slot_rects() -> Array:
 	return rects
 
 ## Y-coordinate where status text should start, computed below the deepest
-## column (input col, output col, or fuel slot). Subclasses inheriting
-## ProcessorPanel use this to keep status from overlapping slots.
+## column (input col, output col, fuel slot, or fluid_indicator widget).
+## Subclasses inheriting ProcessorPanel use this to keep status from
+## overlapping slots/widgets.
 func _status_y() -> float:
 	if building == null:
 		return 0.0
@@ -113,6 +116,7 @@ func _status_y() -> float:
 	var input_count: int = 0
 	var output_count: int = 0
 	var has_fuel: bool = false
+	var has_fluid: bool = false
 	for slot_def in layout:
 		var kind: String = str(slot_def.get("kind", ""))
 		match kind:
@@ -122,13 +126,18 @@ func _status_y() -> float:
 				output_count += 1
 			"fuel":
 				has_fuel = true
+			"fluid_indicator":
+				has_fluid = true
 	var row_h: int = SLOT_LARGE + LABEL_HEIGHT + SLOT_VGAP
 	var input_bottom: float = top_y + max(1, input_count) * row_h
 	var output_bottom: float = top_y + max(1, output_count) * row_h
 	var fuel_bottom: float = 0.0
 	if has_fuel:
 		fuel_bottom = top_y + input_count * row_h + 8 + SlotWidget.SIZE + LABEL_HEIGHT
-	return max(input_bottom, max(output_bottom, fuel_bottom)) + 8
+	var fluid_bottom: float = 0.0
+	if has_fluid:
+		fluid_bottom = top_y + input_count * row_h + 8 + FLUID_ROW_HEIGHT
+	return max(input_bottom, max(output_bottom, max(fuel_bottom, fluid_bottom))) + 8
 
 ## Paint progress bar between input and output, slot labels, status text,
 ## recipe display.
@@ -202,7 +211,16 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 				"Fuel: %d / %d units" % [fuel_units, fuel_cap],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, TEXT_COLOR)
 
-	# Status row — below ALL columns (input, output, fuel).
+	# Fluid-indicator widget (Retter, Yeast Culture). Positioned just below
+	# the input column — same vertical band where a fuel slot would go for
+	# fuel-using processors. Delegates to BuildingPanel.draw_fluid_indicator
+	# (shared with MixerPanel) for visual uniformity.
+	for slot_def in layout:
+		if str(slot_def.get("kind", "")) == "fluid_indicator":
+			var fluid_y: float = top_y + input_count * row_h + 8
+			draw_fluid_indicator(font, slot_def, left_x, fluid_y)
+
+	# Status row — below ALL columns (input, output, fuel, fluid_indicator).
 	var status_y: float = _status_y()
 	var status_text: String = "Status: " + Processor.STATE_NAMES[s] if s >= 0 and s < Processor.STATE_NAMES.size() else "Status: ?"
 	var status_color: Color = STATUS_COLOR_IDLE

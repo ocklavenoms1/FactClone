@@ -254,6 +254,13 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": false,
 		"player_drainable": false,
+		# Standard Processor (session-building-ui-3): 3× straw → fuel briquette.
+		"slot_layout": [
+			{"id": "input", "kind": "input", "accepts": [Items.Type.STRAW],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "output", "kind": "output", "accepts": [Items.Type.FUEL_BRIQUETTE],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.YEAST_CULTURE: {
 		"name": "Yeast Culture",
@@ -262,6 +269,15 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": false,
 		"player_drainable": false,
+		# Solid + fluid input (session-building-ui-3): sugar + water → 2× yeast.
+		# ProcessorPanel-fluid pattern (extended in this session).
+		"slot_layout": [
+			{"id": "input_sugar", "kind": "input", "accepts": [Items.Type.SUGAR],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "fluid_water", "kind": "fluid_indicator", "fluid_type": Fluids.Type.WATER},
+			{"id": "output_yeast", "kind": "output", "accepts": [Items.Type.YEAST],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.SUGAR_PRESS: {
 		"name": "Sugar Press",
@@ -270,6 +286,13 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": false,
 		"player_drainable": false,
+		# Standard Processor (session-building-ui-3): sugar beet → sugar.
+		"slot_layout": [
+			{"id": "input", "kind": "input", "accepts": [Items.Type.SUGAR_BEET],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "output", "kind": "output", "accepts": [Items.Type.SUGAR],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.RETTER: {
 		"name": "Retter",
@@ -278,6 +301,15 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Solid + fluid input (session-building-ui-3): flax + water → fiber.
+		# Same shape as Yeast Culture (1 solid + 1 fluid + 1 output).
+		"slot_layout": [
+			{"id": "input_flax", "kind": "input", "accepts": [Items.Type.FLAX],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "fluid_water", "kind": "fluid_indicator", "fluid_type": Fluids.Type.WATER},
+			{"id": "output_fiber", "kind": "output", "accepts": [Items.Type.FIBER],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.LOOM: {
 		"name": "Loom",
@@ -286,6 +318,13 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Standard Processor (session-building-ui-3): 3× fiber → cloth.
+		"slot_layout": [
+			{"id": "input", "kind": "input", "accepts": [Items.Type.FIBER],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "output", "kind": "output", "accepts": [Items.Type.CLOTH],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.TAILOR: {
 		"name": "Tailor",
@@ -294,6 +333,13 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Standard Processor (session-building-ui-3): 4× cloth → bag.
+		"slot_layout": [
+			{"id": "input", "kind": "input", "accepts": [Items.Type.CLOTH],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "output", "kind": "output", "accepts": [Items.Type.BAG],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.MINING_DRILL: {
 		"name": "Mining Drill",

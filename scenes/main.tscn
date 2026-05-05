@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=27 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -18,6 +18,12 @@
 [ext_resource type="Script" path="res://scripts/ui/proofer_panel.gd" id="16_prpanel"]
 [ext_resource type="Script" path="res://scripts/ui/packager_panel.gd" id="17_pkpanel"]
 [ext_resource type="Script" path="res://scripts/ui/mixer_panel.gd" id="18_mxpanel"]
+[ext_resource type="Script" path="res://scripts/ui/loom_panel.gd" id="19_lmpanel"]
+[ext_resource type="Script" path="res://scripts/ui/tailor_panel.gd" id="20_tlpanel"]
+[ext_resource type="Script" path="res://scripts/ui/briquetter_panel.gd" id="21_bqpanel"]
+[ext_resource type="Script" path="res://scripts/ui/sugar_press_panel.gd" id="22_sppanel"]
+[ext_resource type="Script" path="res://scripts/ui/retter_panel.gd" id="23_rtpanel"]
+[ext_resource type="Script" path="res://scripts/ui/yeast_culture_panel.gd" id="24_ycpanel"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -172,6 +178,54 @@ anchor_bottom = 1.0
 
 [node name="MixerPanel" type="Control" parent="HUD"]
 script = ExtResource("18_mxpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="LoomPanel" type="Control" parent="HUD"]
+script = ExtResource("19_lmpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="TailorPanel" type="Control" parent="HUD"]
+script = ExtResource("20_tlpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="BriquetterPanel" type="Control" parent="HUD"]
+script = ExtResource("21_bqpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="SugarPressPanel" type="Control" parent="HUD"]
+script = ExtResource("22_sppanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="RetterPanel" type="Control" parent="HUD"]
+script = ExtResource("23_rtpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="YeastCulturePanel" type="Control" parent="HUD"]
+script = ExtResource("24_ycpanel")
 visible = false
 anchor_left = 0.0
 anchor_top = 0.0

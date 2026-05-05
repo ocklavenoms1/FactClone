@@ -34,8 +34,9 @@ const BAR_BORDER: Color = Color(0.40, 0.32, 0.20, 1.0)
 const BAR_FILL_RUNNING: Color = Color(0.85, 0.65, 0.30, 1.0)
 const BAR_FILL_IDLE: Color = Color(0.40, 0.40, 0.42, 1.0)
 
-const FLUID_CONNECTED: Color = Color(0.30, 0.70, 1.00)    # blue (active)
-const FLUID_NONE: Color = Color(0.45, 0.45, 0.48)         # gray (no pipe)
+## Fluid-indicator visuals are now in BuildingPanel.draw_fluid_indicator
+## (extracted at session-building-ui-3 so Mixer + Retter + Yeast Culture
+## all share one source of truth).
 
 func _building_slot_rects() -> Array:
 	if building == null:
@@ -116,27 +117,11 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 	draw_line(Vector2(arrow_tip_x - 12, arrow_y - 6), Vector2(arrow_tip_x, arrow_y), TEXT_COLOR, 2.0)
 	draw_line(Vector2(arrow_tip_x - 12, arrow_y + 6), Vector2(arrow_tip_x, arrow_y), TEXT_COLOR, 2.0)
 
-	# Fluid indicator row — below input row.
+	# Fluid indicator row — below input row. Delegate to shared helper.
 	var fluid_y: float = top_y + SLOT_LARGE + 36
 	for slot_def in layout:
 		if str(slot_def.get("kind", "")) == "fluid_indicator":
-			var fluid_type: int = int(slot_def.get("fluid_type", Fluids.Type.WATER))
-			var connected: bool = false
-			if world != null:
-				connected = world.fluid_available_for_building(building, fluid_type)
-			var dot_color: Color = FLUID_CONNECTED if connected else FLUID_NONE
-			var dot_pos: Vector2 = Vector2(left_x + 6, fluid_y + 7)
-			# Filled dot if connected, hollow ring if not.
-			if connected:
-				draw_circle(dot_pos, 6.0, dot_color)
-			else:
-				draw_arc(dot_pos, 6.0, 0.0, TAU, 16, dot_color, 2.0)
-			var label: String = "%s: %s" % [
-				Fluids.name_of(fluid_type),
-				"connected" if connected else "no pipe network",
-			]
-			draw_string(font, Vector2(left_x + 22, fluid_y + 12), label,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR if connected else TEXT_DIM)
+			draw_fluid_indicator(font, slot_def, left_x, fluid_y)
 
 	# Status row.
 	var status_y: float = fluid_y + 28

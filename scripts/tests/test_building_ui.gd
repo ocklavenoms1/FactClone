@@ -75,15 +75,15 @@ static func run(parent: Node) -> Dictionary:
 		"drill output_multi count should be 5")
 
 	# Buildings without slot_layout return [].
-	# (As of session-building-ui-2: mill/oven/etc. ship UIs. BRIQUETTER stays
-	# UI-less until session 3 — using it as the "no UI" canary.)
-	var briquetter_layout: Array = Buildings.slot_layout_for(Buildings.Type.BRIQUETTER)
-	_check(failures, briquetter_layout.is_empty(), "briquetter slot_layout should be empty (UI ships in session 3)")
+	# (As of session-building-ui-3: cloth chain + remaining processors ship.
+	# HARVESTER stays UI-less until Session 4 — using it as the "no UI" canary.)
+	var harvester_layout: Array = Buildings.slot_layout_for(Buildings.Type.HARVESTER)
+	_check(failures, harvester_layout.is_empty(), "harvester slot_layout should be empty (UI ships in session 4)")
 
 	# has_interaction_ui flag.
 	_check(failures, Buildings.has_interaction_ui(Buildings.Type.SMELTER), "smelter has_interaction_ui should be true")
 	_check(failures, Buildings.has_interaction_ui(Buildings.Type.MINING_DRILL), "drill has_interaction_ui should be true")
-	_check(failures, not Buildings.has_interaction_ui(Buildings.Type.BRIQUETTER), "briquetter has_interaction_ui should be false (session 3)")
+	_check(failures, not Buildings.has_interaction_ui(Buildings.Type.HARVESTER), "harvester has_interaction_ui should be false (session 4)")
 
 	# ---------- 3. Hotbar has_selection / clear_selection ----------
 	# (Hotbar is a Control; instantiate via new() and run _build_categories

@@ -389,6 +389,47 @@ func _toast(msg: String) -> void:
 	if toast_callback.is_valid():
 		toast_callback.call(msg)
 
+# ---------- shared fluid_indicator widget ----------
+#
+# Render a fluid-connection indicator (filled dot if pipe-fed, hollow ring if
+# not) + a name label. Used by ANY panel that has a fluid_indicator slot in
+# its slot_layout — extracted here so MixerPanel and ProcessorPanel-fluid
+# (Retter, Yeast Culture) share one source of truth for "how a fluid input
+# looks." Refactoring a single helper > divergent renders.
+#
+# Returns the Y-coordinate just below the rendered widget so the caller can
+# stack subsequent rows without overlapping.
+
+const FLUID_DOT_RADIUS: float = 6.0
+const FLUID_CONNECTED: Color = Color(0.30, 0.70, 1.00)    # blue (active)
+const FLUID_NONE: Color = Color(0.45, 0.45, 0.48)         # gray (no pipe)
+const FLUID_ROW_HEIGHT: int = 22
+
+## Draw the fluid indicator at (origin_x, origin_y). Reads the building's
+## pipe-network state via world.fluid_available_for_building.
+##
+## Returns origin_y + FLUID_ROW_HEIGHT for callers that want to stack
+## additional rows below.
+func draw_fluid_indicator(font: Font, slot_def: Dictionary, origin_x: float, origin_y: float) -> float:
+	var fluid_type: int = int(slot_def.get("fluid_type", Fluids.Type.WATER))
+	var connected: bool = false
+	if world != null and building != null:
+		connected = world.fluid_available_for_building(building, fluid_type)
+	var dot_color: Color = FLUID_CONNECTED if connected else FLUID_NONE
+	var dot_pos: Vector2 = Vector2(origin_x + 6.0, origin_y + 7.0)
+	if connected:
+		draw_circle(dot_pos, FLUID_DOT_RADIUS, dot_color)
+	else:
+		draw_arc(dot_pos, FLUID_DOT_RADIUS, 0.0, TAU, 16, dot_color, 2.0)
+	var label: String = "%s: %s" % [
+		Fluids.name_of(fluid_type),
+		"connected" if connected else "no pipe network",
+	]
+	var label_color: Color = TEXT_COLOR if connected else TEXT_DIM
+	draw_string(font, Vector2(origin_x + 22.0, origin_y + 12.0), label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, label_color)
+	return origin_y + FLUID_ROW_HEIGHT
+
 # ---------- rendering ----------
 
 func _draw() -> void:

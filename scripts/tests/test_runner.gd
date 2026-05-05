@@ -34,6 +34,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_smelter.gd"),
 	preload("res://scripts/tests/test_building_ui.gd"),
 	preload("res://scripts/tests/test_building_ui_2.gd"),
+	preload("res://scripts/tests/test_building_ui_3.gd"),
 ]
 
 func _ready() -> void:

@@ -9,6 +9,113 @@ Each entry has three sections:
 
 ---
 
+## Building Interaction UI — Session 3 of multi-session arc (save v14, no bump)
+
+**Date:** 2026-05-03
+**Tag:** `session-building-ui-3`
+
+Six new specialized building UIs: Loom, Tailor, Briquetter, Sugar Press (cloth chain + fuel processing), and Retter, Yeast Culture (solid + fluid input). All 6 extend ProcessorPanel directly with **no overrides** — each panel file is ~10 lines. ProcessorPanel grew ~30 lines to support `fluid_indicator` slot kind, validating the architectural pattern at **10 total consumers** post-Session-3.
+
+### What shipped
+
+**`scripts/ui/loom_panel.gd` / `tailor_panel.gd` / `briquetter_panel.gd` / `sugar_press_panel.gd`** — each ~5 lines. Pure `extends ProcessorPanel` with no overrides.
+
+**`scripts/ui/retter_panel.gd` / `yeast_culture_panel.gd`** — same shape (1 solid input + 1 fluid_indicator + 1 output). Each ~5 lines, pure `extends ProcessorPanel`.
+
+**ProcessorPanel extended for `fluid_indicator` slot kind (~30 lines)**
+- `_building_slot_rects()`: skips fluid_indicator entries (render-only, not click-targetable).
+- `_draw_building_specific()`: renders the fluid widget below the input column (same vertical band where the fuel slot would go for fuel-using processors).
+- `_status_y()`: includes fluid widget's bottom in the deepest-column calc so status text doesn't overlap.
+- All rendering delegates to the shared `BuildingPanel.draw_fluid_indicator` (extracted in this session).
+
+**Shared `BuildingPanel.draw_fluid_indicator` helper** (~25 lines)
+- Extracted from MixerPanel (~30 lines deleted there).
+- Renders filled-or-hollow blue dot + name label based on `world.fluid_available_for_building(b, fluid_type)`.
+- Used by MixerPanel AND ProcessorPanel-fluid (Retter, Yeast Culture). **Single source of truth** for "how a fluid input looks."
+- Three consumers post-Session-3.
+
+**`Buildings.DATA` slot_layouts added (6 buildings):**
+- BRIQUETTER: `[input STRAW, output FUEL_BRIQUETTE]`
+- SUGAR_PRESS: `[input SUGAR_BEET, output SUGAR]`
+- LOOM: `[input FIBER, output CLOTH]`
+- TAILOR: `[input CLOTH, output BAG]`
+- RETTER: `[input FLAX, fluid_indicator WATER, output FIBER]`
+- YEAST_CULTURE: `[input SUGAR, fluid_indicator WATER, output YEAST]`
+
+**Hot fix from Session 2 carry:** `test_building_ui` "no UI canary" updated from BRIQUETTER (now has UI) to HARVESTER (Session 4 target).
+
+**Tests: 23/23 passing** (was 22; added 1)
+- **NEW** `test_building_ui_3` — 4 sub-suites:
+  1. slot_layout shapes for all 6 new buildings (correct kinds, accepts, fluid_type).
+  2. ProcessorPanel-fluid drag-drop: Retter accepts FLAX into input; rejects wrong-type with toast; fluid_indicator NOT in `_building_slot_rects` (render-only).
+  3. **ProcessorPanel reuse milestone**: static file scan confirms 10 panels are pure `extends ProcessorPanel` with no overrides (Mill, Oven, Proofer, Packager, Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture).
+  4. `BuildingPanel.draw_fluid_indicator` method exists (extraction sanity check).
+
+### ProcessorPanel reuse milestone — architectural-investment-pays-off log
+
+| Session | ProcessorPanel consumers | Notes |
+|---|---|---|
+| Session 2 (~ship) | 4 (Mill, Oven, Proofer, Packager) | Initial pattern — paid ~200 lines for ProcessorPanel base |
+| Session 3 (~ship) | **10** (+ Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture) | ~30 line extension for fluid_indicator support |
+
+**Session 3 additions: 6 new buildings × ~5 lines each = ~30 lines for panel files.** Total session 3 panel cost ≈ 30 lines (panel files) + 30 lines (ProcessorPanel fluid_indicator) = **~60 lines** for 6 new building UIs.
+
+**Naive plan would have been:** 4 standard processors × ~10 lines + 2 specialized fluid processors × ~150 lines (separate Retter/YeastCulture panels with hand-written fluid rendering) = **~340 lines.**
+
+**Net savings: ~280 lines** by extending ProcessorPanel for fluid_indicator instead of specializing the 2 buildings separately. The 30-line ProcessorPanel extension paid for itself **immediately at 2 consumers** and will keep paying as future fluid processors land (e.g., a hypothetical brewery, distillery, kiln-with-water).
+
+This is the second cumulative architectural-investment lesson in the project (first: Burner module reusability validated at session-smelter when smelter integrated in ~13 lines vs ~100+ for drill-specific fuel).
+
+**Pattern:** when a sub-feature (here: fluid input) appears in 2+ buildings of the same family, extending the family base class is dramatically cheaper than per-building specialization. Even at N=2.
+
+### Decisions
+
+- **Click-handling extraction deferred** (per user-approved refined criteria). Audit: only 2 implementations exist (`inventory_grid.gd::_handle_left_click_player` and `building_panel.gd::_handle_player_slot_click`). ChestPanel overrides `_gui_input` but only for hit-test routing (calls inherited `_handle_player_slot_click` for player slots). No third copy. Refined trigger criteria captured in NOTES.md:
+  - Third *implementation* of the click logic appears (not a subclass).
+  - New behavior added that requires both call sites to be updated identically.
+  - Player-slot click logic genuinely diverges between modals.
+- **Fluid indicator helper extracted to `BuildingPanel.draw_fluid_indicator` BEFORE extending ProcessorPanel.** Prevents two independent render paths from drifting over time. MixerPanel + ProcessorPanel-fluid (Retter, Yeast Culture) all call the same helper. Three consumers immediately validate the extraction.
+- **All 6 new buildings extend ProcessorPanel directly, no overrides.** Validates the pattern at 10 total consumers. Each panel file is essentially a class-doc comment + `extends ProcessorPanel`. Adding more processor-shape buildings in the future = same boilerplate.
+- **Retter and Yeast Culture didn't get specialized panels.** First draft of design pass had them at "MixerPanel-style specialization, ~150 lines each." Reconsidered: their shape (1 solid + 1 fluid + 1 output) is simpler than Mixer's (2 side-by-side solid + 1 fluid). Extending ProcessorPanel for fluid_indicator support handles both Retter and YeastCulture trivially. Mixer's 2-input-side-by-side layout is what makes it diverge enough to justify specialization.
+- **Independent panels (no cloth-chain branding).** Considered visual cohesion via tinted borders for cloth-chain panels. Rejected: explicit chain branding is overdesign at this stage. Recipe display name in the panel title area communicates "you're looking at the cloth-chain step."
+- **`fluid_indicator` is not click-targetable.** It's render-only. ProcessorPanel.`_building_slot_rects()` skips it; clicks on the widget area do nothing. Player can't drag water into the building because there's no WATER item. Connection state is purely informational.
+
+### Lessons
+
+- **The audit verification step caught nothing — but was worth doing.** User pushback at design-pass time asked for a grep of subclass click-handler overrides before deferring extraction. Result: only one override (ChestPanel's hit-test routing) and it inherits the actual click logic. So the deferral was correct. But verifying took ~30 seconds and locked in confidence. Lesson: pre-commit audits are cheap; do them when there's any doubt.
+- **3a → 3b → 3c sequencing was right.** Extracted `draw_fluid_indicator` to BuildingPanel base FIRST, refactored MixerPanel to use it (mechanical, no behavior change — verified 22/22 tests still passed), THEN extended ProcessorPanel to also call it. Atomic, reviewable steps. Compare to extracting + extending in one shot: a regression in either step would be harder to localize. **Pattern: when extracting then extending, always intermediate-test after extract before extending.**
+- **Pure subclass files are gold.** The 6 new panels are 5 lines each — basically class-name + `extends ProcessorPanel` + a doc comment. Total panel-file LOC for this session: ~30. Compare to Session 2's MixerPanel at ~155 lines, or Session 1's SmelterPanel at ~180 lines. **The expensive code (drag-drop, layout, validation) was paid in Session 1; subclasses are pure declaration.** The architectural "credit balance" from earlier sessions just keeps cashing out.
+- **No layout bugs surfaced at PAUSE 1.** Unlike Sessions 1 and 2 (each had at least one overlap fix at PAUSE 1), Session 3's panels rendered correctly first try. This is because:
+  - 4 of 6 panels reused the exact ProcessorPanel layout (no new positioning code).
+  - 2 of 6 (Retter, Yeast Culture) reused the fuel-slot vertical position via the `_status_y()` helper that already accounted for variable column heights.
+  - The shared `draw_fluid_indicator` produced visually identical output to MixerPanel.
+  - Each architectural reuse takes one less custom-layout opportunity for bugs.
+
+### Roadmap implications
+
+This is **Session 3 of a 4-session arc**. Session 4 adds extraction-tier UIs for the remaining buildings.
+
+- **Session 4 — Extraction.** Harvester, Planters. Architectural concern flagged in Sessions 1-2: planter has no input/output buffer in the conventional sense (crops grow on the tile itself); harvester's "input" is the tile under it. Both diverge from Processor-shaped slot_layout. Either extends BuildingPanel directly (specialized layouts) OR extends a new `ExtractionPanel` intermediate class if the 2 share enough. **Decide at start of Session 4** based on actual layout sketches.
+
+### Out-of-scope this session (NOT shipped, captured for later)
+
+- **Thresher** has no UI yet. It's a basic Processor (wheat → grain + straw). Should logically have a UI alongside Mill/Mixer/Oven. **Got skipped in Sessions 2 and 3.** Capture as Session 4 add-on candidate (~15 minutes — single slot_layout entry + 5-line panel file).
+- **Pump, Pipe, Belt** — passive infrastructure; no internal state worth a UI panel. Read-only Q-inspect via info_panel is sufficient.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry.
+- **Click-handling duplication** between inventory_grid + BuildingPanel — refined trigger criteria captured in NOTES.md.
+- **Right-click half-stack interactions** — flagged at session-building-ui-1 as building-UI v2 polish.
+- **Thresher UI** — flagged this session.
+
+---
+
 ## Building Interaction UI — Session 2 of multi-session arc (save v14, no bump)
 
 **Date:** 2026-05-03
