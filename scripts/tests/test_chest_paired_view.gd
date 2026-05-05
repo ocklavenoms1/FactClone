@@ -11,7 +11,10 @@ extends RefCounted
 ##   3. Chest → player pickup semantics with overflow (mirror shift-click
 ##      chest→player when player can't fit the whole stack).
 
-const InventoryGridScript = preload("res://scripts/ui/inventory_grid.gd")
+# NOTE (session-building-ui-2): chest paired-view was removed from
+# inventory_grid.gd; the bag→slot-views adapter moved to SlotWidget.
+# Test still locks in the SAME pure adapter logic + the chest transfer
+# primitives the new ChestPanel relies on.
 
 static func test_name() -> String:
 	return "chest paired view (adapter + transfer semantics)"
@@ -22,7 +25,7 @@ static func run(_parent: Node) -> Dictionary:
 	# --- Phase 1: view adapter ---
 	# 250 grain (max_stack 100) → [100, 100, 50]
 	var bag1: Array = [[Items.Type.GRAIN, 250]]
-	var views1: Array = InventoryGridScript.chest_bag_to_slot_views(bag1)
+	var views1: Array = SlotWidget.chest_bag_to_slot_views(bag1)
 	_check(failures, views1.size() == 3, "250 grain should split into 3 views; got %d" % views1.size())
 	if views1.size() == 3:
 		_check(failures, int(views1[0]["count"]) == 100, "view 0 count: expected 100, got %d" % int(views1[0]["count"]))
@@ -33,19 +36,19 @@ static func run(_parent: Node) -> Dictionary:
 
 	# Multi-type bag: 100 grain + 50 flour → 2 views [grain 100, flour 50]
 	var bag2: Array = [[Items.Type.GRAIN, 100], [Items.Type.FLOUR, 50]]
-	var views2: Array = InventoryGridScript.chest_bag_to_slot_views(bag2)
+	var views2: Array = SlotWidget.chest_bag_to_slot_views(bag2)
 	_check(failures, views2.size() == 2, "2 entries each within max_stack should yield 2 views; got %d" % views2.size())
 	if views2.size() == 2:
 		_check(failures, int(views2[0]["item_type"]) == Items.Type.GRAIN, "view 0 type: expected GRAIN")
 		_check(failures, int(views2[1]["item_type"]) == Items.Type.FLOUR, "view 1 type: expected FLOUR")
 
 	# Empty bag → empty views.
-	var views3: Array = InventoryGridScript.chest_bag_to_slot_views([])
+	var views3: Array = SlotWidget.chest_bag_to_slot_views([])
 	_check(failures, views3.size() == 0, "empty bag → empty views; got %d" % views3.size())
 
 	# Edge: count exactly at max_stack → 1 view, not 2.
 	var bag4: Array = [[Items.Type.GRAIN, 100]]
-	var views4: Array = InventoryGridScript.chest_bag_to_slot_views(bag4)
+	var views4: Array = SlotWidget.chest_bag_to_slot_views(bag4)
 	_check(failures, views4.size() == 1, "exactly max_stack → 1 view (not 1+0 split); got %d" % views4.size())
 
 	# --- Phase 2: Player → chest deposit (shift-click player→chest) ---
@@ -83,7 +86,7 @@ static func run(_parent: Node) -> Dictionary:
 	Chest._bag_add(chest2.state["bag"], Items.Type.GRAIN, 50)
 	# Pick view 0 → grain 50. Try to add to player. Should add 0 (no room
 	# for grain — both slots full of flour). Chest stays at 50 grain.
-	var views: Array = InventoryGridScript.chest_bag_to_slot_views(chest2.state["bag"])
+	var views: Array = SlotWidget.chest_bag_to_slot_views(chest2.state["bag"])
 	_check(failures, views.size() == 1, "preflight: chest has 1 view (50 grain)")
 	var v = views[0]
 	var added: int = inv2.add(int(v["item_type"]), int(v["count"]))
@@ -103,7 +106,7 @@ static func run(_parent: Node) -> Dictionary:
 	#   pass 1: top up slot 0 from 80 → 100, +20.
 	#   pass 2: fill slot 1 with 80 grain (remaining), +80.
 	# Total added: 100 (the entire view). Chest drops to 100.
-	var views3b: Array = InventoryGridScript.chest_bag_to_slot_views(chest3.state["bag"])
+	var views3b: Array = SlotWidget.chest_bag_to_slot_views(chest3.state["bag"])
 	_check(failures, int(views3b[0]["count"]) == 100, "preflight: first chest view is 100 grain (max_stack)")
 	var added3: int = inv3.add(int(views3b[0]["item_type"]), int(views3b[0]["count"]))
 	if added3 > 0:

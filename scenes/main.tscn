@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=21 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -12,6 +12,12 @@
 [ext_resource type="Script" path="res://scripts/ui/building_panel.gd" id="10_bpanel"]
 [ext_resource type="Script" path="res://scripts/ui/smelter_panel.gd" id="11_smpanel"]
 [ext_resource type="Script" path="res://scripts/ui/drill_panel.gd" id="12_drpanel"]
+[ext_resource type="Script" path="res://scripts/ui/chest_panel.gd" id="13_chpanel"]
+[ext_resource type="Script" path="res://scripts/ui/mill_panel.gd" id="14_mlpanel"]
+[ext_resource type="Script" path="res://scripts/ui/oven_panel.gd" id="15_ovpanel"]
+[ext_resource type="Script" path="res://scripts/ui/proofer_panel.gd" id="16_prpanel"]
+[ext_resource type="Script" path="res://scripts/ui/packager_panel.gd" id="17_pkpanel"]
+[ext_resource type="Script" path="res://scripts/ui/mixer_panel.gd" id="18_mxpanel"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -118,6 +124,54 @@ anchor_bottom = 1.0
 
 [node name="DrillPanel" type="Control" parent="HUD"]
 script = ExtResource("12_drpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="ChestPanel" type="Control" parent="HUD"]
+script = ExtResource("13_chpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="MillPanel" type="Control" parent="HUD"]
+script = ExtResource("14_mlpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="OvenPanel" type="Control" parent="HUD"]
+script = ExtResource("15_ovpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="ProoferPanel" type="Control" parent="HUD"]
+script = ExtResource("16_prpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="PackagerPanel" type="Control" parent="HUD"]
+script = ExtResource("17_pkpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="MixerPanel" type="Control" parent="HUD"]
+script = ExtResource("18_mxpanel")
 visible = false
 anchor_left = 0.0
 anchor_top = 0.0

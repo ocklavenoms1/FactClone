@@ -57,6 +57,31 @@ static func draw_slot(canvas: CanvasItem, font: Font, rect: Rect2, item_type: in
 	canvas.draw_string(font, count_pos, count_str,
 		HORIZONTAL_ALIGNMENT_RIGHT, alignment_width, 14, COUNT_COLOR)
 
+## Convert a chest bag (Array of [item_type, count]) to a list of
+## {item_type, count} dicts representing visible slot views, splitting bag
+## entries into max_stack-sized chunks. Slot positions DON'T persist —
+## re-rendering recomputes from the bag, so chest layout reorders after
+## each change. Acceptable per design; migrate to per-slot chest storage
+## later if it becomes painful.
+##
+## Moved from inventory_grid.gd at session-building-ui-2 (chest paired-view
+## removed from inventory_grid; ChestPanel now owns chest rendering, but
+## the helper itself is pure render-adapter logic — kept centralized here
+## so any future bag-grid widget can call it).
+##
+## Static + pure so tests can call it with synthetic bags.
+static func chest_bag_to_slot_views(bag: Array) -> Array:
+	var views: Array = []
+	for entry in bag:
+		var item_type: int = int(entry[0])
+		var remaining: int = int(entry[1])
+		var max_stack: int = Items.max_stack_of(item_type)
+		while remaining > 0:
+			var portion: int = min(remaining, max_stack)
+			views.append({"item_type": item_type, "count": portion})
+			remaining -= portion
+	return views
+
 ## Helper: pick the kind-appropriate border tint for slot rendering.
 ## Maps slot_kind string from slot_layout to a Color.
 static func border_for_kind(kind: String) -> Color:

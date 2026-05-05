@@ -83,6 +83,20 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": false,
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-2): single input/output
+		# Processor — uses ProcessorPanel default layout.
+		"slot_layout": [
+			{
+				"id": "input", "kind": "input",
+				"accepts": [Items.Type.GRAIN],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "output", "kind": "output",
+				"accepts": [Items.Type.FLOUR],
+				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
 	},
 	Type.CHEST: {
 		"name": "Chest",
@@ -91,6 +105,18 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": true,
+		# Building Interaction UI (session-building-ui-2): chest is bulk
+		# storage. Single "chest_bag" slot kind tells BuildingPanel base to
+		# defer rendering to ChestPanel (its own bag-grid widget).
+		# Replaces the inventory_grid paired-view (removed this session).
+		"slot_layout": [
+			{
+				"id": "bag", "kind": "chest_bag",
+				"accepts": [],                       # empty = accepts any item
+				"max_stack": 2400,                   # Chest.TOTAL_CAPACITY (aggregate)
+				"state_field": "bag",
+			},
+		],
 	},
 	Type.PIPE: {
 		"name": "Pipe",
@@ -115,6 +141,31 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-2): multi-input
+		# (flour + yeast solid) + fluid water indicator (read-only — water is
+		# pipe-fed, not drag-droppable). MixerPanel handles this specialized
+		# layout; ProcessorPanel doesn't fit.
+		"slot_layout": [
+			{
+				"id": "input_flour", "kind": "input",
+				"accepts": [Items.Type.FLOUR],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "input_yeast", "kind": "input",
+				"accepts": [Items.Type.YEAST],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "fluid_water", "kind": "fluid_indicator",
+				"fluid_type": Fluids.Type.WATER,
+			},
+			{
+				"id": "output", "kind": "output",
+				"accepts": [Items.Type.DOUGH],
+				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
 	},
 	Type.THRESHER: {
 		"name": "Thresher",
@@ -131,6 +182,19 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Standard Processor layout (session-building-ui-2): dough → risen.
+		"slot_layout": [
+			{
+				"id": "input", "kind": "input",
+				"accepts": [Items.Type.DOUGH],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "output", "kind": "output",
+				"accepts": [Items.Type.RISEN_DOUGH],
+				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
 	},
 	Type.OVEN: {
 		"name": "Oven",
@@ -139,6 +203,28 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-2): two solid inputs
+		# (risen dough + fuel briquette) → bread. Fuel is recipe-input not
+		# Burner; both inputs share in_buffer (multi-type bag). Decided NOT
+		# to convert oven to Burner this session (would change recipe + need
+		# save migration; see PROJECT_LOG session-building-ui-2 decisions).
+		"slot_layout": [
+			{
+				"id": "input_dough", "kind": "input",
+				"accepts": [Items.Type.RISEN_DOUGH],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "input_fuel", "kind": "input",   # second input, NOT "fuel" kind
+				"accepts": [Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "output", "kind": "output",
+				"accepts": [Items.Type.BREAD],
+				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
 	},
 	Type.PACKAGER: {
 		"name": "Packager",
@@ -147,6 +233,19 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Standard Processor layout (session-building-ui-2): bread → loaf pack.
+		"slot_layout": [
+			{
+				"id": "input", "kind": "input",
+				"accepts": [Items.Type.BREAD],
+				"max_stack": 8, "state_field": "in_buffer",
+			},
+			{
+				"id": "output", "kind": "output",
+				"accepts": [Items.Type.LOAF_PACK],
+				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
 	},
 	Type.BRIQUETTER: {
 		"name": "Briquetter",

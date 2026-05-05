@@ -22,38 +22,35 @@ Mark as smell now so it doesn't get forgotten when the third consumer lands.
 
 ---
 
-## Building Interaction UI — multi-session arc (Session 1 shipped at session-building-ui-1)
+## Building Interaction UI — multi-session arc (Sessions 1+2 shipped)
 
-**Status:** **Session 1 SHIPPED** at `session-building-ui-1`. Foundation infrastructure (slot_layout registry, BuildingPanel base, CursorStack shared across modals, Esc priority chain, NEUTRAL cursor mode, adjacency-gated click-to-open) plus specialized UIs for **smelter and mining drill**. Sessions 2–4 add specialized UIs for remaining buildings tier by tier.
+**Status:** **Sessions 1 + 2 SHIPPED.** Foundation infrastructure + 8 specialized UIs (smelter, drill, chest, mill, oven, proofer, packager, mixer). Sessions 3–4 add specialized UIs for remaining buildings.
 
-### What's shipped (session-building-ui-1)
+### What's shipped (sessions 1+2)
 
+**Foundation (session-building-ui-1):**
 - `scripts/ui/cursor_stack.gd` — shared cursor object, persists across modals, serializes to `player_progression["cursor"]`.
-- `scripts/ui/slot_widget.gd` — extracted slot rendering (used by inventory_grid + every building panel for visual uniformity).
-- `scripts/ui/building_panel.gd` — base class with modal lifecycle, drag-drop, kind-validation (input/output/fuel/output_multi), lossy fuel take-back, player inventory render at bottom.
-- `scripts/ui/smelter_panel.gd` + `scripts/ui/drill_panel.gd` — specialized layouts (progress bar, coverage 2×2, multi-output sub-slots).
+- `scripts/ui/slot_widget.gd` — extracted slot rendering (used by inventory_grid + every building panel). Now also hosts the `chest_bag_to_slot_views` adapter (moved from inventory_grid at session 2).
+- `scripts/ui/building_panel.gd` — base class with modal lifecycle, drag-drop, kind-validation (input/output/fuel/output_multi/chest_bag/fluid_indicator), lossy fuel take-back, player inventory render at bottom. `_top_area_height()` virtual hook for subclasses needing taller panels.
 - `Buildings.slot_layout_for(t)` + `has_interaction_ui(t)` data registry.
-- `Buildings.DATA[SMELTER].slot_layout` + `Buildings.DATA[MINING_DRILL].slot_layout`.
-- Hotbar `has_selection()` / `clear_selection()` + neutral visual (dim brackets, no border).
-- `main.gd` Esc priority chain + click-to-open dispatch + Manhattan-1 adjacency check + cursor save/load via `_capture_cursor_in_progression()`.
-- Multi-tile hover rect (clicks any cell of a 2×2 building → highlights the full footprint).
-- Tests: 21/21 passing (added `test_building_ui` covering 7 sub-suites).
+- Hotbar `has_selection()` / `clear_selection()` + neutral visual.
+- `main.gd` Esc priority chain + click-to-open dispatch + Manhattan-1 adjacency check + cursor save/load.
+- Multi-tile hover rect.
 
-### Session 2 (next): Chest + food chain
+**Session 1 panels:**
+- `scripts/ui/smelter_panel.gd` — flow layout with progress bar, fuel slot.
+- `scripts/ui/drill_panel.gd` — coverage 2×2, multi-output sub-slots, fuel slot.
 
-**Specialized UIs to add:**
-- Chest — replaces the existing inventory_grid paired-view hack with a BuildingPanel subclass. Slot layout: N output_multi sub-slots (chest is bulk; sub-slots ≈ TOTAL_CAPACITY / max_stack). Migration concern: existing `Chest.try_insert`/`bag` API stays; just the rendering layer changes. Inventory_grid's chest-paired-view code can be deleted once chest_panel.gd is wired.
-- Mill — single input + single output + (no fuel — Mill is currently fuel-less). Layout: input → progress bar → output, like smelter minus the fuel slot. ~120 lines (smaller than smelter).
-- Mixer — 2 solid inputs (flour W, yeast N) + fluid input (water, no slot — pipe-driven) + 1 output. Layout has 2 input slots side-by-side, fluid indicator, output. Slot_layout shape extension may be needed for the fluid indicator (display-only, not drag-droppable).
-- Oven — 1 input (risen dough) + 1 fuel (briquette) + 1 output (bread). Mirrors smelter exactly. ~150 lines.
-- Proofer — 1 input + 1 output, no fuel. ~110 lines.
-- Packager — 1 input (bread, count 4) + 1 output (loaf pack). ~110 lines.
+**Session 2 panels:**
+- `scripts/ui/processor_panel.gd` — intermediate base for Mill/Proofer/Packager/Oven (~10 lines each as subclass).
+- `scripts/ui/chest_panel.gd` — bulk-storage 6×4 grid + capacity header. Replaces old inventory_grid paired-view (removed ~150 lines from inventory_grid.gd).
+- `scripts/ui/mill_panel.gd` / `proofer_panel.gd` / `packager_panel.gd` / `oven_panel.gd` — each `extends ProcessorPanel` with no overrides. Slot_layout in Buildings.DATA drives rendering.
+- `scripts/ui/mixer_panel.gd` — extends BuildingPanel directly; 2 solid inputs side-by-side + fluid indicator + output.
+- E-key unified: opens building UI for any adjacent building with `has_interaction_ui`; falls back to drain for legacy harvester.
 
-**Architectural concerns:**
-- Fluid input visualization in slot_layout. Add `kind: "fluid"` slots that render as a non-droppable indicator showing connection status (similar to Q-inspect's "Fluid in: Water (via adjacent pipe network)").
-- Recipe-progress display generalizes to all Processor-class buildings. Smelter's progress bar is essentially universal — extract into a `ProcessorPanel` intermediate class? Decide at start of Session 2.
+**Tests: 22/22 passing.** New tests cover: cursor stack, slot_layout shapes, hotbar selection, click resolution, drag-drop semantics, ChestPanel pick/drop, multi-input dispatch (oven), mixer fluid indicator, E-key adjacency scan.
 
-### Session 3 (after Session 2): Cloth chain + remaining processors
+### Session 3 (next): Cloth chain + remaining processors
 
 **Specialized UIs to add:**
 - Retter — 1 input + 1 fluid + 1 output. Same shape as Mixer but smaller.

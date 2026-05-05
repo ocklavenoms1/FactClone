@@ -69,6 +69,13 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 @onready var building_panel: Control = $HUD/BuildingPanel
 @onready var smelter_panel: Control = $HUD/SmelterPanel
 @onready var drill_panel: Control = $HUD/DrillPanel
+# Session 2 panels (session-building-ui-2):
+@onready var chest_panel: Control = $HUD/ChestPanel
+@onready var mill_panel: Control = $HUD/MillPanel
+@onready var oven_panel: Control = $HUD/OvenPanel
+@onready var proofer_panel: Control = $HUD/ProoferPanel
+@onready var packager_panel: Control = $HUD/PackagerPanel
+@onready var mixer_panel: Control = $HUD/MixerPanel
 @onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
@@ -130,13 +137,18 @@ func _ready() -> void:
 	# Shared cursor — same instance used by every building panel.
 	inventory_grid.cursor = cursor
 	# Building panels share the same cursor + player inventory + toast.
-	for panel in [building_panel, smelter_panel, drill_panel]:
+	# Session 2: chest, mill, oven, proofer, packager, mixer panels join.
+	var all_panels: Array = [
+		building_panel, smelter_panel, drill_panel,
+		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
+	]
+	for panel in all_panels:
 		if panel != null:
 			panel.cursor = cursor
 			panel.inventory = player_inventory
 			panel.toast_callback = _show_toast
 	# Player gates movement on any building panel being open.
-	player.building_panels = [building_panel, smelter_panel, drill_panel]
+	player.building_panels = all_panels
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.
 	player.inventory_grid = inventory_grid
 	# Map panel needs world + player references for rendering and the
@@ -602,18 +614,26 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 			return
 	info_panel.clear_target()
 
-# ---------- Building Interaction UI (session-building-ui-1) ----------
+# ---------- Building Interaction UI (session-building-ui-1, extended in 2) ----------
+
+## All registered panels — single list so iteration stays consistent across
+## is-open checks, close-active dispatch, and shared-cursor wiring.
+func _all_building_panels() -> Array:
+	return [
+		building_panel, smelter_panel, drill_panel,
+		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
+	]
 
 ## True if any specialized building panel (or the generic fallback) is open.
 func _any_building_panel_open() -> bool:
-	for panel in [building_panel, smelter_panel, drill_panel]:
+	for panel in _all_building_panels():
 		if panel != null and panel.is_open():
 			return true
 	return false
 
 ## Close whichever building panel is currently open. Called by the Esc chain.
 func _close_active_building_panel() -> void:
-	for panel in [building_panel, smelter_panel, drill_panel]:
+	for panel in _all_building_panels():
 		if panel != null and panel.is_open():
 			panel.close()
 			return
@@ -644,15 +664,21 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 		return
 	match b.type:
 		Buildings.Type.SMELTER:
-			if smelter_panel != null:
-				smelter_panel.open(b, grid_world)
-			elif building_panel != null:
-				building_panel.open(b, grid_world)
+			smelter_panel.open(b, grid_world)
 		Buildings.Type.MINING_DRILL:
-			if drill_panel != null:
-				drill_panel.open(b, grid_world)
-			elif building_panel != null:
-				building_panel.open(b, grid_world)
+			drill_panel.open(b, grid_world)
+		Buildings.Type.CHEST:
+			chest_panel.open(b, grid_world)
+		Buildings.Type.MILL:
+			mill_panel.open(b, grid_world)
+		Buildings.Type.OVEN:
+			oven_panel.open(b, grid_world)
+		Buildings.Type.PROOFER:
+			proofer_panel.open(b, grid_world)
+		Buildings.Type.PACKAGER:
+			packager_panel.open(b, grid_world)
+		Buildings.Type.MIXER:
+			mixer_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback.
@@ -671,20 +697,44 @@ static func _is_adjacent_to_building(b: Building, player_tile: Vector2i) -> bool
 	return false
 
 func _try_interact(player_tile: Vector2i) -> void:
-	var b: Building = grid_world.find_adjacent_drainable(player_tile)
-	if b == null:
+	# E-key unified dispatch (session-building-ui-2):
+	#   1. Adjacent building with interaction UI → open its panel
+	#      (same as click-to-open in NEUTRAL cursor mode, but E ignores
+	#       hotbar state — works whether holding an item or not).
+	#   2. Adjacent drainable building (no UI) → drain into player inventory
+	#      (legacy harvester behavior; preserved until Session 4 adds its UI).
+	#   3. Else → silent no-op (don't toast on E with no target; players
+	#      tap E speculatively).
+	var b: Building = _find_adjacent_interactable(player_tile)
+	if b != null:
+		_try_open_building_ui(b.anchor, player_tile)
 		return
-	# Chests open the paired inventory view — replaces the old drain-all
-	# behavior with a richer player↔chest grid. Harvesters and other
-	# drainables continue to drain on E (no slot grid for them).
-	if b.type == Buildings.Type.CHEST:
-		inventory_grid.open_chest_paired_view(b)
+	var d: Building = grid_world.find_adjacent_drainable(player_tile)
+	if d == null:
 		return
-	var moved: int = Buildings.drain_into_player(b, player_inventory)
+	var moved: int = Buildings.drain_into_player(d, player_inventory)
 	if moved > 0:
-		_show_toast("Drained %s (+%d items)" % [Buildings.name_of(b.type), moved])
+		_show_toast("Drained %s (+%d items)" % [Buildings.name_of(d.type), moved])
 	else:
-		_show_toast("%s is empty" % Buildings.name_of(b.type))
+		_show_toast("%s is empty" % Buildings.name_of(d.type))
+
+## Scan the player's 4-adjacent cells (including own tile) for a building
+## with `has_interaction_ui` registered. Returns null if none. Used by
+## E-key dispatch to find what to open.
+func _find_adjacent_interactable(player_tile: Vector2i) -> Building:
+	var scan: Array = [
+		player_tile,
+		player_tile + Vector2i(1, 0),
+		player_tile + Vector2i(-1, 0),
+		player_tile + Vector2i(0, 1),
+		player_tile + Vector2i(0, -1),
+	]
+	for cell in scan:
+		if grid_world.has_building_at(cell):
+			var b: Building = grid_world.building_at(cell)
+			if b != null and Buildings.has_interaction_ui(b.type):
+				return b
+	return null
 
 ## Debug-only: spawns four minimal chains east of the player.
 ##

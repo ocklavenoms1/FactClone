@@ -9,6 +9,115 @@ Each entry has three sections:
 
 ---
 
+## Building Interaction UI — Session 2 of multi-session arc (save v14, no bump)
+
+**Date:** 2026-05-03
+**Tag:** `session-building-ui-2`
+
+Six new specialized building UIs: chest, mill, oven, proofer, packager, mixer. Built on the BuildingPanel base from Session 1. Introduces:
+1. **`ProcessorPanel`** intermediate class — Mill, Proofer, Packager, Oven each ~10 lines (just `extends`).
+2. **`ChestPanel`** replacing the old `inventory_grid` paired-view (~150 lines deleted from inventory_grid.gd).
+3. **Unified E-key**: opens building UIs (any building with `has_interaction_ui`); falls back to drain for legacy harvester.
+4. **New slot kinds**: `chest_bag` (defers to subclass render), `fluid_indicator` (read-only display).
+
+### What shipped
+
+**`scripts/ui/processor_panel.gd`** (~200 lines) — intermediate base class extending BuildingPanel.
+- Default `_building_slot_rects()` lays out inputs as a left-column (stacked vertically), outputs as a right-column, fuel slot below inputs.
+- Default `_draw_building_specific()` paints progress bar between input and output, slot labels, status text + recipe display.
+- Each row is `SLOT_LARGE + LABEL_HEIGHT + SLOT_VGAP = 94px` so labels never overlap the next stacked slot.
+- `_status_y()` helper computes status-text Y as the deepest column's bottom + 8px (avoids overlap when oven has 2 stacked inputs).
+- `_status_subline()` virtual method for buildings that want a sub-line (Smelter would override; deferred).
+
+**`scripts/ui/mill_panel.gd` + `proofer_panel.gd` + `packager_panel.gd` + `oven_panel.gd`** (each ~10 lines)
+- Pure `extends ProcessorPanel`. Slot layout in `Buildings.DATA[type]` drives rendering. No overrides needed.
+- Oven inherits the 2-input vertical stack naturally via ProcessorPanel's iteration over `inputs` array — both slot 1 (Risen Dough) and slot 2 (Fuel Briquette) lay out below each other on the left column.
+
+**`scripts/ui/mixer_panel.gd`** (~155 lines) — extends BuildingPanel directly (not ProcessorPanel).
+- Two solid input slots side-by-side (flour + yeast) — diverges from ProcessorPanel's stacked-vertical default.
+- **Fluid indicator widget**: read-only blue dot (filled = connected, hollow = no pipe network). Reads `world.fluid_available_for_building(b, fluid_type)` per frame. Player can't drag water — water is pipe-fed infrastructure, not a carryable item.
+- Output slot on the right.
+
+**`scripts/ui/chest_panel.gd`** (~170 lines) — extends BuildingPanel.
+- Doesn't use slot_layout-driven generic render (overrides `_building_slot_rects()` to return empty). Renders its own bag grid via `SlotWidget.chest_bag_to_slot_views`.
+- 6-row × 4-col grid, 24 slots (matches old inventory_grid paired-view dimensions).
+- Click semantics: empty cursor + content slot → pick to cursor; cursor + slot → drop to bag (capacity-checked); cursor + occupied slot → swap via remove-then-add (chest is bulk; no per-slot ordering).
+- Capacity header in top-right: "Capacity: N / 2400".
+- **Custom hit-test override** (`_hit_test_chest`): combines player inventory slots + chest grid slots into one routing layer.
+- Overrides `_top_area_height()` to ~380px — wider than default 280px to fit 6 rows of chest slots without overlapping the player inventory below.
+
+**`Buildings.DATA` slot_layouts added (6 buildings):**
+- CHEST: `[{kind: chest_bag, max_stack: 2400, state_field: bag}]`
+- MILL: `[input GRAIN, output FLOUR]`
+- OVEN: `[input RISEN_DOUGH, input FUEL_BRIQUETTE, output BREAD]` — both inputs share `in_buffer` (multi-type bag)
+- PROOFER: `[input DOUGH, output RISEN_DOUGH]`
+- PACKAGER: `[input BREAD, output LOAF_PACK]`
+- MIXER: `[input FLOUR, input YEAST, fluid_indicator WATER, output DOUGH]`
+
+**`SlotWidget.chest_bag_to_slot_views(bag)`** moved from `inventory_grid.gd`. Pure adapter logic; same callers, new home. Used by ChestPanel (and any future bulk-bag widget).
+
+**`inventory_grid.gd` refactored** — chest paired-view code removed (~150 lines deleted).
+- `_chest_building` field, `GRID_CHEST` constant, `open_chest_paired_view`, `_chest_slot_views`, `_chest_slot_capacity`, `_handle_left_click_chest`, `_handle_shift_click`, `_is_paired`, `_row_count_chest`, paired-view branches in `_draw_panel` / `_grid_origin_of` / `_slot_under` — all gone.
+- File shrunk from 543 → 217 lines.
+- Now does ONE thing: render the player inventory. Single-responsibility.
+
+**E-key unification (`main.gd::_try_interact`)**
+- Old: chest → paired-view, harvester → drain, others → no-op.
+- New: any adjacent building with `has_interaction_ui` → open its panel via `_try_open_building_ui`; else any drainable → drain (legacy harvester); else silent no-op.
+- Adjacency scan: 4-direction including own tile (Manhattan ≤ 1 from player_tile).
+- E ignores hotbar state (works whether holding an item or not). Click-to-open requires NEUTRAL cursor.
+
+**Multi-tile hover-rect resolution** (Session 1 carry-over) confirmed working with all new building types — clicking any cell of a 2×2 oven/proofer/packager/mixer highlights the full footprint.
+
+**Tests: 22/22 passing** (was 21; added 1)
+- **NEW** `test_building_ui_2` — 4 sub-suites:
+  1. slot_layout shape correctness for chest (chest_bag kind), mill (GRAIN→FLOUR), oven (2 inputs both kind=input, distinct accepts, both state_field=in_buffer), mixer (4 entries including fluid_indicator), proofer/packager (standard 2-entry).
+  2. ChestPanel drag-drop: pick from bag → cursor; drop into bag → capacity-checked; over-capacity drop rejected with toast.
+  3. Multi-input oven: drop RISEN_DOUGH into dough slot → in_buffer has dough; drop FUEL_BRIQUETTE into briquette slot → in_buffer also has briquette (multi-type bag); wrong-type rejected per slot's accepts list.
+  4. E-key adjacent-interactable scan: 4 cardinal directions + own tile all find an adjacent interactable building; Manhattan 2 doesn't.
+- **UPDATED** `test_building_ui` — assertion swapped from MILL (now has UI) to BRIQUETTER (still no UI; ships in Session 3).
+- **UPDATED** `test_chest_paired_view` — call site updated from `InventoryGridScript.chest_bag_to_slot_views` to `SlotWidget.chest_bag_to_slot_views`. Test logic unchanged; the adapter is exactly the same code at a new home.
+
+### Decisions
+
+- **(a) ProcessorPanel intermediate class.** Mill/Proofer/Packager/Oven all share input → progress → output flow with optional fuel slot. Extracting the layout into a base class makes each subclass ~10 lines. Decision against (b) composition: subclass-per-building is explicit ownership; composition would mean a 500-line `building_panel.gd` with all building-specific render code mingled in one file.
+- **Oven NOT converted to Burner.** Investigated: oven uses fuel-as-recipe-input (FUEL_BRIQUETTE in `inputs_solid` from S edge). Converting to Burner would mean: (1) recipe contract change (remove from `inputs_solid`, add fuel_buffer state), (2) save migration (existing saves have briquettes in `in_buffer`), (3) loss of recipe-layer fuel visibility. Net negative. Oven stays as a 2-input processor; second input is "FUEL_BRIQUETTE only" with the same buffer as the first input. The fact that one input is conceptually fuel is documented by the recipe itself.
+- **Mixer fluid: read-only display, not drag-droppable.** Water is fluid (Fluids.Type.WATER) flowing via pipes; no WATER item in the game. Adding an item parallel to the fluid concept would be bad shape. The fluid indicator just shows "is the pipe network alive."
+- **Chest UI: bulk-storage grid, not slot-discrete.** Chest is conceptually one big bag of any items. Single `chest_bag` slot kind — BuildingPanel's generic render skips it; ChestPanel handles its own grid. New kind documents the intent (chest is "different" from input/output processors).
+- **E-key unified with click-to-open.** Both routes go through `_try_open_building_ui` with adjacency check. E is faster (no need to clear hotbar first); click is more visual (point at exactly which building you mean). Two redundant entry points, accepted. E falls back to drain for legacy harvester (until Session 4 gives it a UI).
+- **`_top_area_height()` virtual method.** ChestPanel's bag grid (6 rows × 52px = 312px) doesn't fit in BuildingPanel's default 280px top area. Adding `_top_area_height()` as a subclass-overridable hook lets each panel size itself appropriately. Future panels (Session 3 cloth-chain processors) can inherit the default; ChestPanel and any other tall-content panel override.
+- **`SlotWidget.chest_bag_to_slot_views` moved, not deleted.** Pure adapter logic; ChestPanel still needs it. Moving to SlotWidget centralizes "bag → display views" rendering helpers. Test_chest_paired_view continues to verify the SAME adapter.
+- **`row_h = 94px`, not `72px`.** First draft used `top_y + i * (SLOT_LARGE + 8)` for stacked slots — labels (at +14 offset) overlapped the next slot's top edge. Bumped to `SLOT_LARGE + LABEL_HEIGHT + SLOT_VGAP = 94px` so each row reserves space for slot + label + gap. Caught at PAUSE 1.
+- **`_status_y()` computes from deepest column.** Originally hardcoded as `top_y + SLOT_LARGE + 50`. Failed on oven (2-input column extends 188px, status at 114px → status overlaps second slot). Fix: compute as `max(input_bottom, output_bottom, fuel_bottom) + 8`. Caught at PAUSE 1; surfaced in user screenshot.
+
+### Lessons
+
+- **PAUSE 1 caught two real layout bugs.** The chest-overlap and the oven-status-overlap were both invisible until visual smoke. The user's screenshots surfaced both. Session 2's two-pause structure (first PAUSE = "infrastructure works", second PAUSE = "full chain") meant we caught these at the cheap stage. Lesson: when adding many panels at once, don't skip the per-stage smoke.
+- **Refactoring inventory_grid was cheaper than expected.** Estimated ~150-200 lines deleted; actually 326 lines deleted (543 → 217). Removing all chest paired-view logic was mechanical once we had ChestPanel as the replacement. Lesson: when a feature has a clean replacement, don't preserve the old code "for compat" — delete it. The replacement's tests cover the same surface.
+- **Oven's "fuel as second input slot" is the right answer.** The slot_layout shape supports two `kind: "input"` slots with distinct accepts lists, both writing to the same in_buffer. Drag-drop validates per-slot (briquette goes only into the briquette slot; wrong-type toast). The recipe still treats fuel as a normal input. No new "fuel_input" kind needed; existing input kind suffices. **Pattern: the right primitive is often "two slots that look different but share storage."**
+- **`extends ProcessorPanel` files are 10-line gold.** Mill, Proofer, Packager, Oven are basically copy-paste boilerplate. Total per-building cost: 10 lines + 1 .uid + 1 scene-node entry. The expensive code (drag-drop, validation, layout) was paid once in ProcessorPanel; subclasses are pure declaration. **Pattern works when the layout is genuinely shared.**
+- **Mixer NOT extending ProcessorPanel was the right call.** Initially considered. But: 2 inputs side-by-side, fluid indicator, no fuel slot. Three layout differences vs ProcessorPanel's defaults; extending would require overriding 3 of ProcessorPanel's 4 layout decisions. At that point, just extend BuildingPanel directly. Lesson: the "barely fits the inheritance hierarchy" sub-class is a smell; flatten and extend the base instead.
+
+### Roadmap implications
+
+This is **Session 2 of a 4-session arc**. Sessions 3 and 4 add UIs for the remaining buildings.
+
+- **Session 3 — Cloth chain + remaining processors.** Retter, Loom, Tailor, Briquetter, Sugar Press, Yeast Culture. ~6 panel subclasses. Most extend ProcessorPanel directly; Retter has fluid input (water from pipe) like Mixer, will likely extend BuildingPanel and reuse the fluid_indicator pattern. **Click-handling-duplication smell** flagged in NOTES.md revisits here at 4+ consumers.
+- **Session 4 — Extraction.** Harvester, Planters. Architectural concern: planter has no input/output buffer in the conventional sense (crops grow on the tile). UI shape may diverge enough to warrant a non-Processor-shaped slot_layout (or none at all).
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry.
+- **Click-handling duplication between inventory_grid + BuildingPanel** — flagged at session-building-ui-1; revisit at Session 3 (4+ consumers).
+- **Specialized building UIs for remaining 8 buildings** — Sessions 3-4.
+
+---
+
 ## Building Interaction UI — Session 1 of multi-session arc (save v14, no bump)
 
 **Date:** 2026-05-03

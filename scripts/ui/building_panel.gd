@@ -86,7 +86,13 @@ func is_open() -> bool:
 # ---------- layout ----------
 
 const PANEL_W: int = 640
-const PANEL_TOP_AREA_H: int = 280     # space reserved for building-specific render
+const PANEL_TOP_AREA_H_DEFAULT: int = 280     # subclass override via _top_area_height()
+
+## Subclass override hook — buildings whose top area needs more vertical
+## room (e.g., ChestPanel's bag grid) override this to widen the panel.
+## Default 280px fits typical Processor layouts (input+output+fuel+status).
+func _top_area_height() -> int:
+	return PANEL_TOP_AREA_H_DEFAULT
 
 func _player_grid_rect() -> Rect2:
 	# Player inventory grid sits at the bottom of the panel.
@@ -95,11 +101,12 @@ func _player_grid_rect() -> Rect2:
 	var rows: int = int(ceil(float(inventory.capacity) / float(PLAYER_GRID_COLS))) if inventory != null else 4
 	var grid_h: int = rows * slot + (rows - 1) * PLAYER_GRID_GAP
 	var grid_w: int = PLAYER_GRID_COLS * slot + (PLAYER_GRID_COLS - 1) * PLAYER_GRID_GAP
-	var panel_h: int = PADDING + TITLE_HEIGHT + PANEL_TOP_AREA_H + SECTION_GAP + 24 + grid_h + PADDING
+	var top_area_h: int = _top_area_height()
+	var panel_h: int = PADDING + TITLE_HEIGHT + top_area_h + SECTION_GAP + 24 + grid_h + PADDING
 	var panel_x: float = (view_size.x - PANEL_W) * 0.5
 	var panel_y: float = (view_size.y - panel_h) * 0.5
 	var grid_x: float = panel_x + (PANEL_W - grid_w) * 0.5
-	var grid_y: float = panel_y + PADDING + TITLE_HEIGHT + PANEL_TOP_AREA_H + SECTION_GAP + 24
+	var grid_y: float = panel_y + PADDING + TITLE_HEIGHT + top_area_h + SECTION_GAP + 24
 	return Rect2(grid_x, grid_y, grid_w, grid_h)
 
 func _panel_rect() -> Rect2:
@@ -107,7 +114,8 @@ func _panel_rect() -> Rect2:
 	var slot: int = SlotWidget.SIZE
 	var rows: int = int(ceil(float(inventory.capacity) / float(PLAYER_GRID_COLS))) if inventory != null else 4
 	var grid_h: int = rows * slot + (rows - 1) * PLAYER_GRID_GAP
-	var panel_h: int = PADDING + TITLE_HEIGHT + PANEL_TOP_AREA_H + SECTION_GAP + 24 + grid_h + PADDING
+	var top_area_h: int = _top_area_height()
+	var panel_h: int = PADDING + TITLE_HEIGHT + top_area_h + SECTION_GAP + 24 + grid_h + PADDING
 	var panel_x: float = (view_size.x - PANEL_W) * 0.5
 	var panel_y: float = (view_size.y - panel_h) * 0.5
 	return Rect2(panel_x, panel_y, PANEL_W, panel_h)
@@ -120,7 +128,7 @@ func _top_area_rect() -> Rect2:
 		p.position.x + PADDING,
 		p.position.y + PADDING + TITLE_HEIGHT,
 		p.size.x - PADDING * 2,
-		PANEL_TOP_AREA_H,
+		_top_area_height(),
 	)
 
 func _player_slot_rect(slot_idx: int) -> Rect2:
