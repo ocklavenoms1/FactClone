@@ -83,6 +83,10 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 @onready var sugar_press_panel: Control = $HUD/SugarPressPanel
 @onready var retter_panel: Control = $HUD/RetterPanel
 @onready var yeast_culture_panel: Control = $HUD/YeastCulturePanel
+# Session 4 panels (session-building-ui-4): extraction tier + thresher catch-up.
+@onready var thresher_panel: Control = $HUD/ThresherPanel
+@onready var planter_panel: Control = $HUD/PlanterPanel
+@onready var harvester_panel: Control = $HUD/HarvesterPanel
 @onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
@@ -146,11 +150,13 @@ func _ready() -> void:
 	# Building panels share the same cursor + player inventory + toast.
 	# Session 2: chest, mill, oven, proofer, packager, mixer panels join.
 	# Session 3: loom, tailor, briquetter, sugar_press, retter, yeast_culture.
+	# Session 4: thresher, planter, harvester. Multi-session UI arc COMPLETE.
 	var all_panels: Array = [
 		building_panel, smelter_panel, drill_panel,
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
+		thresher_panel, planter_panel, harvester_panel,
 	]
 	for panel in all_panels:
 		if panel != null:
@@ -634,6 +640,7 @@ func _all_building_panels() -> Array:
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
+		thresher_panel, planter_panel, harvester_panel,
 	]
 
 ## True if any specialized building panel (or the generic fallback) is open.
@@ -703,9 +710,18 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			retter_panel.open(b, grid_world)
 		Buildings.Type.YEAST_CULTURE:
 			yeast_culture_panel.open(b, grid_world)
+		Buildings.Type.THRESHER:
+			thresher_panel.open(b, grid_world)
+		Buildings.Type.PLANTER:
+			planter_panel.open(b, grid_world)
+		Buildings.Type.HARVESTER:
+			harvester_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
-			# doesn't: open the generic fallback.
+			# doesn't: open the generic fallback. (Post-Session 4 the multi-
+			# session UI arc is complete; remaining UI-less buildings are
+			# passive infrastructure — Pipe/Pump/Belt — and won't reach here
+			# because they have no slot_layout entry.)
 			if building_panel != null:
 				building_panel.open(b, grid_world)
 

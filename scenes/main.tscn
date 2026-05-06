@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=30 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -24,6 +24,9 @@
 [ext_resource type="Script" path="res://scripts/ui/sugar_press_panel.gd" id="22_sppanel"]
 [ext_resource type="Script" path="res://scripts/ui/retter_panel.gd" id="23_rtpanel"]
 [ext_resource type="Script" path="res://scripts/ui/yeast_culture_panel.gd" id="24_ycpanel"]
+[ext_resource type="Script" path="res://scripts/ui/thresher_panel.gd" id="25_thpanel"]
+[ext_resource type="Script" path="res://scripts/ui/planter_panel.gd" id="26_plpanel"]
+[ext_resource type="Script" path="res://scripts/ui/harvester_panel.gd" id="27_hvpanel"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -226,6 +229,30 @@ anchor_bottom = 1.0
 
 [node name="YeastCulturePanel" type="Control" parent="HUD"]
 script = ExtResource("24_ycpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="ThresherPanel" type="Control" parent="HUD"]
+script = ExtResource("25_thpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="PlanterPanel" type="Control" parent="HUD"]
+script = ExtResource("26_plpanel")
+visible = false
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="HarvesterPanel" type="Control" parent="HUD"]
+script = ExtResource("27_hvpanel")
 visible = false
 anchor_left = 0.0
 anchor_top = 0.0

@@ -59,6 +59,20 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": false,
+		# Building Interaction UI (session-building-ui-4):
+		# Crop type is set at placement-time via hotbar `extra` (Wheat /
+		# Sugar Beet / Flax variants share Buildings.Type.PLANTER). One
+		# PlanterPanel handles all variants — reads crop_type from state.
+		# Output is an int (0 or 1 of the configured crop), NOT an array,
+		# so PlanterPanel uses custom take logic for the single output slot.
+		"slot_layout": [
+			{
+				"id": "output", "kind": "output",
+				"accepts": [],                      # informational; crop_type drives display
+				"max_stack": 1,                     # Planter.YIELD_PER_CYCLE
+				"state_field": "output",            # int (0 or 1), NOT array — PlanterPanel handles
+			},
+		],
 	},
 	Type.HARVESTER: {
 		"name": "Harvester",
@@ -67,6 +81,22 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": false,
 		"player_drainable": true,
+		# Building Interaction UI (session-building-ui-4):
+		# Harvester scans 8 King-move neighbors for adjacent ripe planters
+		# and pulls one item per scan into its `buffer`. Pure output, no
+		# input slot; the output is a multi-type bag (player can run wheat
+		# + sugar + flax planters all feeding the same harvester).
+		# Specialized panel renders 3×3 coverage display (own tile + 8
+		# neighbors with planter status).
+		"slot_layout": [
+			{
+				"id": "buffer", "kind": "output_multi",
+				"accepts": [],                      # informational; output kinds are read-only
+				"max_stack": 50,                    # Harvester.BUFFER_CAPACITY (aggregate)
+				"state_field": "buffer",
+				"multi_count": 6,                   # display 6 sub-slots
+			},
+		],
 	},
 	Type.BELT: {
 		"name": "Belt",
@@ -174,6 +204,17 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Standard Processor (session-building-ui-4 — catch-up from sessions
+		# 2-3 oversight): wheat → grain + straw. Two output slots stacked
+		# vertically on the right column via ProcessorPanel default.
+		"slot_layout": [
+			{"id": "input", "kind": "input", "accepts": [Items.Type.WHEAT],
+			 "max_stack": 8, "state_field": "in_buffer"},
+			{"id": "output_grain", "kind": "output", "accepts": [Items.Type.GRAIN],
+			 "max_stack": 8, "state_field": "out_buffer"},
+			{"id": "output_straw", "kind": "output", "accepts": [Items.Type.STRAW],
+			 "max_stack": 8, "state_field": "out_buffer"},
+		],
 	},
 	Type.PROOFER: {
 		"name": "Proofer",
@@ -429,10 +470,35 @@ static func is_player_drainable(t: int) -> bool:
 	return DATA[t].get("player_drainable", false)
 
 ## Slot layout for the Building Interaction UI (session-building-ui-1).
-## Returns an Array of slot descriptors (see Buildings.DATA[type].slot_layout
-## for shape). Empty array = building has no interaction UI yet (chest, mill,
-## etc. — added in future sessions). Click-to-open detection uses
-## `not slot_layout.is_empty()` to decide whether to open a panel.
+## Returns an Array of slot descriptors. Empty array = building has no
+## interaction UI registered (passive infrastructure like Pipe/Pump/Belt
+## stays empty forever; planter/harvester ship UIs at session 4).
+##
+## Slot descriptor shape (per session-building-ui-1, refined through 4):
+##   id: String              identifier for drag-drop logic
+##   kind: String            one of "input" | "output" | "output_multi"
+##                           | "fuel" | "fluid_indicator" | "chest_bag"
+##   accepts: Array[int]     for input/fuel: VALIDATED — drag-drop rejects
+##                                            non-listed item types
+##                           for output/output_multi: INFORMATIONAL —
+##                                            output kinds are read-only;
+##                                            accepts is for display only
+##                                            (e.g. listing what the
+##                                            building emits)
+##   max_stack: int          per-item-type capacity in the slot's buffer
+##                           (or fuel-units capacity for kind=="fuel")
+##   state_field: String     which b.state field this slot reads/writes
+##                           (e.g. "in_buffer", "out_buffer", "fuel_buffer",
+##                           "buffer", "output", "bag")
+##
+## Special-purpose fields per kind:
+##   output_multi.multi_count:     how many visible sub-slots to render
+##   fluid_indicator.fluid_type:   Fluids.Type value (no state_field;
+##                                  fluid_indicator is render-only, queries
+##                                  world.fluid_available_for_building)
+##
+## Click-to-open detection uses `not slot_layout.is_empty()` to decide
+## whether to open a panel.
 static func slot_layout_for(t: int) -> Array:
 	return DATA[t].get("slot_layout", [])
 

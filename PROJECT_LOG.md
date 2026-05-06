@@ -9,6 +9,126 @@ Each entry has three sections:
 
 ---
 
+## Building Interaction UI — Session 4 of multi-session arc (save v14, no bump) — **ARC COMPLETE**
+
+**Date:** 2026-05-03
+**Tag:** `session-building-ui-4`
+
+Final session of the 4-session UI arc. Three new specialized panels: HarvesterPanel (3×3 coverage display + multi-output buffer), PlanterPanel (handles all 3 variants — Wheat/Sugar Beet/Flax — via crop_type read), ThresherPanel (vanilla `extends ProcessorPanel`). After this session, **every interactive building in the game has a specialized UI**; only passive infrastructure (Pipe/Pump/Belt) remains UI-less.
+
+### What shipped
+
+**`scripts/ui/harvester_panel.gd`** (~165 lines) — extends BuildingPanel.
+- 3×3 coverage display: harvester's own tile (■) + 8 King-move neighbors color-coded by planter status (R=ripe gold, G=growing leafy-green, _=empty/non-planter dim gray).
+- Output buffer rendered as 6-slot horizontal row (`output_multi` kind, same shape as drill's output buffer). Multi-type bag: harvester scoops crops from any planter type in coverage.
+- Coverage state read on-the-fly per frame from `world.has_building_at` + `Planter.is_ripe` (per Q2 design — no caching needed at this scale).
+- Status row: scan timer + buffer fill, plus hint about belt/chest auto-drain.
+- Overrides `_top_area_height()` to 380px (coverage + output row + status).
+
+**`scripts/ui/planter_panel.gd`** (~140 lines) — extends BuildingPanel.
+- **One panel handles all 3 planter variants** — they share `Buildings.Type.PLANTER` with `crop_type` set at placement via hotbar `extra`. PlanterPanel reads `Planter.crop_of(b)` per frame to title and color the output.
+- Growth bar (240×18px) fills toward `max_growth_for(crop_type)`: 600 ticks for wheat, 800 for sugar beet, 500 for flax.
+- Status text: "Growing N%" (leafy-green) or "Ripe — extract to start next cycle" (ripe gold).
+- Centered output slot with the configured crop's color swatch.
+- **Custom drag-out for int-typed output**: Planter's `output` is `int` (0 or 1), not `Array of [type, count]`. PlanterPanel overrides `_take_from_slot` to call `Planter.try_extract` (resets growth=0 on output→0 — consistent with the harvester-driven extraction primitive). Drop into output rejected via base-class read-only logic (no override needed).
+- Overrides `_draw_slots` so the slot renders the crop_type-derived item even though the underlying state is just an int.
+
+**`scripts/ui/thresher_panel.gd`** (~5 lines) — pure `extends ProcessorPanel`.
+- 1 input (WHEAT) + 2 outputs (GRAIN, STRAW). ProcessorPanel's default lay-out stacks the 2 outputs vertically on the right column. **No overrides needed.**
+- Validates ProcessorPanel pattern at **11 consumers** post-Session-4.
+
+**Buildings.DATA slot_layouts added (3 buildings):**
+- HARVESTER: `[output_multi buffer, multi_count: 6]`
+- PLANTER: `[output, max_stack: 1, state_field: output (int!)]`
+- THRESHER: `[input WHEAT, output GRAIN, output STRAW]`
+
+**Buildings.gd schema docs**: added comprehensive comment for `slot_layout_for` clarifying the slot descriptor shape, kind enum, and the `accepts:[]` semantics:
+- For `input`/`fuel` kinds: accepts is **VALIDATED** (drag-drop rejects non-listed types).
+- For `output`/`output_multi` kinds: accepts is **INFORMATIONAL** (output kinds are read-only by design; accepts is for display).
+- Special-purpose fields per kind documented (`multi_count`, `fluid_type`).
+
+**E-key on harvester now opens panel, not drain.** Harvester gained `has_interaction_ui == true`; `_try_e_key_interact` finds it as an interactable first, so E opens HarvesterPanel. Player drains by drag-out from the output buffer. Old "Drain with E" hint replaced with "Drag items from buffer to inventory below, or place a chest/belt adjacent for auto-drain."
+
+**Test canary updated**: `test_building_ui` "no UI" assertion swapped from HARVESTER (now has UI) to BELT (passive infrastructure, will never have a UI).
+
+**Tests: 24/24 passing** (was 23; added 1)
+- **NEW** `test_building_ui_4` — 5 sub-suites:
+  1. slot_layout shapes for harvester/planter/thresher correct (kinds, accepts, fields).
+  2. ProcessorPanel reuse milestone hits 11 consumers via static file scan.
+  3. **Multi-session arc COMPLETE check**: iterates every `Buildings.DATA` key — passive types (Pipe/Pump/Belt) have NO UI; all others have `has_interaction_ui == true`.
+  4. PlanterPanel int-typed output: take from ripe planter pulls crop to cursor and resets growth via `Planter.try_extract`. Empty planter → no-op.
+  5. HarvesterPanel coverage scan returns expected enum states (RIPE for ripe planter, GROWING for default planter, EMPTY for chest/no-building).
+
+### Multi-session arc COMPLETE — final reuse milestones
+
+| Pattern | Consumers post-arc | Cost saved vs naive |
+|---|---|---|
+| **BuildingPanel base** | 14 specialized panels | one-shared modal lifecycle, drag-drop, validation |
+| **ProcessorPanel intermediate** | 11 (Mill/Oven/Proofer/Packager/Loom/Tailor/Briquetter/SugarPress/Retter/YeastCulture/Thresher) | ~700 lines saved across sessions 2-4 |
+| **`draw_fluid_indicator` shared helper** | 3 (Mixer/Retter/YeastCulture) | unified visual; ~50 lines saved |
+| **`output_multi` shared kind** | 2 (Drill/Harvester) | shared sub-slot rendering + click logic |
+| **`fluid_indicator` shared kind** | 3 (Mixer/Retter/YeastCulture) | unified read-only fluid widget |
+
+**Final post-arc panel sizes:**
+- 14 specialized panel files
+- 11 of those are 5–10 lines each (pure `extends ProcessorPanel` or `extends BuildingPanel`)
+- 3 specialized: HarvesterPanel (~165), PlanterPanel (~140), ChestPanel (~170), MixerPanel (~155), SmelterPanel (~180), DrillPanel (~245)
+- ProcessorPanel itself: ~230 lines (intermediate base for 11 buildings)
+- BuildingPanel base: ~400 lines (modal lifecycle, drag-drop, validation, `draw_fluid_indicator`, player inventory render)
+
+**Architectural payoff arc:**
+- Session 1 paid ~400 lines for the BuildingPanel framework. 2 specialized consumers.
+- Session 2 paid ~200 lines for ProcessorPanel. Reuse jumped to 4 consumers.
+- Session 3 paid ~30 lines for fluid_indicator extension. Reuse jumped to 10 consumers + 3 fluid consumers.
+- Session 4 paid ~5 lines for ThresherPanel and ~300 lines for harvester+planter specialization. Reuse hit 11 consumers; arc complete.
+
+The "expensive code paid in early sessions, cheap subclass declarations in later sessions" pattern played out exactly as planned. Late-session subclass files are 5-10 lines each. The architectural credit balance keeps cashing out.
+
+### Decisions
+
+- **ExtractionPanel intermediate class deferred (architectural reversal #3 in the project).** User-locked decision at session start was "ExtractionPanel base class for harvester + 3 planters." Pre-implementation audit found:
+  - Harvester is 1×1 with a 3×3 *coverage* display reading 8 neighbors.
+  - Planters are 1×1 with NO coverage area; just grow on themselves.
+  - Their layouts share <30% — coverage is harvester-only; growth fraction is planter-only; harvester has multi-bag output, planters have int-typed single output.
+  - Forcing them into one base class would mean "if-has-coverage / if-has-growth / if-multi-output" branches — at that point ExtractionPanel is BuildingPanel with flags, no real abstraction value.
+- **PlanterPanel single-class for all 3 variants.** Wheat/Sugar Beet/Flax planters share `Buildings.Type.PLANTER`; only the `crop_type` state field differs. One PlanterPanel reads crop_type per-open. Three variants but one panel file. Cleaner than 3 near-identical subclasses (which the user's brief had implicitly assumed).
+- **Coverage state read on-the-fly per frame, not cached.** Harvester scans 8 cells at most; per-frame cost is negligible. Caching would introduce sync complexity (when does the cache invalidate?) for no measurable gain.
+- **Planter's int-typed output handled via PlanterPanel override**, not by changing Planter state shape. Migration risk avoided. The override is small and localized.
+- **Thresher's 2 outputs use existing ProcessorPanel default**, not a special "multi-output" Processor variant. ProcessorPanel already stacks outputs vertically when `output_count > 1`; thresher's 2-stack (grain above, straw below) inherits this for free.
+
+### Lessons
+
+- **Pre-implementation audits catch faulty abstraction assumptions.** This is the **3rd architectural reversal in the project** based on reconnaissance findings:
+  1. **Mining tier — deposit-overlay rule reversal** (`session-mining-manual`): "overlay obscures deposit, RMB-clear reveals" was reversed to "overlay placement BLOCKED on deposits" after the UX trap became obvious in playtest.
+  2. **Fluid_indicator extraction before extending ProcessorPanel** (`session-building-ui-3`): user pushback on the design pass added the 3a→3b→3c sequencing to extract MixerPanel's fluid renderer to a shared helper BEFORE ProcessorPanel grew its own fluid logic.
+  3. **ExtractionPanel deferred** (`session-building-ui-4`): user-locked architectural decision overturned by reconnaissance audit revealing harvester ↔ planter shape divergence.
+- **Codified as protocol** in NOTES.md: "**Locked architectural decisions can be reversed if pre-implementation reconnaissance reveals the assumption was wrong.**" The cost of reversing during design pass is ~10 minutes of writeup; the cost of shipping a bad abstraction and removing it later is 10× that. Always run the audit step the user explicitly requested.
+- **The "specialized panel" line count grew with feature complexity, not arbitrarily.** HarvesterPanel (~165 lines) is 3× the size of trivial ProcessorPanel subclasses because it has a unique coverage widget. PlanterPanel (~140 lines) is 2× because of its int-typed-output override and crop_type-driven display. The ratio of "novel UX requirement → custom code" is what drove sizes; pure declaration cases stayed at 5-10 lines.
+- **Thresher catch-up was a 5-line fix** after sessions 2-3 missed it. Carrying "Thresher should have shipped with food chain" as an explicit follow-up note (NOTES.md) prevented it from being silently forgotten. Lesson: **when a session scope-out is intentional, document it as a known follow-up immediately, not "later in the doc pass."**
+- **Multi-session arc complete on schedule with no schema bumps.** 4 sessions, 14 specialized panels, 0 save format changes, 24 cumulative tests at the end (vs 21 at session 1 start). The data-driven `slot_layout` registry + `BuildingPanel`/`ProcessorPanel` hierarchy was the right architecture from session 1; later sessions were pure additions, not reshapes. Lesson: **when the early-session architectural decisions are right, late sessions are easy.**
+
+### Roadmap implications — multi-session UI arc COMPLETE
+
+This arc is closed. Every interactive building in the game has a specialized UI panel. Future UI work falls into three categories:
+
+- **Polish** (defer to playtest feedback): right-click half-stack, drag-drop visuals (true mouse drag instead of click-pick / click-place), animations, panel transitions.
+- **New buildings** (Sessions C/D/E/F per main spec): future processors automatically inherit ProcessorPanel; specialized buildings get a panel file. Adding a UI for a new processor = ~10 lines panel file + 1 slot_layout entry.
+- **Major rework** (deferred indefinitely): SmelterPanel and DrillPanel still have their own standalone implementations from Session 1 — they predate ProcessorPanel. Could be migrated in a future polish session if the divergence becomes painful. Not currently painful.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry. Future kilns/lumber camp/electric drills join here.
+- **Click-handling duplication** between inventory_grid + BuildingPanel — refined trigger criteria in NOTES.md (still 2 implementations after 4 sessions).
+- **Right-click half-stack interactions** — flagged at session-building-ui-1 as building-UI v2 polish.
+- **SmelterPanel + DrillPanel migration to ProcessorPanel + ExtractionPanel-style refactor** — flagged this session as deferred indefinitely.
+
+---
+
 ## Building Interaction UI — Session 3 of multi-session arc (save v14, no bump)
 
 **Date:** 2026-05-03

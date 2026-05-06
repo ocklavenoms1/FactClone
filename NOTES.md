@@ -6,6 +6,27 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Protocol: locked architectural decisions can be reversed by reconnaissance findings
+
+**Codified at session-building-ui-4** after the third project-level architectural reversal.
+
+**Pattern:** when the user (or a prior design pass) locks in an architectural decision before implementation, and the implementation includes a "verify before code" reconnaissance step, the audit can produce findings that invalidate the locked decision's premise. **Reversing during the design-pass writeup is correct.** It's cheaper than shipping the bad abstraction and removing it later (10× cost differential).
+
+**Three reversals so far:**
+1. **`session-mining-manual` — deposit-overlay rule reversal.** Original: "overlay obscures deposit, RMB-clear reveals." Reversed to: "overlay placement BLOCKED on deposits." The UX trap (player accidentally pavers over and loses the deposit) was visible in playtest within minutes.
+2. **`session-building-ui-3` — fluid_indicator extracted to shared helper BEFORE ProcessorPanel extension.** User pushback added a 3a→3b→3c sequencing: extract from MixerPanel first, refactor MixerPanel to use shared, THEN extend ProcessorPanel. Avoided two divergent fluid renderers.
+3. **`session-building-ui-4` — ExtractionPanel intermediate deferred.** Reconnaissance found harvester (3×3 coverage) and planter (no coverage, int-typed output) share <30% layout. Forcing them into one base class would mean "if-has-coverage" branches with no real abstraction value.
+
+**Protocol:**
+- Always honor a "verify before implementation" step in the implementation order — don't skip it.
+- If the audit reveals the locked decision's premise is wrong, **reverse during the design-pass writeup, not silently in code.**
+- Document the reversal explicitly in PROJECT_LOG with the audit findings as evidence.
+- Cost to reverse during writeup: ~10 minutes. Cost to ship-then-remove a bad abstraction: hours-to-days.
+
+If a reversal feels expensive (e.g., the user pre-committed publicly to the original choice), that's a smell that the audit step was treated as ceremony rather than gate. The audit IS the gate.
+
+---
+
 ## Click-handling duplication (BuildingPanel ↔ inventory_grid)
 
 **Status:** still 2 implementations after session-building-ui-3. Audit verified at session 3 design pass: ChestPanel overrides `_gui_input` for hit-test routing only; calls `_handle_player_slot_click` from BuildingPanel base unchanged. No third copy exists.
@@ -23,13 +44,26 @@ When any one fires: extract to `CursorStack.click_swap(slot, cursor) -> void` or
 
 ---
 
-## Building Interaction UI — multi-session arc (Sessions 1+2+3 shipped)
+## Building Interaction UI — multi-session arc **COMPLETE** (Sessions 1+2+3+4 shipped)
 
-**Status:** **Sessions 1 + 2 + 3 SHIPPED.** Foundation infrastructure + 14 specialized UIs (smelter, drill, chest, mill, oven, proofer, packager, mixer, loom, tailor, briquetter, sugar press, retter, yeast culture). Session 4 adds extraction-tier UIs (harvester, planters).
+**Status:** **All 4 sessions SHIPPED.** Every interactive building in the game has a specialized UI panel. Only passive infrastructure (Pipe/Pump/Belt) remains UI-less, by design.
 
-**ProcessorPanel reuse milestone:** 10 consumers post-Session-3 (Mill, Oven, Proofer, Packager, Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture). All extend with no overrides — pure 5-line subclass files. ~280 line savings vs naive plan (specialized panels per building). See PROJECT_LOG session-building-ui-3 for the architectural-investment-pays-off log.
+**14 specialized panels:**
+- Session 1: SmelterPanel, DrillPanel
+- Session 2: ChestPanel, MillPanel, OvenPanel, ProoferPanel, PackagerPanel, MixerPanel
+- Session 3: LoomPanel, TailorPanel, BriquetterPanel, SugarPressPanel, RetterPanel, YeastCulturePanel
+- Session 4: ThresherPanel (catch-up), PlanterPanel (handles 3 variants), HarvesterPanel
 
-**Shared `BuildingPanel.draw_fluid_indicator`:** 3 consumers (Mixer, Retter, Yeast Culture). Single source of truth for "how a fluid input looks."
+**Final reuse milestones:**
+- **ProcessorPanel: 11 consumers** (Mill, Oven, Proofer, Packager, Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture, Thresher) — all 5–10 line `extends ProcessorPanel` subclasses with no overrides.
+- **`draw_fluid_indicator` shared helper**: 3 consumers (Mixer, Retter, Yeast Culture).
+- **`output_multi` slot kind**: 2 consumers (Drill, Harvester).
+- **`fluid_indicator` slot kind**: 3 consumers (Mixer, Retter, Yeast Culture).
+
+**Future UI work** (not part of the arc):
+- Polish (deferred to playtest feedback): right-click half-stack, true mouse drag, panel transitions.
+- New buildings: future processors inherit ProcessorPanel automatically (~10 lines per new building).
+- SmelterPanel + DrillPanel still standalone (predate ProcessorPanel) — could migrate in a future polish session if divergence becomes painful. Not currently painful.
 
 ### What's shipped (sessions 1+2)
 
@@ -53,31 +87,23 @@ When any one fires: extract to `CursorStack.click_swap(slot, cursor) -> void` or
 - `scripts/ui/mixer_panel.gd` — extends BuildingPanel directly; 2 solid inputs side-by-side + fluid indicator + output.
 - E-key unified: opens building UI for any adjacent building with `has_interaction_ui`; falls back to drain for legacy harvester.
 
-**Tests: 22/22 passing.** New tests cover: cursor stack, slot_layout shapes, hotbar selection, click resolution, drag-drop semantics, ChestPanel pick/drop, multi-input dispatch (oven), mixer fluid indicator, E-key adjacency scan.
+**Tests: 24/24 passing.** Tests cover all 4 sessions' invariants — cursor stack, slot_layout shapes, hotbar selection, click resolution, drag-drop semantics, ChestPanel pick/drop, multi-input dispatch (oven), mixer fluid indicator, E-key adjacency scan, ProcessorPanel reuse milestones (10 → 11 consumers), planter int-typed-output handling, harvester coverage scan, and the **arc-COMPLETE check** (every interactive building has a UI; only Pipe/Pump/Belt are UI-less).
 
-### Session 4 (next): Extraction tier
+### Cross-cutting follow-ups (deferred)
 
-**Specialized UIs to add:**
-- Harvester — 1 input slot (auto-populated from adjacent crop tile? Or just shows what was harvested?) + N output (multi-item buffer like drill). Depends on architecture decisions during the session.
-- Planter (Wheat/Sugar Beet/Flax variants) — single seed slot? Or no slot at all (seeds are in inventory only)? Planter may not need a panel; if it doesn't have buffers, the existing Q-inspect read-only view is enough.
-- **Thresher** (carry from sessions 2-3 oversight) — basic Processor (wheat → grain + straw). Likely just 5-line `extends ProcessorPanel` like other simple processors. Small add-on this session.
-
-**Architectural concern:** Planter and Harvester are extraction-tier; they don't have the input-buffer / output-buffer / fuel shape that Processor-derived buildings share. If their UIs don't fit the BuildingPanel mold cleanly, that's a signal that BuildingPanel is over-fitted to processors. Plan to revisit the slot_layout schema if/when extraction UIs feel forced.
-
-### Cross-cutting follow-ups (across all 4 sessions)
-
-- **Right-click half-stack** in building slots — defer to building UI v2 polish.
+- **Right-click half-stack** in building slots — building UI v2 polish.
 - **Animations / transitions** for modal open/close — defer.
-- **Drag-and-drop visual** — currently click-to-pickup, click-to-place. Real drag (button-down + move + button-up) may feel more natural; defer until playtest confirms the click pattern is unwieldy.
+- **Drag-and-drop visual** — currently click-to-pickup, click-to-place. Real mouse drag (button-down + move + button-up) may feel more natural; defer until playtest confirms the click pattern is unwieldy.
+- **SmelterPanel + DrillPanel migration to ProcessorPanel-style** — they predate the intermediate class. Could refactor if divergence becomes painful. Not currently painful.
 
-### Hooks shipped this arc so far (sessions 1-3)
+### Hooks shipped (final tally)
 
 - `Buildings.slot_layout_for(t)` + `has_interaction_ui(t)` — data registry.
-- `BuildingPanel` base class with modal lifecycle + drag-drop + kind-validation + `draw_fluid_indicator` helper.
-- `ProcessorPanel` intermediate class (input → progress → output ± fuel ± fluid_indicator). 10 consumers.
+- `BuildingPanel` base (~400 lines): modal lifecycle, drag-drop, kind-validation, `draw_fluid_indicator` helper, player inventory render.
+- `ProcessorPanel` intermediate (~230 lines): 11 consumers via pure `extends`.
 - `CursorStack` shared object (one instance, all modals).
-- `SlotWidget` static helper for uniform slot rendering + chest-bag adapter.
-- Esc priority chain in main.gd — extending for new panels is mechanical.
+- `SlotWidget` static helper: slot rendering + chest-bag adapter.
+- Esc priority chain in main.gd.
 - E-key unified dispatch — opens building UI for any adjacent building with `has_interaction_ui`.
 
 ---
