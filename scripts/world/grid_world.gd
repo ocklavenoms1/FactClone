@@ -56,19 +56,56 @@ var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2
 # state=1, then update_vision() upgrades the 5×5 around player to state=2.
 var region_visibility: Dictionary = {}
 
-# Soil exhaustion (session-soil-exhaustion-1). Each 32×32 region has a
-# shared soil_health value 0..100. Default 100 (pristine) — sparse storage,
-# only depleted regions appear in the dict. Future sessions add fallow
-# regeneration (Session 2), fertilizer chain (Session 3), wasteland
-# below-zero values (Session 4).
+# Soil exhaustion (session-soil-exhaustion-1, refactored to per-tile at
+# session-soil-exhaustion-2). Each TILE has its own soil_health 0..100.
+# Default 100 (pristine) — sparse storage; only modified tiles appear.
 #
-# Save format: `region_soil_modifications` field (Array of [rx, ry, soil]).
-# Saves at v15. Hard-fail on v14 per existing schema-bump policy.
-var region_soil_modifications: Dictionary = {}    # Vector2i (region) -> int (0..100)
+# Architectural reversal from Session 1's region-based model: playtest
+# revealed that 32×32 region scope made one planter affect 1024 tiles,
+# disconnecting cause from effect. Per-tile scope localizes depletion to
+# the immediate 3×3 around each planter (see deplete_planter_area).
+#
+# Save format: `tile_soil_modifications` field (Array of [x, y, soil]).
+# Saves at v16. v15 saves hard-fail (region-scoped data not migrated;
+# soil mechanic is fresh enough that no meaningful save state lost).
+var tile_soil_modifications: Dictionary = {}    # Vector2i (tile pos) -> int (0..100)
 
-# Per-region "pristine" baseline. Anchored as a constant so future sessions
-# (recovery, wasteland) reference the canonical full value.
-const SOIL_HEALTH_FULL: int = 100
+# Per-tile "pristine" baseline. Anchored as a constant so future sessions
+# (fertilizer chain, wasteland) reference the canonical full value.
+const TILE_SOIL_FULL: int = 100
+
+# Soil regen (session-soil-exhaustion-2). Per-frame fractional progress
+# accumulated when a tile is depleted AND no active planter's 3×3 area
+# overlaps it. When progress >= 1.0, soil increments by floor(progress)
+# and the float remainder carries over.
+#
+# Per design Q5: NOT serialized. Save/load loses up to SECONDS_PER_SOIL_POINT
+# of pending regen progress per tile. Negligible UX cost.
+#
+# Per design Q3 (locked): 1 point per 30 sec. Full pristine recovery
+# (0 → 100) takes 50 minutes wall-clock when no active farming nearby.
+var tile_regen_progress: Dictionary = {}    # Vector2i (tile) -> float (0..1+)
+const SECONDS_PER_SOIL_POINT: float = 30.0
+
+## Soil level enum (per-tile). Pure function of soil_health value; NOT
+## related to nearby planter state. Used by visual rendering and Q-inspect
+## status labels.
+enum SoilLevel {
+	PRISTINE,    # 100         (no modifications entry)
+	HEALTHY,     # 70..99      (no visual tint — same as PRISTINE visually)
+	DAMAGED,     # 30..69      (yellow-brown overlay)
+	DYING,       # 1..29       (brown overlay)
+	DEAD,        # 0           (dark cracked-earth tint)
+}
+
+## Soil activity enum (per-tile). Orthogonal to SoilLevel — tracks
+## whether a planter is currently affecting this tile vs whether the tile
+## is being passively recovered.
+enum SoilActivity {
+	NONE,             # tile is pristine (not modified) OR fully recovered
+	ACTIVE_FARMING,   # an active planter's 3×3 area overlaps this tile
+	REGENERATING,     # in modifications, soil < 100, no active planter affects
+}
 
 # Vision parameters. VISION_RADIUS is Chebyshev distance; the 5×5 area is
 # (2*VISION_RADIUS + 1)^2 = 25 regions when radius = 2.
@@ -485,28 +522,58 @@ func _in_region_bounds(region: Vector2i) -> bool:
 	return region.x >= WorldGenerator.REGION_MIN and region.x < WorldGenerator.REGION_MAX \
 		and region.y >= WorldGenerator.REGION_MIN and region.y < WorldGenerator.REGION_MAX
 
-# ---------- soil exhaustion (session-soil-exhaustion-1) ----------
+# ---------- soil exhaustion (per-tile, session-soil-exhaustion-2) ----------
 
-## Read region soil health. Default SOIL_HEALTH_FULL (100) if not in
+## Read tile soil health. Default TILE_SOIL_FULL (100) if not in
 ## modifications dict — sparse storage means absent = pristine.
-func region_soil_health(region: Vector2i) -> int:
-	return int(region_soil_modifications.get(region, SOIL_HEALTH_FULL))
+func tile_soil_health(pos: Vector2i) -> int:
+	return int(tile_soil_modifications.get(pos, TILE_SOIL_FULL))
 
-## Decrement region soil_health by `amount`, clamped at 0 (this session;
+## Decrement tile soil_health by `amount`, clamped at 0 (this session;
 ## future sessions allow negative for wasteland). Updates the modifications
-## dict; if the new value happens to be SOIL_HEALTH_FULL again (100, only
-## possible when amount <= 0 — defensive), erases the entry to keep the
-## dict sparse.
+## dict; if the new value happens to be TILE_SOIL_FULL again (only possible
+## when amount <= 0 — defensive), erases the entry to keep the dict sparse.
 ##
 ## Returns the new soil_health value.
-func deplete_region_soil(region: Vector2i, amount: int) -> int:
-	var current: int = region_soil_health(region)
+func deplete_tile_soil(pos: Vector2i, amount: int) -> int:
+	var current: int = tile_soil_health(pos)
 	var new_value: int = max(0, current - amount)
-	if new_value >= SOIL_HEALTH_FULL:
-		region_soil_modifications.erase(region)
+	if new_value >= TILE_SOIL_FULL:
+		tile_soil_modifications.erase(pos)
 	else:
-		region_soil_modifications[region] = new_value
+		tile_soil_modifications[pos] = new_value
 	return new_value
+
+## Compute the neighbor falloff cost. Center loses center_cost; each of
+## the 8 neighbors loses this amount. Formula (per locked design Q5):
+##   max(1, ceil(center_cost * 0.6))
+##
+## Verification: Wheat 5 → 3, Sugar Beet 8 → 5, Flax 3 → 2.
+## The max(1, ...) ensures any future tiny-cost crop still touches
+## neighbors at least 1.
+static func _neighbor_falloff_cost(center_cost: int) -> int:
+	return max(1, int(ceil(float(center_cost) * 0.6)))
+
+## Apply soil depletion to the 9-tile area centered at `anchor` (the
+## planter's tile + its 8 King-move neighbors). Center tile loses the
+## full center_cost; neighbors lose the falloff cost.
+##
+## Each tile's soil clamped at 0 individually. Tiles that don't need
+## visualization (e.g., stone, water) still track soil values internally —
+## the rendering layer decides what to show.
+##
+## Aggregate per-harvest depletion (across all 9 tiles):
+##   Wheat (cost 5):     5 + 8×3 = 29
+##   Sugar Beet (cost 8): 8 + 8×5 = 48
+##   Flax (cost 3):      3 + 8×2 = 19
+func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
+	var neighbor_cost: int = _neighbor_falloff_cost(center_cost)
+	deplete_tile_soil(anchor, center_cost)
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			deplete_tile_soil(Vector2i(anchor.x + dx, anchor.y + dy), neighbor_cost)
 
 ## Recompute active-vs-fog for the current player region. Returns the list
 ## of regions whose visibility CHANGED so the map texture can be marked
@@ -734,7 +801,169 @@ func _draw_harvest_indicator() -> void:
 
 func _process(delta: float) -> void:
 	_tick_regrowth(delta)
+	_tick_soil_regen(delta)
 	queue_redraw()
+
+# ---------- per-tile soil regen (session-soil-exhaustion-2) ----------
+
+## Per-frame fallow regen tick. Iterates `tile_soil_modifications` (sparse)
+## and regenerates soil in tiles where no active planter's 3×3 area overlaps.
+##
+## Active-tile detection: single O(planters × 9) pass per frame. At 100
+## planters = 900 dict inserts/frame; sub-millisecond.
+##
+## Active farming = at least one planter with growth > 0 OR output > 0
+## whose 3×3 area covers the tile. Idle planters (growth==0 AND output==0)
+## DON'T mark their area active — this enables the single-planter-
+## oscillation edge case (idle planter on dead tile → tile regens to 1 →
+## planter activates → consumes → tile drops → idle → cycle). PlanterPanel
+## mini-grid shows the flicker visually.
+##
+## **3×3 boundary exactness**: planter at (50,50) marks tiles (49..51,
+## 49..51) active. A tile at (53, 50) is OUTSIDE that 3×3 area and
+## regenerates independently of the planter's state.
+##
+## When a tile transitions ACTIVE→REGENERATING (or vice versa), partial
+## tile_regen_progress is reset to 0. Conceptual simplicity: "active
+## farming = no regen, period." Player loses up to SECONDS_PER_SOIL_POINT
+## of pending progress on activation.
+func _tick_soil_regen(delta: float) -> void:
+	if tile_soil_modifications.is_empty():
+		return
+
+	# Single pass: mark all tiles in active planters' 3×3 areas.
+	var active_tiles: Dictionary = {}
+	for anchor in buildings:
+		var b: Building = buildings[anchor]
+		if b == null or b.type != Buildings.Type.PLANTER:
+			continue
+		if not Planter.is_active(b):
+			continue
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				active_tiles[Vector2i(b.anchor.x + dx, b.anchor.y + dy)] = true
+
+	# Second pass: regen non-active depleted tiles.
+	# Snapshot keys() because we may mutate tile_soil_modifications mid-loop
+	# (full-recovery erase). Same iteration pattern as _tick_regrowth.
+	var to_restore: Array[Vector2i] = []
+	for pos in tile_soil_modifications.keys():
+		if active_tiles.has(pos):
+			# Active farming this frame — clear partial regen so a brief
+			# active period doesn't leave stale progress accumulated.
+			tile_regen_progress.erase(pos)
+			continue
+
+		# Accumulate progress.
+		var prog: float = float(tile_regen_progress.get(pos, 0.0)) + delta / SECONDS_PER_SOIL_POINT
+		var increment: int = int(prog)
+		if increment > 0:
+			var current: int = int(tile_soil_modifications[pos])
+			var new_val: int = current + increment
+			tile_regen_progress[pos] = prog - float(increment)
+			if new_val >= TILE_SOIL_FULL:
+				to_restore.append(pos)
+			else:
+				tile_soil_modifications[pos] = new_val
+		else:
+			tile_regen_progress[pos] = prog
+
+	# Pristine restoration: erase from both dicts (sparse return to default 100).
+	for pos in to_restore:
+		tile_soil_modifications.erase(pos)
+		tile_regen_progress.erase(pos)
+
+## Derived tile soil level (session-soil-exhaustion-2). Pure function of
+## soil_health value. Used by visual rendering (tint selection) and
+## Q-inspect / PlanterPanel labels.
+func tile_soil_level(pos: Vector2i) -> int:
+	var soil: int = tile_soil_health(pos)
+	if soil >= TILE_SOIL_FULL:
+		return SoilLevel.PRISTINE
+	if soil >= 70:
+		return SoilLevel.HEALTHY
+	if soil >= 30:
+		return SoilLevel.DAMAGED
+	if soil >= 1:
+		return SoilLevel.DYING
+	return SoilLevel.DEAD
+
+## Derived tile soil activity (session-soil-exhaustion-2). Orthogonal to
+## tile_soil_level; tracks whether a planter is currently affecting this
+## tile vs whether the tile is passively regenerating.
+##
+## NONE: pristine (not in modifications) — no activity-relevant state.
+## ACTIVE_FARMING: an active planter's 3×3 area covers this tile.
+## REGENERATING: tile in modifications, soil < 100, no active planter
+##                affects this tile — regen ticks running.
+func tile_soil_activity(pos: Vector2i) -> int:
+	if not tile_soil_modifications.has(pos):
+		return SoilActivity.NONE
+	if _is_tile_actively_farmed(pos):
+		return SoilActivity.ACTIVE_FARMING
+	return SoilActivity.REGENERATING
+
+## True if any planter's 3×3 area covers `pos` AND that planter is active.
+## Read-side O(planters) scan called from tile_soil_activity (Q-inspect,
+## panel render). Hot-path is _tick_soil_regen which avoids this by doing
+## one pass over planters and one pass over modified tiles.
+func _is_tile_actively_farmed(pos: Vector2i) -> bool:
+	for anchor in buildings:
+		var b: Building = buildings[anchor]
+		if b == null or b.type != Buildings.Type.PLANTER:
+			continue
+		if not Planter.is_active(b):
+			continue
+		# 3×3 boundary check — Chebyshev distance ≤ 1.
+		if abs(pos.x - b.anchor.x) <= 1 and abs(pos.y - b.anchor.y) <= 1:
+			return true
+	return false
+
+# ---------- soil visual tints (session-soil-exhaustion-2) ----------
+
+# Alpha-blended overlay tints per SoilLevel. PRISTINE + HEALTHY render
+# nothing (zero alpha); only DAMAGED/DYING/DEAD tints visibly modify the
+# tile color. Restriction below: only tilled or plain-grass tiles get
+# tinted; stone/path/water are "infrastructure" and look unchanged.
+const SOIL_TINT_DAMAGED: Color = Color(0.95, 0.85, 0.55, 0.40)   # yellow-brown
+const SOIL_TINT_DYING: Color   = Color(0.75, 0.55, 0.35, 0.55)   # brown
+const SOIL_TINT_DEAD: Color    = Color(0.50, 0.32, 0.20, 0.85)   # dark cracked-earth
+
+## Compute the soil tint for a tile at `pos`. Returns a transparent color
+## (alpha 0) when no tint should render — the caller skips the draw.
+##
+## Tint applies only to tiles where soil affects gameplay:
+##   - Plain grass (unmapped tile, OR tile in dict with base=GRASS,
+##     overlay=NONE): tint shows (extends "dead zone" visually).
+##   - SOIL_TILLED tiles (player has tilled): tint shows.
+##   - Stone/Path/Water: NO tint (these are infrastructure / water).
+##
+## Note: an unmapped tile (not in `tiles` dict) is implicitly
+## base=GRASS, overlay=NONE — the default. Most regen-tracked tiles
+## without a building are in this state.
+func _soil_tint_for_tile(pos: Vector2i) -> Color:
+	# First, check if this tile's overlay/base allows soil tinting.
+	var base: int = Terrain.Base.GRASS
+	var overlay: int = Terrain.Overlay.NONE
+	if tiles.has(pos):
+		var t: Tile = tiles[pos]
+		base = t.base
+		overlay = t.overlay
+	# Filter: water is impassable infrastructure; stone/path are paved.
+	if base == Terrain.Base.WATER:
+		return Color(0, 0, 0, 0)
+	if overlay == Terrain.Overlay.STONE or overlay == Terrain.Overlay.PATH:
+		return Color(0, 0, 0, 0)
+	# Lookup tint by SoilLevel.
+	match tile_soil_level(pos):
+		SoilLevel.DAMAGED:
+			return SOIL_TINT_DAMAGED
+		SoilLevel.DYING:
+			return SOIL_TINT_DYING
+		SoilLevel.DEAD:
+			return SOIL_TINT_DEAD
+		_:
+			return Color(0, 0, 0, 0)   # PRISTINE / HEALTHY: no tint
 
 ## Per-frame regrowth tick. Iterates resource_state for entries with
 ## regrowth_remaining (chopped trees), decrements, and restores trees
@@ -891,6 +1120,22 @@ func _draw() -> void:
 		# (Water tiles never have resource_node; defensive base check too.)
 		if t.overlay == Terrain.Overlay.NONE and t.resource_node != ResourceNodes.Type.NONE and t.base != Terrain.Base.WATER:
 			_draw_resource(t.resource_node, rect, tp)
+
+	# Soil tint pass (session-soil-exhaustion-2). Iterate sparse
+	# tile_soil_modifications and overlay a tint per tile based on its
+	# SoilLevel. Restricted to tiles where soil mechanic is gameplay-
+	# relevant: SOIL_TILLED (planted) and plain unmodified grass.
+	# Stone/Path/Water tiles ignore the tint (their overlays/bases are
+	# "infrastructure" or "water" — not soil-relevant). Pristine + Healthy
+	# levels render no tint (visually identical to default).
+	for pos in tile_soil_modifications.keys():
+		if pos.x < min_tile.x or pos.x > max_tile.x:
+			continue
+		if pos.y < min_tile.y or pos.y > max_tile.y:
+			continue
+		var tint: Color = _soil_tint_for_tile(pos)
+		if tint.a > 0.0:
+			draw_rect(Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE), tint, true)
 
 	# Grid lines — width in world units so the line scales with the tile.
 	# At low zoom this fades the line slightly (sub-pixel anti-aliased),

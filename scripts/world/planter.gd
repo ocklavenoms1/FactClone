@@ -74,14 +74,14 @@ static func tick(b: Building, world = null) -> void:
 	var growth: int = int(b.state.get("growth", 0))
 	var max_growth: int = max_growth_for(crop_of(b))
 
-	# Soil-zero gate (session-soil-exhaustion-1): block START of a new
-	# growth cycle when the planter's region soil_health is 0. In-progress
-	# crops (growth > 0) keep ticking and finish gracefully — graceful Q5
-	# behavior. Player gets the in-flight harvest, then planter idles in
-	# dead soil. Recovery comes Session 2.
+	# Soil-zero gate (session-soil-exhaustion-1, refactored at session 2 to
+	# per-tile): block START of a new growth cycle when the planter's
+	# CENTER tile soil_health is 0. In-progress crops (growth > 0) keep
+	# ticking and finish gracefully. Per design, only the center tile
+	# matters for the gate — the planter's crop is rooted there. Neighbors
+	# can be depleted without blocking this planter.
 	if growth == 0 and world != null:
-		var region: Vector2i = GridWorld.region_of(b.anchor)
-		if world.region_soil_health(region) <= 0:
+		if world.tile_soil_health(b.anchor) <= 0:
 			return  # idle: don't start a new cycle in dead soil
 
 	if growth < max_growth:
@@ -104,11 +104,13 @@ static func info_lines(b: Building) -> Array:
 
 ## Try to extract one item. Returns the item type (>=0) or -1 if nothing ready.
 ##
-## When extraction succeeds, the planter's region soil_health is decremented
-## by the crop's soil_cost (session-soil-exhaustion-1). Soil deplete fires at
-## the planter's anchor region (where the crop GREW), not the consumer's —
-## a harvester at region (1, 0) extracting from a planter at region (0, 0)
-## still depletes (0, 0). Cause-effect tied to the grow site.
+## When extraction succeeds, the planter's 3×3 area soil is depleted via
+## deplete_planter_area (session-soil-exhaustion-2 per-tile refactor):
+##   center tile loses soil_cost; 8 neighbors lose ceil(cost * 0.6).
+##
+## Soil depleted at the planter's anchor's 3×3 (where the crop GREW), not
+## the consumer's — a harvester pulling from a planter at (50, 50) still
+## depletes the (50,50)-centered 3×3 area. Cause-effect tied to the grow site.
 static func try_extract(b: Building, world = null) -> int:
 	var output: int = int(b.state.get("output", 0))
 	if output <= 0:
@@ -117,15 +119,26 @@ static func try_extract(b: Building, world = null) -> int:
 	b.state["output"] = output - 1
 	if int(b.state["output"]) <= 0:
 		b.state["growth"] = 0  # restart cycle (gated by soil-zero check on next tick)
-	# Deplete region soil for the harvested crop. Defensive null-check for
-	# tests without a world reference.
+	# Deplete planter's 3×3 area soil. Defensive null-check for tests without
+	# a world reference.
 	if world != null:
-		var region: Vector2i = GridWorld.region_of(b.anchor)
-		world.deplete_region_soil(region, soil_cost_for(crop_type))
+		world.deplete_planter_area(b.anchor, soil_cost_for(crop_type))
 	return crop_type
 
 static func is_ripe(b: Building) -> bool:
 	return int(b.state.get("output", 0)) > 0
+
+## True if this planter is "actively farming" — currently growing a crop OR
+## holding ripe output waiting for extraction. Used by the soil regen system
+## (session-soil-exhaustion-2) to decide whether a region is in active farming
+## or should be regenerating.
+##
+## Idle planter (growth == 0 AND output == 0) returns false. This is what
+## allows the single-planter-oscillation edge case in fully-depleted regions:
+## planter is idle → region treated as regenerating → soil ticks up → planter
+## starts new cycle → cycle. Emergent stewardship pressure.
+static func is_active(b: Building) -> bool:
+	return int(b.state.get("growth", 0)) > 0 or int(b.state.get("output", 0)) > 0
 
 static func growth_pct(b: Building) -> float:
 	if int(b.state.get("output", 0)) > 0:

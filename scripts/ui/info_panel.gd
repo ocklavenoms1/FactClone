@@ -30,7 +30,9 @@ const SUBTEXT_COLOR: Color = Color(0.70, 0.70, 0.65)
 ## the cursor.
 enum TargetKind { NONE, BUILDING, RESOURCE, TILE }
 
-const SOIL_DEPLETED_COLOR: Color = Color(0.95, 0.45, 0.45)
+const SOIL_DEPLETED_COLOR: Color = Color(0.95, 0.45, 0.45)    # red
+const SOIL_ACTIVE_COLOR: Color = Color(0.95, 0.80, 0.40)      # warm yellow
+const SOIL_REGEN_COLOR: Color = Color(0.55, 0.85, 0.55)       # cool green
 
 var target_kind: int = TargetKind.NONE
 var target_anchor: Vector2i = Vector2i.ZERO
@@ -213,21 +215,49 @@ func _draw_tile() -> void:
 	_draw_soil_footer(font, y)
 
 ## Draw a soil_health line at the given y. Shared across all 3 target
-## kinds — Q-inspect always shows region soil regardless of what's at
-## the cursor (per Q8 design pass).
+## kinds — Q-inspect always shows tile soil regardless of what's at
+## the cursor (per Q8 design at session-soil-exhaustion-1).
+##
+## Per-tile rewrite at session-soil-exhaustion-2: shows soil level
+## (PRISTINE/HEALTHY/DAMAGED/DYING/DEAD) with color cues, plus an
+## activity suffix (active/regen) when the tile is modified.
 func _draw_soil_footer(font: Font, y: float) -> void:
 	if world == null:
 		return
-	var region: Vector2i = GridWorld.region_of(target_anchor)
-	var soil: int = world.region_soil_health(region)
-	var soil_text: String
-	var soil_color: Color
-	if soil <= 0:
-		soil_text = "Soil: %d / %d (DEPLETED)" % [soil, GridWorld.SOIL_HEALTH_FULL]
-		soil_color = SOIL_DEPLETED_COLOR
-	else:
-		soil_text = "Soil: %d / %d" % [soil, GridWorld.SOIL_HEALTH_FULL]
-		soil_color = TEXT_COLOR
+	var soil: int = world.tile_soil_health(target_anchor)
+	var level: int = world.tile_soil_level(target_anchor)
+	var activity: int = world.tile_soil_activity(target_anchor)
+
+	var level_label: String = ""
+	var soil_color: Color = TEXT_COLOR
+	match level:
+		GridWorld.SoilLevel.PRISTINE:
+			pass    # no level label, default color
+		GridWorld.SoilLevel.HEALTHY:
+			level_label = " (healthy)"
+			# Default color — visually mild
+		GridWorld.SoilLevel.DAMAGED:
+			level_label = " (damaged)"
+			soil_color = SOIL_ACTIVE_COLOR
+		GridWorld.SoilLevel.DYING:
+			level_label = " (dying)"
+			soil_color = SOIL_ACTIVE_COLOR
+		GridWorld.SoilLevel.DEAD:
+			level_label = " (DEAD)"
+			soil_color = SOIL_DEPLETED_COLOR
+
+	var activity_label: String = ""
+	match activity:
+		GridWorld.SoilActivity.ACTIVE_FARMING:
+			activity_label = " — active"
+		GridWorld.SoilActivity.REGENERATING:
+			activity_label = " — regen"
+			# Override color to green if level was default — regen is good news.
+			if level == GridWorld.SoilLevel.HEALTHY:
+				soil_color = SOIL_REGEN_COLOR
+
+	var soil_text: String = "Soil: %d / %d%s%s" % [
+		soil, GridWorld.TILE_SOIL_FULL, level_label, activity_label]
 	draw_string(font, Vector2(PADDING, y), soil_text,
 		HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, soil_color)
 

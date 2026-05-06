@@ -9,6 +9,178 @@ Each entry has three sections:
 
 ---
 
+## Soil exhaustion — Session 2 of multi-session arc (save v15 → v16) — **REFACTOR + REGEN + VISUAL STATES**
+
+**Date:** 2026-05-03
+**Tag:** `session-soil-exhaustion-2`
+
+Three deliverables in one commit, plus the most expensive architectural reversal in the project's history (#5 — would have been catastrophic if missed).
+
+1. **Refactor**: region-based soil → per-tile soil with 1-tile-radius falloff (3×3 around each planter).
+2. **Visual states**: per-tile rendering shows soil tints so dead zones form visibly.
+3. **Per-tile regen**: fallow regeneration at 1 point per 30 sec, blocked by active planters' 3×3 areas.
+
+Total: ~700 lines net change across grid_world.gd, planter.gd, info_panel.gd, planter_panel.gd, save_system.gd, and test_soil_exhaustion.gd. Save schema v15 → v16, hard-fail v15 (no migration).
+
+### Architectural reversal #5 — region-based soil → per-tile
+
+**The reversal in numbers:**
+| | Region (Session 1) | Per-tile (Session 2) |
+|---|---|---|
+| Scope per planter | 1024 tiles (32×32) | 9 tiles (3×3) |
+| Storage | sparse Dict[region → soil] | sparse Dict[tile → soil] |
+| Save size at 50 planters | ~10 entries (~200B) | ~200-450 entries (~9KB) |
+| Visual feedback | none planned | per-tile tints |
+| Player perception | "1 planter killed an entire region" | "1 planter killed its 3×3 area" |
+
+**Why region was wrong:** at 32×32 tiles, one planter affected an enormous area decoupled from its physical footprint. Player UX in playtest: harvested a wheat planter, looked around, "where's the effect?" Soil dropped from 100 → 95 in the abstract — invisible in any visual feedback because the region scope was too large to localize cause.
+
+**Why per-tile is right:** 9 tiles around the planter is a *visible* footprint. Player harvests, sees the immediate 3×3 dim. Multiple planters spaced apart create non-overlapping dead patches; planters in a line create overlap intensification. The geometry of the factory becomes visible in the soil state. **Cause-effect proximity restored.**
+
+### Cost of the reversal — caught fast vs. caught late
+
+**Caught at: ~1 hour after Session 1 ship.** Real-time wall-clock from `git log`. The user playtested the Session 1 region-based mechanic, immediately saw the disconnect, called the architectural reversal during the next session's design pass.
+
+**Cost now:**
+- ~30 lines of UI scaffolding from a partial Session 2 attempt salvaged (Planter.is_active, info_panel colorization, planter_panel status messaging shapes — all scope-agnostic).
+- ~1 session of rewrite work: storage refactor, regen rewrite, visual rendering, test rewrite.
+- Save schema bump v15 → v16 with hard-fail (no migration; mechanic 1 day old, no real save state to preserve).
+
+**Cost if caught later (estimated):**
+- Session 3 (fertilizer chain) would have built on region-scoped Compost / Spreader buildings. Compost spreader would distribute fertilizer per region. Per-tile concept would force redesign of whole fertilizer chain.
+- Session 4 (wasteland) would have implemented region-wide wasteland. Per-tile wasteland tiles is an entirely different mechanic.
+- Session 5 (legumes) would have inherited region-scoped healing. Per-tile healing is fundamentally different geometry.
+
+3-5 sessions of compound rework, plus undoing each session's tests + UI + save schema additions. **Estimated 10× cost differential** vs catching at Session 2 (~1 session vs 3-5).
+
+### What shipped
+
+**Per-tile storage (`tile_soil_modifications`)**
+- `Dictionary[Vector2i (tile pos) → int (0..100)]`. Sparse — pristine tiles absent. `tile_soil_health(pos)` defaults to 100 via `.get(pos, TILE_SOIL_FULL)`.
+- `tile_regen_progress: Dictionary[Vector2i → float]` — in-memory only (not persisted). Lossy on save/load: up to 30 sec of pending regen per tile.
+
+**Falloff formula (`_neighbor_falloff_cost`)** — per locked design Q5:
+```
+neighbor_cost = max(1, ceil(center_cost * 0.6))
+```
+Verified for all 3 crops:
+- Wheat (5): center -5, 8 neighbors -3 each = -29 aggregate per harvest
+- Sugar Beet (8): center -8, 8 neighbors -5 each = -48 aggregate
+- Flax (3): center -3, 8 neighbors -2 each = -19 aggregate
+
+Wheat aggregate (-29) is ~6× the old single-region depletion (-5). New mechanic is genuinely punishing per-action.
+
+**`deplete_planter_area(anchor, center_cost)`** — applies center + 8-neighbor falloff in one call. Replaces the old `deplete_region_soil(region, amount)`. Each tile clamped at 0 individually.
+
+**Per-tile regen (`_tick_soil_regen`)** — per-frame iteration of `tile_soil_modifications`:
+1. Single pass marks all tiles in active planters' 3×3 areas (Chebyshev distance ≤ 1 from each active planter).
+2. Second pass iterates modified tiles: if active, clear partial regen progress; else accumulate `delta / SECONDS_PER_SOIL_POINT`. When progress ≥ 1.0, increment soil by floor(progress); on full recovery (soil ≥ 100), erase from both dicts (sparse return to pristine).
+
+**Active-planter detection: O(planters × 9) per frame.** At 100 planters = 900 dict inserts/frame; sub-millisecond.
+
+**Two new enums** (orthogonal):
+- `SoilLevel`: PRISTINE / HEALTHY / DAMAGED / DYING / DEAD — pure function of `soil_health` value.
+- `SoilActivity`: NONE / ACTIVE_FARMING / REGENERATING — function of nearby planter state.
+
+`tile_soil_level(pos)` and `tile_soil_activity(pos)` helpers; used by visual rendering and Q-inspect.
+
+**Visual rendering (`_soil_tint_for_tile`)**
+- Tint pass added to `_draw()` between resource layer and grid lines.
+- Per-tile lookup of `tile_soil_modifications`; iterate sparse dict, draw tint rect per visible tile.
+- **Restricted scope** (per design Q5):
+  - Plain grass (unmapped tile, OR `base=GRASS, overlay=NONE`): tint shows.
+  - SOIL_TILLED tiles: tint shows.
+  - Stone / Path / Water tiles: NO tint (these are infrastructure / paved / water).
+- Tint colors: DAMAGED = yellow-brown, DYING = brown, DEAD = dark cracked-earth. PRISTINE + HEALTHY = no tint.
+
+**Q-inspect updates (info_panel)**
+- `_draw_soil_footer` rewritten to show per-tile soil + level label + activity suffix.
+- Format: `Soil: 73 / 100 (damaged) — regen` with color cue per level.
+
+**PlanterPanel 3×3 mini-grid**
+- New widget showing planter's 3×3 area with each cell color-coded by SoilLevel and labeled with soil value. Center cell highlighted with yellow border.
+- Aggregate average + center tile level + activity status displayed alongside.
+- Single-planter oscillation (per Q1 user note) visible naturally: center cell flickers DEAD ↔ DYING every ~30 sec when fully depleted; the mini-grid IS the diagnostic feedback.
+
+**`_top_area_height`** override in PlanterPanel bumped to 300px to fit the 3×3 mini-grid.
+
+**Save format v15 → v16**
+- Replace `region_soil_modifications` with `tile_soil_modifications`.
+- Hard-fail v15 saves per existing schema-bump policy.
+- No migration: region values would synthesize artificially uniform tiles (1024 tiles all at the same value) — gameplay feel wrong, save bloat for fake data.
+
+**Test rewrite (`test_soil_exhaustion`)**
+- Session 1 region-scoped tests fully replaced with 17 sub-suites for per-tile model:
+  - `tile_soil_health` defaults / sparse storage
+  - `deplete_tile_soil` clamp
+  - `_neighbor_falloff_cost` formula for all 3 crops + edge cases (cost=0, cost=1)
+  - `deplete_planter_area` 9-tile area depletion
+  - Per-crop integration: WHEAT extract drops 9 tiles correctly
+  - Multi-planter overlap: tiles in both 3×3 areas drop double
+  - Distance-isolation: tile far from planter unaffected
+  - **3×3 boundary exactness** (Q2 user pushback): distance-3 tile regenerates while nearby planter active
+  - Soil-zero gate per-tile (center tile drives gate)
+  - In-progress crop finishes despite zero center soil
+  - Already-dead tile edge case
+  - Per-tile regen with 30-sec delta
+  - Active planter blocks regen on its 3×3; outside-3×3 unaffected
+  - Save round-trip preserves tile_soil_modifications
+  - **Partial-progress-cleared-on-active-farming** (Session 2 carry)
+  - **Single-planter oscillation in dead 3×3 area** (Q1 user pushback) — verified growth advances after regen ticks
+  - SoilLevel thresholds at all 5 boundaries (100, 99, 70, 69, 30, 29, 1, 0)
+- 25 → 25 tests passing (1 test rewritten, no net add — rewrite was extensive).
+
+### Decisions
+
+- **Per-tile over region scope.** Reversal of Session 1's design. Argued in detail above.
+- **3×3 area, not 5×5 or larger.** 1-tile radius was chosen because:
+  - Visible at typical zoom levels (3 tiles is recognizable as "the planter and its surroundings").
+  - Localizes the dead zone visibly to the player.
+  - Multi-planter spacing strategy emerges naturally (place planters 2+ tiles apart for non-overlap, tighter for overlap intensification).
+- **Falloff formula `max(1, ceil(0.6 * center_cost))`.** The 0.6 factor was the user's locked decision. Neighbors take ~60% of the center hit — significantly more than half, ensures fast dead-zone formation. The `max(1, …)` guards against future tiny-cost crops touching neighbors at 0 (which would create visual edge cases where the area is "depleted" but neighbors are pristine).
+- **Hard-fail v15 saves** rather than migrate. Mechanic is 1 day old; no real save state to preserve. Migration would synthesize fake uniform per-tile values that don't match player expectation.
+- **Visual tints scoped to grass + SOIL_TILLED only.** Avoids weird visuals on stone/path/water (which players read as "infrastructure" — soil mechanic doesn't apply). Soil VALUES still tracked on infrastructure tiles (faithful to the model); only visualization is filtered.
+- **In-memory `tile_regen_progress` (not persisted).** Save is integer-only; partial fractional progress lost on reload. Up to 30 sec lost per regenerating tile — negligible. Keeps save format simple.
+- **Two orthogonal enums (SoilLevel + SoilActivity)** instead of one combined enum. Soil level is pure function of value; activity is function of nearby planter state. Combining would have been a 5×3 = 15-state enum where most combos are meaningless.
+- **Two-pass active detection in `_tick_soil_regen`.** Single pass over planters builds active-tile set; single pass over modified tiles checks set membership. Cleaner than per-tile O(planters) lookups; same total work.
+- **Single-planter oscillation feedback via mini-grid flicker.** Per Q1 user pushback: don't add explicit "oscillating" status text. The mini-grid's flicker (DEAD ↔ DYING every 30 sec) IS the diagnostic feedback. Player sees their farming intensity exceeds soil capacity without needing a textbook diagnosis.
+- **3×3 boundary check via Chebyshev distance** (`abs(dx) ≤ 1 and abs(dy) ≤ 1`). Exact, simple, no fuzzy region-match.
+
+### Lessons
+
+- **Playtest reveals scope errors that pure design doesn't.** This was reversal #5 — the most expensive one we'd have committed to without playtest. Region-based soil sounded strategic in design pass; felt disconnected in play. The 30 minutes of playtest after Session 1 caught what hours of design pass missed.
+- **Reversal cost scales with how many dependent sessions land before the reversal.** Catching at Session 2 = 1 session rewrite. Catching at Session 5 = 3-5 sessions of compound rework + save migrations + test cascades. **The cost differential is roughly 10×** in this case.
+- **Codified protocol** (in NOTES.md): "**Playtest gates between foundational sessions.** After a foundational session ships, play 30+ minutes before approving the design of dependent sessions." This is a new development-process invariant for the project.
+- **Salvage > rewrite when partial work exists.** ~30 lines of UI scaffolding from a partial Session 2 attempt (Planter.is_active, info_panel colorization, status messaging skeleton) were preserved when their domain was scope-agnostic. Region-scoped logic was rewritten; level-scoped UI was kept. Two-pass cleanup left the codebase clean.
+- **The visual tint pass mattered enormously for "feel."** Without tints, per-tile mechanic would have been just numbers in Q-inspect — invisible during gameplay. With tints, the dead zones literally appear on the map. **The architectural decision and its visual feedback are inseparable** — neither would feel right alone.
+
+### Roadmap implications
+
+This is **Session 2 of the multi-session arc** (per-tile foundation now stable). Sessions 3-5 inherit per-tile semantics:
+
+- **Session 3 — Fertilizer chain** (per-tile). Compost building (consumes straw/scraps → compost item). Fertilizer Spreader (consumes compost, accelerates regen on a per-tile area — likely 5×5 or larger to differentiate from planter's 3×3). Save schema bump if Spreader needs duration/intensity state.
+- **Session 4 — Wasteland mechanics** (per-tile). Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`.
+- **Session 5 — Legumes / crop rotation** (per-tile). Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Player learns "wheat → flax → legume" rotation as the sustainable per-tile pattern.
+
+All three sessions are FUNDAMENTALLY DIFFERENT under per-tile vs region scope. The reversal at Session 2 was the right time to catch this.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry.
+- **Click-handling duplication** between inventory_grid + BuildingPanel — refined trigger criteria in NOTES.md.
+- **Right-click half-stack interactions** — flagged at session-building-ui-1 as building-UI v2 polish.
+- **SmelterPanel + DrillPanel migration to ProcessorPanel-style** — flagged session-building-ui-4 as deferred indefinitely.
+- **Tile-level soil visualization** — DELIVERED this session; no longer a follow-up.
+- **"Q on grass shows 100/100 everywhere" noise** — still deferred to polish.
+- **Optional Session 5 (legumes / crop rotation)** captured in NOTES.md as part of the soil arc roadmap.
+
+---
+
 ## Soil exhaustion — Session 1 of multi-session stewardship-tension arc (save v14 → v15)
 
 **Date:** 2026-05-03

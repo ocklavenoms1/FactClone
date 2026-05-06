@@ -6,56 +6,66 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Soil exhaustion arc — Session 1 shipped (`session-soil-exhaustion-1`)
+## Soil exhaustion arc — Sessions 1+2 shipped (per-tile foundation)
 
-**Status:** **Foundation SHIPPED.** Region-based `soil_health` with depletion-on-harvest, soil-zero gate (graceful in-progress finish), Q-inspect universal info access, PlanterPanel state-aware messaging. Save v15. Recovery NOT in scope this session.
+**Status:** **Sessions 1 + 2 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, save v16, hard-fail v15.
 
-### What's shipped this session
+### Architecture (current)
 
-- `GridWorld.region_soil_modifications: Dictionary[Vector2i → int]` (sparse storage, default 100).
-- `GridWorld.region_soil_health(region)` + `deplete_region_soil(region, amount)` helpers.
-- `GridWorld.SOIL_HEALTH_FULL = 100` constant.
-- `Planter.CROP_DATA` (renamed from `CROP_GROWTH_TICKS`) with `growth_ticks` + `soil_cost` per crop. Initial: WHEAT 5, SUGAR_BEET 8, FLAX 3.
-- `Planter.soil_cost_for(crop_type)` helper.
-- `Planter.tick(b, world)` + `Planter.try_extract(b, world)` — signature changes plumbing world for region soil access.
-- Soil-zero gate at `growth == 0` blocks new cycles; in-progress cycles finish gracefully.
-- info_panel `TargetKind.TILE` + soil footer on all 3 kinds (BUILDING/RESOURCE/TILE).
-- PlanterPanel state-aware messaging when region soil ≤ 0.
-- Save v14 → v15 schema bump.
-- Tests: 25/25 (added `test_soil_exhaustion`).
+- **Per-tile storage**: `GridWorld.tile_soil_modifications: Dictionary[Vector2i (tile pos) → int (0..100)]`. Sparse — only modified tiles in dict, default 100 implicit.
+- **Falloff**: planter harvest depletes 9 tiles. Center loses crop's `soil_cost`; 8 neighbors lose `max(1, ceil(soil_cost * 0.6))`. Per-crop costs: WHEAT 5/3, SUGAR_BEET 8/5, FLAX 3/2.
+- **Per-tile regen**: 1 soil point per 30 sec when no active planter's 3×3 area covers the tile. `tile_regen_progress` accumulator (in-memory only, not persisted; lossy on save/load up to 30 sec).
+- **Visual tints**: SoilLevel enum (PRISTINE/HEALTHY/DAMAGED/DYING/DEAD); rendering pass in `GridWorld._draw` overlays DAMAGED+ tints on grass + SOIL_TILLED tiles. Stone/path/water unaffected.
+- **Soil-zero gate**: planter at `growth == 0` AND `tile_soil_health(b.anchor) <= 0` stays idle. In-progress crops (growth > 0) finish gracefully.
+- **Single-planter oscillation**: idle planter on dead tile → tile regens to 1 → planter activates → consumes → tile drops → idle → cycle. PlanterPanel mini-grid flicker IS the player feedback.
+
+### What's shipped (sessions 1 + 2)
+
+- Per-tile storage + helpers (`tile_soil_health`, `deplete_tile_soil`, `deplete_planter_area`).
+- `Planter.CROP_DATA` with `growth_ticks` + `soil_cost` per crop.
+- `Planter.tick(b, world)` + `Planter.try_extract(b, world)` plumbed for per-tile access.
+- `Planter.is_active(b)` helper — used by regen blocking.
+- `_tick_soil_regen(delta)` — per-frame regen iteration.
+- Visual rendering: tint pass in `GridWorld._draw`; level-aware Q-inspect; PlanterPanel 3×3 mini-grid.
+- Save schema v14 → v15 → v16 (region scope reversed at v16).
+- Tests: 25/25 with 17 sub-suites (depletion + falloff + multi-planter overlap + boundary exactness + regen + oscillation + save round-trip + level thresholds).
 
 ### Remaining sessions in the arc
 
-- **Session 2 — Fallow regeneration.** Idle regions slowly heal. No harvests for N ticks → soil_health +1 per minute (or similar tunable). Save bump if region needs `last_harvest_tick` field. Adds the recovery half of the cycle so depletion isn't permanent. Tile-level soil visualization probably lands here (so visual states have meaning beyond "is it depleted").
-- **Session 3 — Fertilizer chain.** Compost building (straw/chaff/scraps → compost item), Fertilizer Spreader (compost → accelerates regen on its region). Connects bread/cloth chains to soil management via cross-chain item flow.
-- **Session 4 — Wasteland mechanics.** Negative soil_health for severely over-depleted regions. Unclamps the `max(0, …)` in `deplete_region_soil`. Wasteland tiles render visually distinct, block planter placement, require fertilizer to reclaim.
-- **Optional Session 5 — Crop rotation / legumes.** Legumes have negative `soil_cost` — they heal soil instead of depleting. Player learns "wheat → flax → legume" rotation as the sustainable pattern.
+- **Session 3 — Fertilizer chain (per-tile).** Compost building (consumes straw/scraps → compost item), Fertilizer Spreader (consumes compost, accelerates regen on a per-tile area — likely 5×5 or larger to differentiate from planter's 3×3). Connects bread/cloth chains to soil management via cross-chain item flow. Save bump if Spreader needs duration/intensity state.
+- **Session 4 — Wasteland mechanics (per-tile).** Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`.
+- **Optional Session 5 — Crop rotation / legumes (per-tile).** Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Player learns "wheat → flax → legume" rotation as the sustainable per-tile pattern.
+
+All three Sessions 3-5 INHERIT per-tile semantics. Region-based versions of these would have been fundamentally different (per-region fertilizer; per-region wasteland; per-region rotation healing) — none of them transferable. **Catching the reversal at Session 2 was load-bearing for the entire arc.**
 
 ### Architectural hooks already in place for the arc
 
-- Sparse storage with default-100 baseline survives unclamp later (Session 4 just removes the `max(0, …)` in `deplete_region_soil`).
-- `Planter.CROP_DATA` extension model: legumes will add an entry with `soil_cost: -3` or similar; no other code changes needed for the deplete-side.
-- `info_panel._draw_soil_footer` is the central rendering helper — future visual states (DEPLETED, WASTELAND, RECOVERING, RICH) extend this single method.
-- Save schema is additive: future sessions can add `region_last_harvest_tick`, `region_fertilizer_level`, etc. without reshaping the existing field.
+- Sparse storage with default-100 baseline survives unclamp at Session 4.
+- `Planter.CROP_DATA` extension model: legumes add an entry with `soil_cost: -3` or similar.
+- `_soil_tint_for_tile` is the central rendering hook — future Session 4 wasteland tint extends this single method.
+- Save schema is additive: future sessions can add per-tile fertilizer level fields without reshaping the existing tile_soil_modifications field.
+- `SoilLevel` / `SoilActivity` enums extend cleanly for new states (WASTELAND for Session 4, FERTILIZED for Session 3).
 
 ### What's NOT yet decided (defer to design pass at session start)
 
-- **Tile-level visualization** semantics. When recovery exists (Session 2), visualizing depletion-vs-healing-vs-pristine has more state to communicate. Likely a tile-tint overlay (green=healthy, brown=depleted, gray=wasteland).
-- **Fallow regen rate.** Tunable — needs playtest balance vs. crop production rate. Initial guess: +1 soil per (REGION_SIZE × growth_ticks_avg) ticks, so a region drains in ~4 wheat cycles and recovers in ~1.
-- **Per-region modifier slots** (fertilizer, mulch). Whether a region holds an Array of active "buffs" or just numeric `regen_bonus`. Depends on what Session 3's Fertilizer Spreader actually does.
+- **Fertilizer Spreader area** — 3×3 like planter? 5×5 to be larger/more strategic? 7×7 for "big infrastructure"? Decide at Session 3.
+- **Compost recipe shape** — straw + scraps → compost? Just straw? Item costs? Decide at Session 3.
+- **Wasteland recovery cost** — fertilizer X → soil 0; X+Y → soil pristine? Or wasteland is permanent until paved over?  Decide at Session 4.
 
 ---
 
 ## Protocol: locked architectural decisions can be reversed by reconnaissance findings
 
-**Codified at session-building-ui-4** after the third project-level architectural reversal.
+**Codified at session-building-ui-4** after the third project-level architectural reversal. Extended at session-soil-exhaustion-2 with the playtest-gate addition.
 
-**Pattern:** when the user (or a prior design pass) locks in an architectural decision before implementation, and the implementation includes a "verify before code" reconnaissance step, the audit can produce findings that invalidate the locked decision's premise. **Reversing during the design-pass writeup is correct.** It's cheaper than shipping the bad abstraction and removing it later (10× cost differential).
+**Pattern:** when the user (or a prior design pass) locks in an architectural decision before implementation, and the implementation includes a "verify before code" reconnaissance step, the audit can produce findings that invalidate the locked decision's premise. **Reversing during the design-pass writeup is correct.** It's cheaper than shipping the bad abstraction and removing it later (10× cost differential at typical session-cascade depth).
 
-**Three reversals so far:**
-1. **`session-mining-manual` — deposit-overlay rule reversal.** Original: "overlay obscures deposit, RMB-clear reveals." Reversed to: "overlay placement BLOCKED on deposits." The UX trap (player accidentally pavers over and loses the deposit) was visible in playtest within minutes.
+**Five reversals so far:**
+1. **`session-mining-manual` — deposit-overlay rule reversal.** Original: "overlay obscures deposit, RMB-clear reveals." Reversed to: "overlay placement BLOCKED on deposits." The UX trap (player accidentally paves over and loses the deposit) was visible in playtest within minutes.
 2. **`session-building-ui-3` — fluid_indicator extracted to shared helper BEFORE ProcessorPanel extension.** User pushback added a 3a→3b→3c sequencing: extract from MixerPanel first, refactor MixerPanel to use shared, THEN extend ProcessorPanel. Avoided two divergent fluid renderers.
 3. **`session-building-ui-4` — ExtractionPanel intermediate deferred.** Reconnaissance found harvester (3×3 coverage) and planter (no coverage, int-typed output) share <30% layout. Forcing them into one base class would mean "if-has-coverage" branches with no real abstraction value.
+4. **`session-soil-exhaustion-1` (in-flight Session 2 attempt) — region-regen partial work salvaged, region-scoped logic rewritten.** Mid-session pivot from region-regen to per-tile rewrite preserved scope-agnostic UI scaffolding (~30 lines).
+5. **`session-soil-exhaustion-2` — region-based soil → per-tile soil.** **The most expensive reversal in the project.** Region scope (32×32 = 1024 tiles per planter) decoupled cause from effect; player UX in playtest was disconnected. Per-tile (3×3 = 9 tiles) localizes the effect. Caught ~1 hour after Session 1 ship; would have cascaded across Sessions 3-5 (fertilizer chain, wasteland, legumes — all fundamentally different under per-tile vs region scope). Estimated 10× cost if caught later.
 
 **Protocol:**
 - Always honor a "verify before implementation" step in the implementation order — don't skip it.
@@ -64,6 +74,30 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 - Cost to reverse during writeup: ~10 minutes. Cost to ship-then-remove a bad abstraction: hours-to-days.
 
 If a reversal feels expensive (e.g., the user pre-committed publicly to the original choice), that's a smell that the audit step was treated as ceremony rather than gate. The audit IS the gate.
+
+---
+
+## Protocol: playtest gates between foundational sessions
+
+**Codified at session-soil-exhaustion-2** after reversal #5 (region-based soil → per-tile).
+
+**Pattern:** design passes can verify *correctness* of an architecture, but not *fit* with how it actually plays. Region-based soil was internally consistent and well-specified — it just felt wrong when played. **Playtest is the gate that catches scope errors design doesn't.**
+
+**Protocol:**
+- After a foundational session ships, **play 30+ minutes** before approving the design pass for any dependent session.
+- "Foundational" means: introduces a new mechanic that future sessions will build on (e.g., soil-exhaustion-1 was foundational for sessions 2-5; building-ui-1 was foundational for sessions 2-4).
+- During the 30 min: actually USE the mechanic. Watch how it FEELS. Pay attention to "this doesn't quite work" sensations even when nothing's broken.
+- Surface any feel-disconnect findings BEFORE the next session's design pass. The cost of catching scope errors at session N+1 is always lower than at N+3.
+
+**Example application — soil-exhaustion arc:**
+- Session 1 (region) shipped at ~morning.
+- Playtest revealed disconnect within 30 min (one harvest, no visible effect).
+- Session 2 design pass kicked off ~1 hour after Session 1 ship — flagged the reversal in re-orientation.
+- Session 2 implemented the per-tile refactor instead of regen-on-region.
+
+**When to skip the gate:** sessions that don't introduce new mechanics (e.g., UI polish, additional building panels, test refactors). The playtest gate applies specifically to *foundational* sessions.
+
+**Failure mode:** skipping the playtest gate because "the design feels right." Reversal #5 originated from a Session 1 design that felt right at design-pass time. Playtest disagreed. Trust the playtest.
 
 ---
 
