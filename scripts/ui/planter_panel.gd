@@ -32,6 +32,7 @@ const PROGRESS_BAR_H: float = 18.0
 
 const STATUS_GROWING: Color = Color(0.55, 0.85, 0.55)
 const STATUS_RIPE: Color = Color(1.00, 0.85, 0.30)
+const STATUS_DEPLETED: Color = Color(0.95, 0.45, 0.45)    # red — soil dead
 
 const BAR_BG: Color = Color(0.12, 0.10, 0.08, 1.0)
 const BAR_BORDER: Color = Color(0.40, 0.32, 0.20, 1.0)
@@ -83,16 +84,39 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 	draw_string(font, bar_rect.position + Vector2(0, PROGRESS_BAR_H - 4),
 		bar_text, HORIZONTAL_ALIGNMENT_CENTER, int(PROGRESS_BAR_W), 12, TEXT_COLOR)
 
-	# Status text.
+	# Region soil status (session-soil-exhaustion-1). Shown above main status
+	# so the player notices it before the standard growing/ripe message.
+	var region: Vector2i = GridWorld.region_of(building.anchor)
+	var soil: int = world.region_soil_health(region) if world != null else GridWorld.SOIL_HEALTH_FULL
+	var soil_text: String = "Region soil: %d / %d" % [soil, GridWorld.SOIL_HEALTH_FULL]
+	var soil_color: Color = STATUS_DEPLETED if soil <= 0 else TEXT_COLOR
+	draw_string(font, Vector2(x, area.position.y + 88),
+		soil_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, soil_color)
+
+	# Status text. With soil-zero, status messaging diverges per the planter's
+	# current state (per Q9 design):
+	#   - growth == 0, soil <= 0: "Region soil DEPLETED — no new crops"
+	#   - growth in progress, soil <= 0: "Crop in progress — soil already depleted"
+	#   - output > 0, soil <= 0: "Finishing crop, then idle (soil depleted)"
 	var status_text: String
 	var status_color: Color
 	if ripe:
-		status_text = "Status: Ripe — extract to start next cycle"
-		status_color = STATUS_RIPE
+		if soil <= 0:
+			status_text = "Status: Ripe — extract; soil depleted, no new crop"
+			status_color = STATUS_DEPLETED
+		else:
+			status_text = "Status: Ripe — extract to start next cycle"
+			status_color = STATUS_RIPE
+	elif soil <= 0 and growth == 0:
+		status_text = "Status: Region soil DEPLETED — no new crops"
+		status_color = STATUS_DEPLETED
+	elif soil <= 0 and growth > 0:
+		status_text = "Status: Growing %d%% (soil depleted; this cycle finishes)" % int(round(pct * 100.0))
+		status_color = STATUS_DEPLETED
 	else:
 		status_text = "Status: Growing %d%%" % int(round(pct * 100.0))
 		status_color = STATUS_GROWING
-	draw_string(font, Vector2(x, area.position.y + 100),
+	draw_string(font, Vector2(x, area.position.y + 108),
 		status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, status_color)
 
 	# "Output:" label above the centered output slot.
@@ -136,7 +160,7 @@ func _take_from_slot(slot_def: Dictionary, _sub_idx: int) -> void:
 		return
 	# Use Planter.try_extract — same primitive harvester uses, so growth
 	# resets correctly (Planter.try_extract resets growth=0 when output→0).
-	var crop_type: int = Planter.try_extract(building)
+	var crop_type: int = Planter.try_extract(building, world)
 	if crop_type < 0:
 		return
 	cursor.pick(crop_type, 1)

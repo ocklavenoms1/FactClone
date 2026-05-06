@@ -23,7 +23,14 @@ const HEADER_COLOR: Color = Color(1.00, 0.92, 0.55)
 const TEXT_COLOR: Color = Color(0.95, 0.95, 0.85)
 const SUBTEXT_COLOR: Color = Color(0.70, 0.70, 0.65)
 
-enum TargetKind { NONE, BUILDING, RESOURCE }
+## Target kinds (NONE / BUILDING / RESOURCE / TILE).
+## TILE added at session-soil-exhaustion-1: Q on empty grass shows region
+## info + soil_health. Without TILE, Q on grass clears the panel; with TILE,
+## the panel always shows useful per-region info regardless of what's at
+## the cursor.
+enum TargetKind { NONE, BUILDING, RESOURCE, TILE }
+
+const SOIL_DEPLETED_COLOR: Color = Color(0.95, 0.45, 0.45)
 
 var target_kind: int = TargetKind.NONE
 var target_anchor: Vector2i = Vector2i.ZERO
@@ -61,6 +68,16 @@ func set_resource_target(pos: Vector2i, w: Node2D) -> void:
 	target_kind = TargetKind.RESOURCE
 	visible = true
 
+## Set an empty-tile target (session-soil-exhaustion-1). Used by main.gd
+## when Q is pressed on grass with no building or resource — shows the
+## region's coordinates and soil_health. Player gets useful info on every
+## Q press.
+func set_tile_target(pos: Vector2i, w: Node2D) -> void:
+	target_anchor = pos
+	world = w
+	target_kind = TargetKind.TILE
+	visible = true
+
 func clear_target() -> void:
 	target_kind = TargetKind.NONE
 	visible = false
@@ -94,6 +111,12 @@ func _process(_delta: float) -> void:
 				# resource_node==NONE check covers the post-mining revert.
 				clear_target()
 				return
+		TargetKind.TILE:
+			# TILE target stays open until Esc / inspect-elsewhere; no
+			# auto-close conditions (region info is always available).
+			if world == null:
+				clear_target()
+				return
 	queue_redraw()
 
 func _draw() -> void:
@@ -102,6 +125,8 @@ func _draw() -> void:
 			_draw_building()
 		TargetKind.RESOURCE:
 			_draw_resource()
+		TargetKind.TILE:
+			_draw_tile()
 		_:
 			return
 
@@ -115,7 +140,8 @@ func _draw_building() -> void:
 		return
 
 	var lines: Array = Buildings.info_lines_for(b, world)
-	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * lines.size() + 2
+	# +1 line for the soil footer (session-soil-exhaustion-1).
+	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * (lines.size() + 1) + 2
 	offset_bottom = offset_top + height
 
 	var rect: Rect2 = Rect2(0, 0, PANEL_WIDTH, height)
@@ -130,6 +156,7 @@ func _draw_building() -> void:
 	for line in lines:
 		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
 		y += LINE_HEIGHT
+	_draw_soil_footer(font, y)
 
 # ---------- resource draw ----------
 
@@ -138,7 +165,8 @@ func _draw_resource() -> void:
 		return
 	var t: Tile = world.tiles[target_anchor]
 	var lines: Array = _resource_lines(t)
-	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * lines.size() + 2
+	# +1 line for the soil footer.
+	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * (lines.size() + 1) + 2
 	offset_bottom = offset_top + height
 
 	var rect: Rect2 = Rect2(0, 0, PANEL_WIDTH, height)
@@ -153,6 +181,55 @@ func _draw_resource() -> void:
 	for line in lines:
 		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
 		y += LINE_HEIGHT
+	_draw_soil_footer(font, y)
+
+# ---------- tile draw (session-soil-exhaustion-1) ----------
+
+func _draw_tile() -> void:
+	if world == null:
+		return
+	var region: Vector2i = GridWorld.region_of(target_anchor)
+	# Two body lines: tile coords + soil. Soil footer also shown (always);
+	# header summarizes region.
+	var lines: Array = [
+		"Tile: (%d, %d)" % [target_anchor.x, target_anchor.y],
+		"Region: (%d, %d)" % [region.x, region.y],
+	]
+	var height: float = PADDING * 2 + HEADER_HEIGHT + LINE_HEIGHT * (lines.size() + 1) + 2
+	offset_bottom = offset_top + height
+
+	var rect: Rect2 = Rect2(0, 0, PANEL_WIDTH, height)
+	draw_rect(rect, BG_COLOR, true)
+	draw_rect(rect, BORDER_COLOR, false, 1.5)
+
+	var font: Font = ThemeDB.fallback_font
+	var header: String = "Region (%d, %d)" % [region.x, region.y]
+	draw_string(font, Vector2(PADDING, PADDING + 14), header, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, HEADER_COLOR)
+	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
+	var y: float = PADDING + HEADER_HEIGHT + 14
+	for line in lines:
+		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
+		y += LINE_HEIGHT
+	_draw_soil_footer(font, y)
+
+## Draw a soil_health line at the given y. Shared across all 3 target
+## kinds — Q-inspect always shows region soil regardless of what's at
+## the cursor (per Q8 design pass).
+func _draw_soil_footer(font: Font, y: float) -> void:
+	if world == null:
+		return
+	var region: Vector2i = GridWorld.region_of(target_anchor)
+	var soil: int = world.region_soil_health(region)
+	var soil_text: String
+	var soil_color: Color
+	if soil <= 0:
+		soil_text = "Soil: %d / %d (DEPLETED)" % [soil, GridWorld.SOIL_HEALTH_FULL]
+		soil_color = SOIL_DEPLETED_COLOR
+	else:
+		soil_text = "Soil: %d / %d" % [soil, GridWorld.SOIL_HEALTH_FULL]
+		soil_color = TEXT_COLOR
+	draw_string(font, Vector2(PADDING, y), soil_text,
+		HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, soil_color)
 
 func _resource_lines(t: Tile) -> Array:
 	var lines: Array = []

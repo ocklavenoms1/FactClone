@@ -21,12 +21,20 @@ extends RefCounted
 const YIELD_PER_CYCLE: int = 1
 const DEFAULT_CROP: int = Items.Type.WHEAT  # used by old saves predating crop_type
 
-## Per-crop growth time. Add a crop = add it here AND register a hotbar
-## slot pointing at it (see hotbar.gd).
-const CROP_GROWTH_TICKS: Dictionary = {
-	Items.Type.WHEAT:      600,   # 30s @ 20tps
-	Items.Type.SUGAR_BEET: 800,   # 40s
-	Items.Type.FLAX:       500,   # 25s
+## Per-crop properties (session-soil-exhaustion-1). Co-located so
+## growth_ticks + soil_cost can't drift apart. Add a crop = add it here AND
+## register a hotbar slot pointing at it (see hotbar.gd).
+##
+## soil_cost: amount each successful harvest depletes the planter's region
+##   soil_health (0..100). Different crops feed differently:
+##     - light feeders (FLAX): 3 — minimal soil draw
+##     - baseline (WHEAT):     5 — average
+##     - heavy feeders (SUGAR_BEET): 8 — heavier draw
+##     - future legumes: negative cost (heal soil)
+const CROP_DATA: Dictionary = {
+	Items.Type.WHEAT:      {"growth_ticks": 600, "soil_cost": 5},   # 30s @ 20tps, baseline
+	Items.Type.SUGAR_BEET: {"growth_ticks": 800, "soil_cost": 8},   # 40s, heavy feeder
+	Items.Type.FLAX:       {"growth_ticks": 500, "soil_cost": 3},   # 25s, light feeder
 }
 
 # Visual constants
@@ -49,14 +57,33 @@ static func crop_of(b: Building) -> int:
 	return int(b.state.get("crop_type", DEFAULT_CROP))
 
 static func max_growth_for(crop_type: int) -> int:
-	return int(CROP_GROWTH_TICKS.get(crop_type, 600))
+	return int(CROP_DATA.get(crop_type, {}).get("growth_ticks", 600))
 
-static func tick(b: Building) -> void:
+## Per-harvest soil cost for the given crop (session-soil-exhaustion-1).
+## Future legumes can return negative to heal soil. Default 0 (no cost) for
+## unknown crop types — defensive against pre-Session-soil saves that might
+## have crop_type values not yet in CROP_DATA.
+static func soil_cost_for(crop_type: int) -> int:
+	return int(CROP_DATA.get(crop_type, {}).get("soil_cost", 0))
+
+static func tick(b: Building, world = null) -> void:
 	var output: int = int(b.state.get("output", 0))
 	if output > 0:
 		return  # crop ready, waiting for extraction — pauses growth
+
 	var growth: int = int(b.state.get("growth", 0))
 	var max_growth: int = max_growth_for(crop_of(b))
+
+	# Soil-zero gate (session-soil-exhaustion-1): block START of a new
+	# growth cycle when the planter's region soil_health is 0. In-progress
+	# crops (growth > 0) keep ticking and finish gracefully — graceful Q5
+	# behavior. Player gets the in-flight harvest, then planter idles in
+	# dead soil. Recovery comes Session 2.
+	if growth == 0 and world != null:
+		var region: Vector2i = GridWorld.region_of(b.anchor)
+		if world.region_soil_health(region) <= 0:
+			return  # idle: don't start a new cycle in dead soil
+
 	if growth < max_growth:
 		b.state["growth"] = growth + 1
 		if growth + 1 >= max_growth:
@@ -76,14 +103,26 @@ static func info_lines(b: Building) -> Array:
 	]
 
 ## Try to extract one item. Returns the item type (>=0) or -1 if nothing ready.
-static func try_extract(b: Building) -> int:
+##
+## When extraction succeeds, the planter's region soil_health is decremented
+## by the crop's soil_cost (session-soil-exhaustion-1). Soil deplete fires at
+## the planter's anchor region (where the crop GREW), not the consumer's —
+## a harvester at region (1, 0) extracting from a planter at region (0, 0)
+## still depletes (0, 0). Cause-effect tied to the grow site.
+static func try_extract(b: Building, world = null) -> int:
 	var output: int = int(b.state.get("output", 0))
 	if output <= 0:
 		return -1
+	var crop_type: int = crop_of(b)
 	b.state["output"] = output - 1
 	if int(b.state["output"]) <= 0:
-		b.state["growth"] = 0  # restart cycle
-	return crop_of(b)
+		b.state["growth"] = 0  # restart cycle (gated by soil-zero check on next tick)
+	# Deplete region soil for the harvested crop. Defensive null-check for
+	# tests without a world reference.
+	if world != null:
+		var region: Vector2i = GridWorld.region_of(b.anchor)
+		world.deplete_region_soil(region, soil_cost_for(crop_type))
+	return crop_type
 
 static func is_ripe(b: Building) -> bool:
 	return int(b.state.get("output", 0)) > 0

@@ -6,6 +6,46 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Soil exhaustion arc — Session 1 shipped (`session-soil-exhaustion-1`)
+
+**Status:** **Foundation SHIPPED.** Region-based `soil_health` with depletion-on-harvest, soil-zero gate (graceful in-progress finish), Q-inspect universal info access, PlanterPanel state-aware messaging. Save v15. Recovery NOT in scope this session.
+
+### What's shipped this session
+
+- `GridWorld.region_soil_modifications: Dictionary[Vector2i → int]` (sparse storage, default 100).
+- `GridWorld.region_soil_health(region)` + `deplete_region_soil(region, amount)` helpers.
+- `GridWorld.SOIL_HEALTH_FULL = 100` constant.
+- `Planter.CROP_DATA` (renamed from `CROP_GROWTH_TICKS`) with `growth_ticks` + `soil_cost` per crop. Initial: WHEAT 5, SUGAR_BEET 8, FLAX 3.
+- `Planter.soil_cost_for(crop_type)` helper.
+- `Planter.tick(b, world)` + `Planter.try_extract(b, world)` — signature changes plumbing world for region soil access.
+- Soil-zero gate at `growth == 0` blocks new cycles; in-progress cycles finish gracefully.
+- info_panel `TargetKind.TILE` + soil footer on all 3 kinds (BUILDING/RESOURCE/TILE).
+- PlanterPanel state-aware messaging when region soil ≤ 0.
+- Save v14 → v15 schema bump.
+- Tests: 25/25 (added `test_soil_exhaustion`).
+
+### Remaining sessions in the arc
+
+- **Session 2 — Fallow regeneration.** Idle regions slowly heal. No harvests for N ticks → soil_health +1 per minute (or similar tunable). Save bump if region needs `last_harvest_tick` field. Adds the recovery half of the cycle so depletion isn't permanent. Tile-level soil visualization probably lands here (so visual states have meaning beyond "is it depleted").
+- **Session 3 — Fertilizer chain.** Compost building (straw/chaff/scraps → compost item), Fertilizer Spreader (compost → accelerates regen on its region). Connects bread/cloth chains to soil management via cross-chain item flow.
+- **Session 4 — Wasteland mechanics.** Negative soil_health for severely over-depleted regions. Unclamps the `max(0, …)` in `deplete_region_soil`. Wasteland tiles render visually distinct, block planter placement, require fertilizer to reclaim.
+- **Optional Session 5 — Crop rotation / legumes.** Legumes have negative `soil_cost` — they heal soil instead of depleting. Player learns "wheat → flax → legume" rotation as the sustainable pattern.
+
+### Architectural hooks already in place for the arc
+
+- Sparse storage with default-100 baseline survives unclamp later (Session 4 just removes the `max(0, …)` in `deplete_region_soil`).
+- `Planter.CROP_DATA` extension model: legumes will add an entry with `soil_cost: -3` or similar; no other code changes needed for the deplete-side.
+- `info_panel._draw_soil_footer` is the central rendering helper — future visual states (DEPLETED, WASTELAND, RECOVERING, RICH) extend this single method.
+- Save schema is additive: future sessions can add `region_last_harvest_tick`, `region_fertilizer_level`, etc. without reshaping the existing field.
+
+### What's NOT yet decided (defer to design pass at session start)
+
+- **Tile-level visualization** semantics. When recovery exists (Session 2), visualizing depletion-vs-healing-vs-pristine has more state to communicate. Likely a tile-tint overlay (green=healthy, brown=depleted, gray=wasteland).
+- **Fallow regen rate.** Tunable — needs playtest balance vs. crop production rate. Initial guess: +1 soil per (REGION_SIZE × growth_ticks_avg) ticks, so a region drains in ~4 wheat cycles and recovers in ~1.
+- **Per-region modifier slots** (fertilizer, mulch). Whether a region holds an Array of active "buffs" or just numeric `regen_bonus`. Depends on what Session 3's Fertilizer Spreader actually does.
+
+---
+
 ## Protocol: locked architectural decisions can be reversed by reconnaissance findings
 
 **Codified at session-building-ui-4** after the third project-level architectural reversal.

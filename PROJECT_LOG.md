@@ -9,6 +9,114 @@ Each entry has three sections:
 
 ---
 
+## Soil exhaustion — Session 1 of multi-session stewardship-tension arc (save v14 → v15)
+
+**Date:** 2026-05-03
+**Tag:** `session-soil-exhaustion-1`
+
+First slice of the soil exhaustion mechanic — region-based soil_health that depletes when crops harvest. Foundation for fallow regen (Session 2), fertilizer chain (Session 3), and wasteland mechanics (Session 4). Recovery is intentionally NOT in scope this session; soil can only deplete.
+
+The mechanic introduces real factory-strategy consequences: a wheat farm that runs unchecked drains its region's soil to zero, and the planters quietly stop accepting new growth cycles. Existing crops finish gracefully (player keeps the in-flight harvest), but to keep producing the player must move planters to fresh regions — until enough sessions ship to give them recovery options.
+
+### What shipped
+
+**Region soil_health storage** (`GridWorld.region_soil_modifications: Dictionary[Vector2i → int]`)
+- Sparse: only depleted regions appear. Default `SOIL_HEALTH_FULL = 100` is implicit (absent key = pristine).
+- Mirrors the proven `resource_state_modifications` pattern. Adds a constant + a Dictionary; minimal new state.
+- Two helpers: `region_soil_health(region)` reads with default 100; `deplete_region_soil(region, amount)` decrements clamped at 0 (negative-soil for wasteland deferred to Session 4).
+
+**Per-crop soil_cost** in `Planter.CROP_DATA` (renamed from `CROP_GROWTH_TICKS`)
+- Co-located dict: each crop entry has `growth_ticks` AND `soil_cost`. Can't drift apart.
+- Initial values: WHEAT 5 (baseline), SUGAR_BEET 8 (heavy feeder), FLAX 3 (light feeder).
+- New helper `Planter.soil_cost_for(crop_type)`. `max_growth_for` updated to read from the Dict-of-Dicts shape.
+
+**Depletion-on-extract**: `Planter.try_extract(b, world)` — signature change adds `world` param. When extraction succeeds, region soil drops by `soil_cost_for(crop_type)`. Region resolved from the planter's anchor (NOT the consumer — soil is paid at the grow site).
+- Both call sites updated: `Harvester.tick` passes `world`, `PlanterPanel._take_from_slot` passes `world`.
+
+**Soil-zero gate** in `Planter.tick(b, world)` — signature change adds `world` param.
+- When `growth == 0` AND `region_soil_health <= 0`: tick returns early (don't start a new cycle in dead soil).
+- When `0 < growth < max_growth`: keeps ticking regardless of soil (in-progress crops finish gracefully).
+- When ripe (`output > 0`): paused as before.
+- Achieves the locked Q5 graceful behavior — player gets in-flight crops, then planter idles.
+
+**Save format v14 → v15**
+- New top-level field `region_soil_modifications: Array of [rx, ry, soil_health]`.
+- Sparse: pristine regions absent. On load, `.get()` with default 100 keeps absent regions pristine.
+- Old v14 saves hard-fail per existing schema-bump policy (`OS.alert` with delete instructions).
+- Migration log comment added to save_system.gd header.
+
+**Q-inspect — universal info access**
+- New `TargetKind.TILE` for Q on empty grass. Shows region coordinates + soil_health.
+- BUILDING and RESOURCE target kinds get a soil footer line via shared `_draw_soil_footer` helper.
+- Panel always shows useful per-region info regardless of what's at the cursor (per Q8 design: "player scouting requires universal info access").
+- main.gd `_try_inspect` falls through to `info_panel.set_tile_target` for empty grass instead of `clear_target`.
+
+**PlanterPanel — soil status line + state-aware messaging** (per Q9 design)
+- "Region soil: 73 / 100" line above main status.
+- Three messaging cases when soil <= 0:
+  - growth == 0: "Region soil DEPLETED — no new crops" (red)
+  - growth > 0 (in progress): "Growing N% (soil depleted; this cycle finishes)" (red)
+  - output > 0 (ripe): "Ripe — extract; soil depleted, no new crop" (red)
+
+**Tests: 25/25 passing** (was 24; added 1)
+- **NEW** `test_soil_exhaustion` — 9 sub-suites:
+  1. `region_soil_health` defaults to 100 for absent regions.
+  2. `deplete_region_soil` accumulates across calls; clamps at 0; multi-region isolation (depleting (1,1) leaves (2,2) at 100).
+  3. Per-crop `soil_cost_for` returns 5 / 8 / 3 for WHEAT / SUGAR_BEET / FLAX.
+  4. Depletion-on-extract: `try_extract(p, world)` decrements region soil; empty extract is no-op.
+  5. **Multi-region isolation**: harvest in region (0,0) drops only (0,0); region (1,1) untouched after extract from a separate planter at (40, 40).
+  6. **Soil-zero gate**: planter at growth==0 in dead region stays at growth==0 across multiple ticks.
+  7. **In-progress finishes**: planter at growth==300 in dead region keeps ticking, completes (output=1).
+  8. **Save round-trip**: depleted regions persist; pristine regions absent from save (sparse); load restores defaults via `.get(region, 100)`.
+  9. **Edge case — already-dead region**: planter placed in zero-soil region stays at growth=0 from tick 1, no grace period (matches "soil-zero gate" general rule).
+
+### Decisions
+
+- **Region-based, not tile-based, soil.** Per locked design Q1. Each 32×32 region has ONE shared soil_health. Tile-level would have meant 256× more state (every tile its own soil), painful to visualize, and forces the player to micro-manage. Region scope creates strategic decisions ("don't over-farm this region") without overwhelming bookkeeping.
+- **Sparse storage** (`region_soil_modifications`). Mirror of `resource_state_modifications`. Default 100 implicit (absent = pristine). Avoids 256-entry pristine dict that grows for no reason.
+- **Q3 pushback: Planter.CROP_DATA, NOT Recipes.DATA.** Crops aren't recipes — `Planter.tick` reads its own crop dict; planters don't go through the Processor pipeline. Adding soil_cost to Recipes.DATA would have created a "crop" recipe shape that no other code uses. Co-locating in Planter's existing dict is cleaner.
+- **Depletion-on-extract, not on growth-completion.** Per locked design Q5(a). Cause-effect is clean: player got the crop, soil paid the cost. If we depleted on completion (Q5(b)), a ripe-but-unharvested crop would have already paid the soil cost — but the player hasn't benefited yet. Extract-time aligns the bookkeeping with the visible benefit.
+- **Soil-zero gate at `growth == 0` AND fresh-cycle start.** In-progress crops keep ticking (per Q7 graceful). The gate only blocks NEW growth from starting. This avoids the ugly UX of crops disappearing mid-growth because soil hit zero between their start and finish.
+- **Soil-zero clamps at 0 this session.** Future Session 4 unclamps for negative-value wasteland mechanics. The clamp is intentional — without it, over-depletion would silently track magnitude, but no current code reads beyond zero.
+- **Universal info access via Q on any tile** (locked decision Q8(a)). Q always shows useful info — pristine regions display "100/100" as a meaningful baseline rather than "no info." Defer to polish if "Q on grass shows 100/100 everywhere" becomes noise in playtest.
+- **Save v15 hard-fails v14.** No migration code (consistent with existing schema-bump policy at v13/v14). Player must delete the save and start fresh.
+
+### Lessons
+
+- **Pre-implementation reconnaissance prevented two design-pass errors.**
+  1. The user's premise that "planters use Recipes.DATA" was wrong; recipes weren't there. Audit caught it; design pushed back with `Planter.CROP_DATA` as the right home. (Same protocol-driven reversal as session-building-ui-3 and session-building-ui-4.)
+  2. The user's premise about info_panel showing soil "for any tile" needed clarification: implemented as a TILE target kind for empty grass + soil footer for building/resource kinds. Without the audit, would have either (a) hidden soil info on grass tiles (poor UX) or (b) added it only to existing kinds (incomplete coverage).
+- **Defaults via `.get()` make the sparse storage trivially forward-compat.** Old v14 saves can't load (hard-fail) but the additive shape means a hypothetical future migration could read v14 + treat all regions as pristine. The `region_soil_health(r)` accessor reads `modifications.get(r, 100)` — caller code never sees the difference between "absent" and "explicitly 100." Internal sparse storage, external uniform default. **Pattern: sparse-with-default is the right shape for player-modified state with implicit baselines.**
+- **The signature change cascade was small.** Adding `world` to `Planter.tick(b)` and `Planter.try_extract(b)` touched 4 call sites total: Buildings.tick_one, Harvester.tick, PlanterPanel._take_from_slot, plus the function itself. Defensive `world == null` guards keep tests that don't have a world reference working. **Lesson: when a primitive needs context it didn't previously, count the callers BEFORE the design pass — small caller count → low cost; large caller count → maybe the context belongs elsewhere.**
+- **Test ordering caught the right invariants in the right order.** Sub-suite 5 (multi-region isolation) and sub-suite 9 (already-dead-region edge case) both came from user pushback at design pass. Both were genuine risks: a global-state implementation bug would have escaped sub-suite 4 (single-region depletion works) but would have been caught by sub-suite 5; a misplaced `growth == 0` check would have failed sub-suite 9. **Lesson: edge-case tests catch what happy-path tests miss; spec them explicitly when reviewing the design pass.**
+
+### Roadmap implications
+
+This is **Session 1 of a multi-session stewardship-tension arc**. The remaining sessions add the recovery half:
+
+- **Session 2 — Fallow regeneration.** Regions slowly heal soil_health when no harvests occur for N ticks (e.g., +1 per minute when idle). Player can leave a depleted region fallow and return later. Adds fallow-state UI + decay timer per region. Save bump v15 → v16 if region tracks "last_harvest_tick" explicitly.
+- **Session 3 — Fertilizer chain.** New buildings: Compost (consumes organic waste — straw, chaff, kitchen scraps), Fertilizer Spreader (consumes compost, accelerates regen on its region). Connects to bread chain (straw → compost) for cross-chain dependencies.
+- **Session 4 — Wasteland mechanics.** Soil_health goes negative for severely depleted regions. Wasteland tiles render visually distinct, block planter placement, require fertilizer to reclaim. Unclamps the deplete clamp shipped this session.
+- **Optional Session 5 — Crop rotation.** Legumes (with negative soil_cost — they HEAL the soil) introduced. Player learns "rotate wheat → flax → legume" as a sustainable pattern.
+
+This session sets up all of those: the storage primitive, the depletion trigger, the visualization layer. Each future session adds a recovery mechanism on top of the same foundation.
+
+### Known follow-ups (carried forward)
+
+- **Cellular noise revisit at sprite migration** (worldgen-stage1 carry).
+- **Cloth chain `prefer_dir` polish** (Session E carry).
+- **Map polish** (zoom, markers — explore-map carry).
+- **Patch-edge zero-richness tiles** (mining-manual carry).
+- **Sapling visual during regrowth** (tree-harvest carry).
+- **Hotbar Mining category at 2/9** — smelter session carry.
+- **Click-handling duplication** between inventory_grid + BuildingPanel — refined trigger criteria in NOTES.md.
+- **Right-click half-stack interactions** — flagged at session-building-ui-1 as building-UI v2 polish.
+- **SmelterPanel + DrillPanel migration to ProcessorPanel-style** — flagged session-building-ui-4 as deferred indefinitely.
+- **Tile-level soil visualization** — deferred to Session 2 alongside recovery (so visual states have both deplete + heal meaning).
+- **"Q on grass shows 100/100 everywhere" noise** — deferred to polish if playtest confirms it's annoying.
+
+---
+
 ## Building Interaction UI — Session 4 of multi-session arc (save v14, no bump) — **ARC COMPLETE**
 
 **Date:** 2026-05-03

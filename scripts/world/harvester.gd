@@ -54,7 +54,7 @@ static func tick(b: Building, world: Node2D) -> void:
 			var neighbor: Building = world.building_at(npos)
 			if neighbor == null or neighbor.type != Buildings.Type.PLANTER:
 				continue
-			var item: int = Planter.try_extract(neighbor)
+			var item: int = Planter.try_extract(neighbor, world)
 			if item >= 0:
 				_add_to_buffer(b, item, 1)
 				return  # one per scan

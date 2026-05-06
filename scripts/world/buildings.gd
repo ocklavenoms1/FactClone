@@ -621,7 +621,7 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 static func tick_one(b: Building, world: Node2D) -> void:
 	match b.type:
 		Type.PLANTER:
-			Planter.tick(b)
+			Planter.tick(b, world)
 		Type.HARVESTER:
 			Harvester.tick(b, world)
 		Type.BELT:

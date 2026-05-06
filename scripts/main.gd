@@ -628,7 +628,10 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 		if t.resource_node != ResourceNodes.Type.NONE:
 			info_panel.set_resource_target(hover_tile, grid_world)
 			return
-	info_panel.clear_target()
+	# Fall through to TILE target (session-soil-exhaustion-1) — Q on empty
+	# grass shows region info + soil_health. Player gets useful info on
+	# every Q press; never goes to clear-target via Q.
+	info_panel.set_tile_target(hover_tile, grid_world)
 
 # ---------- Building Interaction UI (session-building-ui-1, extended in 2) ----------
 

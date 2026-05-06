@@ -56,6 +56,20 @@ var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2
 # state=1, then update_vision() upgrades the 5×5 around player to state=2.
 var region_visibility: Dictionary = {}
 
+# Soil exhaustion (session-soil-exhaustion-1). Each 32×32 region has a
+# shared soil_health value 0..100. Default 100 (pristine) — sparse storage,
+# only depleted regions appear in the dict. Future sessions add fallow
+# regeneration (Session 2), fertilizer chain (Session 3), wasteland
+# below-zero values (Session 4).
+#
+# Save format: `region_soil_modifications` field (Array of [rx, ry, soil]).
+# Saves at v15. Hard-fail on v14 per existing schema-bump policy.
+var region_soil_modifications: Dictionary = {}    # Vector2i (region) -> int (0..100)
+
+# Per-region "pristine" baseline. Anchored as a constant so future sessions
+# (recovery, wasteland) reference the canonical full value.
+const SOIL_HEALTH_FULL: int = 100
+
 # Vision parameters. VISION_RADIUS is Chebyshev distance; the 5×5 area is
 # (2*VISION_RADIUS + 1)^2 = 25 regions when radius = 2.
 const VISION_RADIUS: int = 2
@@ -470,6 +484,29 @@ static func region_of_world_pos(world_pos: Vector2) -> Vector2i:
 func _in_region_bounds(region: Vector2i) -> bool:
 	return region.x >= WorldGenerator.REGION_MIN and region.x < WorldGenerator.REGION_MAX \
 		and region.y >= WorldGenerator.REGION_MIN and region.y < WorldGenerator.REGION_MAX
+
+# ---------- soil exhaustion (session-soil-exhaustion-1) ----------
+
+## Read region soil health. Default SOIL_HEALTH_FULL (100) if not in
+## modifications dict — sparse storage means absent = pristine.
+func region_soil_health(region: Vector2i) -> int:
+	return int(region_soil_modifications.get(region, SOIL_HEALTH_FULL))
+
+## Decrement region soil_health by `amount`, clamped at 0 (this session;
+## future sessions allow negative for wasteland). Updates the modifications
+## dict; if the new value happens to be SOIL_HEALTH_FULL again (100, only
+## possible when amount <= 0 — defensive), erases the entry to keep the
+## dict sparse.
+##
+## Returns the new soil_health value.
+func deplete_region_soil(region: Vector2i, amount: int) -> int:
+	var current: int = region_soil_health(region)
+	var new_value: int = max(0, current - amount)
+	if new_value >= SOIL_HEALTH_FULL:
+		region_soil_modifications.erase(region)
+	else:
+		region_soil_modifications[region] = new_value
+	return new_value
 
 ## Recompute active-vs-fog for the current player region. Returns the list
 ## of regions whose visibility CHANGED so the map texture can be marked

@@ -88,7 +88,12 @@ extends RefCounted
 ##            v13 saves have Array of [x, y, int] — incompatible with
 ##            the new Dict shape — hard-fail.
 
-const SAVE_VERSION: int = 14
+## Save format migration log:
+##   v14 → v15: added `region_soil_modifications` (Array of [rx, ry, soil])
+##              for the soil exhaustion arc (session-soil-exhaustion-1).
+##              Sparse — absent regions default to SOIL_HEALTH_FULL (100).
+##              Hard-fail v14 saves per existing schema-bump policy.
+const SAVE_VERSION: int = 15
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -132,6 +137,13 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		# duplicate() so save snapshot can't mutate via shared reference.
 		resource_mods_data.append([pos.x, pos.y, state.duplicate()])
 
+	# v15: serialize region_soil_modifications. Sparse — only depleted
+	# regions appear (default SOIL_HEALTH_FULL = 100 is implicit, absent).
+	# Shape: Array of [rx, ry, soil_health].
+	var region_soil_data: Array = []
+	for region in grid_world.region_soil_modifications.keys():
+		region_soil_data.append([region.x, region.y, int(grid_world.region_soil_modifications[region])])
+
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"world_seed": grid_world.world_seed,
@@ -140,6 +152,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"tick": TickSystem.current_tick,
 		"tile_modifications": modifications_data,
 		"resource_state_modifications": resource_mods_data,
+		"region_soil_modifications": region_soil_data,
 		"explored_regions": explored_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
@@ -259,6 +272,15 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			# Tree regrowth: canonical state is "mature" (no entry). Insert
 			# the regrowth dict so _tick_regrowth picks it up next frame.
 			grid_world.resource_state[rs_pos] = rs_state.duplicate()
+
+	# v15: restore region soil_health modifications. Sparse — absent entries
+	# default to SOIL_HEALTH_FULL (100) on read via region_soil_health().
+	# Old v14 saves miss this field entirely (hard-fail prevented load), but
+	# defensive .get() with default keeps the additive shape forward-compat.
+	grid_world.region_soil_modifications.clear()
+	for entry in data.get("region_soil_modifications", []):
+		var soil_region := Vector2i(int(entry[0]), int(entry[1]))
+		grid_world.region_soil_modifications[soil_region] = int(entry[2])
 
 	# v12: restore explored regions as fog. Active state will be set by
 	# main.gd's vision update after load completes (running update_vision
