@@ -60,12 +60,13 @@ All three Sessions 3-5 INHERIT per-tile semantics. Region-based versions of thes
 
 **Pattern:** when the user (or a prior design pass) locks in an architectural decision before implementation, and the implementation includes a "verify before code" reconnaissance step, the audit can produce findings that invalidate the locked decision's premise. **Reversing during the design-pass writeup is correct.** It's cheaper than shipping the bad abstraction and removing it later (10× cost differential at typical session-cascade depth).
 
-**Five reversals so far:**
+**Six reversals so far:**
 1. **`session-mining-manual` — deposit-overlay rule reversal.** Original: "overlay obscures deposit, RMB-clear reveals." Reversed to: "overlay placement BLOCKED on deposits." The UX trap (player accidentally paves over and loses the deposit) was visible in playtest within minutes.
 2. **`session-building-ui-3` — fluid_indicator extracted to shared helper BEFORE ProcessorPanel extension.** User pushback added a 3a→3b→3c sequencing: extract from MixerPanel first, refactor MixerPanel to use shared, THEN extend ProcessorPanel. Avoided two divergent fluid renderers.
 3. **`session-building-ui-4` — ExtractionPanel intermediate deferred.** Reconnaissance found harvester (3×3 coverage) and planter (no coverage, int-typed output) share <30% layout. Forcing them into one base class would mean "if-has-coverage" branches with no real abstraction value.
 4. **`session-soil-exhaustion-1` (in-flight Session 2 attempt) — region-regen partial work salvaged, region-scoped logic rewritten.** Mid-session pivot from region-regen to per-tile rewrite preserved scope-agnostic UI scaffolding (~30 lines).
 5. **`session-soil-exhaustion-2` — region-based soil → per-tile soil.** **The most expensive reversal in the project.** Region scope (32×32 = 1024 tiles per planter) decoupled cause from effect; player UX in playtest was disconnected. Per-tile (3×3 = 9 tiles) localizes the effect. Caught ~1 hour after Session 1 ship; would have cascaded across Sessions 3-5 (fertilizer chain, wasteland, legumes — all fundamentally different under per-tile vs region scope). Estimated 10× cost if caught later.
+6. **`session-zoom-to-map` — separate-render approach → wheel-trigger of existing M-key modal.** ~2 sessions of work fully discarded (`MapBackdrop` Node2D + cross-fade alpha math + dynamic resolution-independent `_zoom_min()` + click-to-pan with smooth lerp + click-vs-drag distinction + dual-texture plan). Replaced with ~30 lines: at the existing zoom floor, one more wheel-down opens the existing M-key modal. Triggered by user clarification at PAUSE 2 manual smoke after diagnostic instrumentation confirmed the cross-fade math was correct but solving the wrong problem. Discarded cleanly via `git restore . && git clean -fd` from clean HEAD; zero salvage attempted because every line of the discarded work encoded the wrong abstraction. **Lesson surfaced:** "exactly like Factorio" is a reference, not a spec — see `Protocol: unpack reference-style requirements before design pass` below.
 
 **Protocol:**
 - Always honor a "verify before implementation" step in the implementation order — don't skip it.
@@ -74,6 +75,40 @@ All three Sessions 3-5 INHERIT per-tile semantics. Region-based versions of thes
 - Cost to reverse during writeup: ~10 minutes. Cost to ship-then-remove a bad abstraction: hours-to-days.
 
 If a reversal feels expensive (e.g., the user pre-committed publicly to the original choice), that's a smell that the audit step was treated as ceremony rather than gate. The audit IS the gate.
+
+---
+
+## Protocol: unpack reference-style requirements before design pass
+
+**Codified at session-zoom-to-map** after reversal #6 (separate-render zoom-to-map → wheel-trigger of M-key modal). ~2 sessions of work fully discarded.
+
+**Pattern:** when a feature is described with a reference rather than a behavioral specification — phrases like "exactly like Factorio," "like Minecraft does it," "the way most games handle this" — there's a hidden ambiguity. The reference compresses a large mental model into a few words; the listener decompresses with their own mental model, which is rarely identical to the speaker's. Both parties feel aligned because the phrase "exactly like X" sounds precise. It isn't. **Reference-style phrasing always preserves the speaker's escape hatch ("oh, that's not what I meant").**
+
+**Concrete example — session-zoom-to-map:** the user wanted "wheel-out triggers the existing M-key map modal" (an alternate input route to a known surface). The implementer's mental model for "exactly like Factorio's zoom-to-map" was a continuous cross-fade rendering between world view and a baked-texture map view. Both were locally consistent with "exactly like Factorio." The reversal cost: ~2 sessions of work + diagnostic effort + a full discard.
+
+**Protocol — when the user uses reference-style phrasing:**
+
+The next response MUST be specific behavioral verification BEFORE any design pass. Concretely:
+
+1. Refuse to do a design pass on the reference alone. Don't say "great, here's the design pass for our 'exactly like Factorio' zoom feature."
+2. Ask for **frame-by-frame description**: "Tell me the exact sequence of inputs and what should happen at each step. What does the player press / scroll / click? What changes on screen? What state does the game enter?"
+3. Pin down the EXIT condition: "How does the player get OUT of this state?" (Often the most diagnostic question — separate-render zoom-to-map had no clear exit; wheel-trigger has wheel-up.)
+4. Pin down the GATING: "What ELSE is happening — can the player still move? Place buildings? See the world?"
+5. Only after the behavioral spec is clear: design pass.
+
+**Smell test for reference-style requirements:**
+- Phrases that compress a feature into a citation: "like Factorio," "the way Minecraft does it," "exactly how Diablo handles inventory," "standard MMO targeting."
+- Phrases that name a feel rather than a behavior: "make it feel polished," "the usual zoom-out experience."
+- Phrases that name a system without scoping: "add a tech tree," "a research mechanic."
+
+**When reference-style phrasing is OK:**
+- The reference is a tightening constraint on an already-clear spec ("the placement preview should ghost the building like Factorio does — half-alpha, color-tinted by validity").
+- The reference is to a feature that exists in this codebase already ("wire it up like the existing M-key map modal").
+- The reference is in a "how" not a "what" ("use the same lerp-rate as the camera smooth-zoom").
+
+In all OK cases, the spec already exists or the reference points to in-codebase behavior. The dangerous form is reference-as-spec: when the entire feature definition relies on the listener's interpretation of the reference.
+
+**Failure mode of skipping this protocol:** the listener does the design pass with their own mental model of the reference, the user nods because "exactly like X" sounds right to them too, implementation ships, playtest reveals the divergence. By that point, the cost is sunk. **Cost of unpacking the reference upfront: 5–15 minutes of dialogue. Cost of NOT unpacking: ~2 sessions of dead work in the worst case (reversal #6 evidence).**
 
 ---
 

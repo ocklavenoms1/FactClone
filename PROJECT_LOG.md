@@ -9,6 +9,101 @@ Each entry has three sections:
 
 ---
 
+## Zoom-to-map — wheel-trigger of M-key modal — **30 LINES OF CODE, ~2 SESSIONS OF DEAD WORK**
+
+**Date:** 2026-05-06
+**Tag:** `session-zoom-to-map`
+
+The shipped feature is small and clean: at the existing zoom floor (`ZOOM_MIN = 0.85`), one more wheel-down opens the existing M-key map modal. Inside the modal, wheel-up closes back to world view at the same zoom. ~30 lines in `main.gd` + a 130-line headless test (7 sub-suites).
+
+The history behind those 30 lines is the entry's real content: **architectural reversal #6** discarded ~2 sessions of work (`MapBackdrop` separate-render node, dual textures with/without fog, dynamic resolution-independent `ZOOM_MIN`, cross-fade alpha math, click-vs-drag distinction, smooth lerp pan animation in fullscreen) after the user's playtest revealed they wanted "wheel-out triggers the existing M-key modal," not a new continuous-cross-fade rendering path.
+
+### Architectural reversal #6 — separate-render zoom-to-map → wheel-trigger of M-key modal
+
+**Original locked design (~2 sessions of work):**
+- New `MapBackdrop` Node2D rendering the cached map texture covering the entire 16384×16384 world rect, fading in below `ZOOM_FADE_START = 0.40`, fully visible below `ZOOM_FADE_END = 0.20`.
+- Cross-fade math via `_world_alpha_for_zoom(z)` and `_map_alpha_for_zoom(z)` driving `grid_world.modulate.a` and `map_backdrop.map_alpha` per frame.
+- Dynamic `_zoom_min()` computed from viewport height (so map fills vertical viewport on any monitor).
+- Player movement frozen at `grid_world.modulate.a < 0.5` (Factorio look-only convention; this was reversal #6.5 in the same arc).
+- Click-to-pan with click-vs-drag threshold (5px), smooth lerp pan animation (PAN_LERP_RATE = 12.0) inside the M-key fullscreen.
+- Test suite for cross-fade math + click-vs-drag threshold + rapid-zoom edge cases.
+
+**What revealed it was wrong:** at PAUSE 2 manual verification, the user reported the map "fills only ~43% of the viewport." Diagnostic HUD instrumentation (`get_canvas_transform()` applied to known world corners + viewport size + window size) confirmed the math was actually correct: the map texture WAS rendering at full 16384 world-px = full vertical viewport. But ~80% of the texture was solid black (unexplored regions per `_redraw_region`'s `Color(0,0,0,1)` fill), so the visible "map" was just the explored center. Path forward would have been a second 4MB always-bright texture for `MapBackdrop` only — adding more code on top of code that wasn't the right shape.
+
+The user's clarification: "discard all current zoom-to-map work, build the simpler 'zoom-out triggers M-key map' feature." The desired feature was a **trigger**, not a **render mode**. Fog-of-war + drag-pan + click-to-pan + everything else came for free from the existing M-key modal.
+
+**The reversal in numbers:**
+| | Separate-render approach (~2 sessions) | Wheel-trigger of M-key (this commit) |
+|---|---|---|
+| New nodes | `MapBackdrop` Node2D + scene wiring | none |
+| New textures | 1 texture (1024² RGBA = 4MB), with planned 2nd full-bright texture (+4MB) | none |
+| Cross-fade math | ~30 lines + tests | none |
+| Dynamic `_zoom_min()` | ~10 lines + tests | none (existing constant `ZOOM_MIN = 0.85` reused) |
+| Click-to-pan in M-fullscreen | ~50 lines (smooth lerp + click-vs-drag) | none (existing M-key behavior reused) |
+| Player freeze logic | ~10 lines in `player.gd` | none (existing modal pattern reused) |
+| Save schema bump | none planned but conceptually adjacent | none |
+| `main.gd` zoom handler | full rewrite around alpha cross-fade | +30 lines (modal-open + at-floor branches) |
+| Test code | 100+ lines on cross-fade + thresholds + edges | 130 lines on the 7 wheel decision branches |
+| Total LOC delta from clean state | ~600 added | +30 in main.gd + 130 test = **160 net** |
+
+**Cost of the reversal — caught at PAUSE 2 of the second session:**
+- ~2 sessions of `MapBackdrop` work fully discarded (`git restore .` + `git clean -fd` from clean HEAD).
+- Architectural lesson preserved (this entry).
+- Zero salvage — the new feature shares no code with the old approach.
+
+**Why the reversal was correct:** the user wanted to **navigate** at extreme zoom-out, not see a continuous cross-fade visualization. The M-key modal already supported all the navigation primitives (pan, click-to-pan, full fog-of-war map texture). Wheel-out was just an alternate trigger for it. The "separate-render with cross-fade" framing was an over-elaborate solution to a much simpler input-routing problem.
+
+### What shipped (this session)
+
+**`scripts/main.gd` — wheel-trigger logic (~30 lines net)**
+- Extracted `_handle_zoom_wheel(direction: int)` from `_unhandled_input` (pure refactor preserving the previous behavior).
+- Added `_compute_zoom_action(current_zoom, modal_open, direction) -> Dictionary` as a static, pure decision function. Tests call this directly without instantiating Main's full @onready scene graph.
+- Three behaviors layered on top of plain zoom:
+  - **A.** Modal open + wheel-up → close the modal. No zoom change.
+  - **B.** Modal open + wheel-down → no-op (debounce).
+  - **C.** World view + wheel-down at `ZOOM_MIN + 1e-4` floor → open the modal. Zoom unchanged.
+- Threshold reuses existing `ZOOM_MIN = 0.85` — no new constant. Float-epsilon tolerance handles lerp-converged values that float just above the strict floor.
+
+**`scripts/tests/test_zoom_trigger_map.gd` — 7 sub-suites**
+1. Wheel-down decreases zoom above min, modal stays closed.
+2. Wheel-down at min triggers map open, target_zoom unchanged.
+3. Modal-open blocks wheel-down (no zoom change, no extra toggle).
+4. Modal-open + wheel-up requests close.
+5. Wheel-up after modal closed zooms in normally.
+6. M-key direct toggle is independent of wheel state (verified structurally — only `modal_open` parameter couples the function to modal state).
+7. **Regression: wheel-up in world view at any zoom < ZOOM_MAX zooms in normally** across 30 steps from floor; clamps at ceiling without exceeding. This is the regression test for the static-helper extraction.
+
+**Test count: 25 → 26 passing.**
+
+**`scripts/tests/test_runner.gd`** — registered the new test.
+
+### Decisions
+
+- **Reuse existing `ZOOM_MIN` constant.** No new threshold variable. The floor where zoom previously clamped is the trigger point. One source of truth.
+- **Float-epsilon tolerance (`1e-4`) on the at-floor check.** Smooth-zoom lerp drifts target_zoom slightly above the strict floor in some frames; epsilon makes the trigger reliable. Test #2b verifies fired-within-epsilon.
+- **Static + pure decision function (`_compute_zoom_action`).** Lets headless tests verify the full decision logic without standing up a Main instance with all its @onready scene-graph dependencies. Pattern: thin instance wrapper applies side-effects (target_zoom assignment, `map_panel.toggle()` call); pure helper makes the decisions. Tests exercise the pure helper.
+- **Wheel-up at floor with modal open closes the modal but does NOT bump zoom up by one step.** Clean state-machine boundary: one wheel event = one decision. If the player wants to zoom in further, they wheel-up again after the modal closes. Considered the "close + bump zoom in same event" alternative; rejected for state-machine clarity.
+- **No visual hint that wheel-out can trigger the modal.** Modal-open IS the indicator. Player learns "wheel-out at min zoom opens the map" the first time it happens. Defer any one-shot toast to PAUSE 2 follow-up if discoverability proves to be an issue.
+- **No save schema bump.** Behavior change only — no persisted state added.
+- **No project.godot input changes.** Wheel events already bind through `_unhandled_input`.
+
+### Lessons
+
+- **"Like Factorio" is a reference, not a spec.** The user said the feature should work "exactly like Factorio." That phrase let the implementer pick a mental model (continuous cross-fade rendering) that fit "exactly like Factorio" but not the user's actual need (wheel-out trigger of the existing modal). Reference-style phrasing preserves the user's escape hatch ("oh, that's not what I meant") without forcing the alignment that a behavioral spec would. **Protocol added to NOTES.md:** when the user says "like X," the next response must be specific behavioral verification — frame-by-frame description of the desired sequence — before any design pass. See NOTES.md → Protocol: unpack reference-style requirements before design pass.
+- **Reversals get more expensive when reconnaissance is "verify the math" rather than "verify the user's mental model."** Multiple HUD instrumentations + canvas-transform debugging confirmed the cross-fade math was correct, while the actual issue was that the cross-fade approach was solving the wrong problem. Math verification is necessary but not sufficient — the audit step has to also ask "is this what the user wants to see?"
+- **Same-day pattern: this is the second instance.** Reversal #5 (region soil → per-tile soil) was caught after ~1 hour of playtest. Reversal #6 (separate-render → wheel-trigger) was caught after ~2 sessions of build + diagnostic. Both reversals had the same root cause: building what the literal text said vs. what the user actually meant. The cost differential: #5 caught fast = 1 session of rewrite. #6 caught slower = 2 sessions of fully-discarded work.
+- **Discard cleanly when the reversal is total.** No salvage was attempted on the `MapBackdrop` work because nothing in it was scope-agnostic — every line was specific to the wrong framing. `git restore . && git clean -fd` from clean HEAD `58934b7` was the right move. Salvage is appropriate when partial work is scope-agnostic (reversal #5: ~30 lines of UI scaffolding). Salvage is wrong when every line encodes the wrong abstraction (reversal #6: 100% discarded).
+
+### Roadmap implications
+
+None for the soil-exhaustion arc (Sessions 3-5 unaffected). Zoom-to-map is now closed; the M-key modal is the single canonical "look at the whole map" surface, with two triggers (M key + wheel-out at floor).
+
+### Known follow-ups
+
+- **PAUSE-2 discoverability check (low priority):** if subsequent playtest reveals players don't realize wheel-out at floor opens the map, add a one-shot toast on first ZOOM_MIN-reach: "Wheel down again to open the map." Defer until evidence demands it.
+
+---
+
 ## Soil exhaustion — Session 2 of multi-session arc (save v15 → v16) — **REFACTOR + REGEN + VISUAL STATES**
 
 **Date:** 2026-05-03

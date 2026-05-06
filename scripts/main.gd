@@ -489,9 +489,71 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			target_zoom = clamp(target_zoom * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+			_handle_zoom_wheel(+1)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			target_zoom = clamp(target_zoom / ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+			_handle_zoom_wheel(-1)
+
+## Apply a wheel-zoom step. `direction = +1` is zoom-in (wheel-up),
+## `-1` is zoom-out (wheel-down). Thin instance wrapper around the pure
+## static `_compute_zoom_action` so tests exercise the decision logic
+## without instantiating Main's full @onready scene graph.
+##
+## Three behaviors layer on top of plain zoom (session-zoom-to-map):
+##
+##   A. Modal open + wheel-up  → close the modal. No zoom change. Player
+##      wheels up again to actually zoom in.
+##   B. Modal open + wheel-down → no-op. Modal blocks further wheel
+##      events; this prevents rapid wheel input from re-triggering the
+##      open/close toggle (clean state-machine debouncing).
+##   C. World view + wheel-down at ZOOM_MIN floor → open the M-key map
+##      modal. Same modal as the M key — fog-of-war, drag-pan, click-to-
+##      pan all preserved. The threshold IS the existing zoom floor; no
+##      new constant. Tolerance epsilon handles floating-point drift in
+##      the lerp-converged target_zoom value.
+##
+## Architectural note: an earlier attempt built a separate MapBackdrop
+## node + dual textures + cross-fade rendering. User clarification
+## revealed the desired feature was "wheel-out triggers the existing
+## M-key modal." Discarded the separate-render approach; this trigger
+## replaces ~600 lines of work. See PROJECT_LOG (reversal #N).
+const _ZOOM_FLOOR_EPSILON: float = 1.0e-4
+
+func _handle_zoom_wheel(direction: int) -> void:
+	var modal_open: bool = map_panel != null and map_panel.is_open()
+	var action: Dictionary = _compute_zoom_action(target_zoom, modal_open, direction)
+	target_zoom = action["new_zoom"]
+	if action["toggle_modal"] and map_panel != null:
+		map_panel.toggle()
+
+## Pure decision function for wheel-zoom — no side effects, no Main
+## instance required. Returns a dict with the new target_zoom value and
+## whether the caller should toggle the map modal. Static + pure so
+## tests can call it directly without standing up a scene tree.
+##
+## Inputs:
+##   current_zoom   — caller's current target_zoom
+##   modal_open     — is the map modal currently open?
+##   direction      — +1 (wheel-up) or -1 (wheel-down); 0 is a no-op
+## Returns:
+##   { "new_zoom": float, "toggle_modal": bool }
+##
+## Branch order matters — modal-open dominates floor-trigger dominates
+## normal zoom. See `_handle_zoom_wheel` docstring for the three layered
+## behaviors (A, B, C) this function encodes.
+static func _compute_zoom_action(current_zoom: float, modal_open: bool, direction: int) -> Dictionary:
+	# A + B. Modal open: wheel-up closes, wheel-down is a no-op.
+	if modal_open:
+		return { "new_zoom": current_zoom, "toggle_modal": direction > 0 }
+	# C. Wheel-down at the floor: open the modal, leave zoom at floor.
+	if direction < 0 and current_zoom <= ZOOM_MIN + _ZOOM_FLOOR_EPSILON:
+		return { "new_zoom": current_zoom, "toggle_modal": true }
+	# Normal zoom — clamped to [ZOOM_MIN, ZOOM_MAX].
+	var new_zoom: float = current_zoom
+	if direction > 0:
+		new_zoom = clamp(current_zoom * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+	elif direction < 0:
+		new_zoom = clamp(current_zoom / ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+	return { "new_zoom": new_zoom, "toggle_modal": false }
 
 func _try_place(pos: Vector2i) -> void:
 	match hotbar.current_kind():
