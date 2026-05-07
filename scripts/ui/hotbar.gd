@@ -8,13 +8,41 @@ extends Control
 ##   Tab cycles to next category, Shift+Tab to previous.
 ##   Each category remembers its own last selection.
 ##
-## Each slot is a dict { "kind": String, "value": int, optional "extra": Variant, optional "label": String }:
-##   kind = "terrain"  -> value is a Terrain.Overlay (player paints overlays)
-##   kind = "building" -> value is a Buildings.Type
-##                        extra (optional) is forwarded to Buildings.make
-##                        — used today for Planter crop variants (Wheat / Sugar Beet)
-##                        label (optional) overrides the default name shown
-##                        below the slot (e.g. "Wheat Planter" instead of "Planter").
+## Each slot is a dict { "kind": String, "value": int, optional "extra": Variant, optional "label": String }.
+##
+## ----------------------------------------------------------------------
+## THREE HOTBAR KINDS (extension protocol):
+##
+##   kind = "terrain"     -> value is a Terrain.Overlay enum value.
+##                            Click on a tile = paint overlay onto it.
+##                            E.g. "Tilled Soil", "Path", "Stone".
+##
+##   kind = "building"    -> value is a Buildings.Type enum value.
+##                            Click on a tile = place a building there.
+##                            extra (optional) is forwarded to Buildings.make
+##                            (used today for Planter crop variants Wheat /
+##                            Sugar Beet / Flax — same building type, different
+##                            initial state).
+##                            label (optional) overrides the default building
+##                            name (e.g. "Wheat Planter" instead of "Planter").
+##
+##   kind = "item_apply"  -> value is an Items.Type enum value (a CONSUMABLE
+##                            item). Click on a tile = consume 1 of the item
+##                            from player inventory and apply its effect to
+##                            the tile (e.g. fertilizer boosts regen rate).
+##                            Slot dims when the player has 0 of the item.
+##                            See main.gd's _try_apply_fertilizer for the
+##                            current consumer; future kinds (seeds,
+##                            wasteland restorers, etc.) follow this same
+##                            pattern.
+##
+## To add a new kind:
+##   1. Document it in this header block.
+##   2. Add a case to _color_for() and _label_for() if visual treatment differs.
+##   3. Add a dispatch case in main.gd's _try_place(pos) match-statement.
+##   4. If the kind has "use availability" (like inventory-backed item_apply),
+##      consider extending _is_slot_disabled() so it dims when unusable.
+## ----------------------------------------------------------------------
 
 const SLOT_SIZE: int = 64
 const SLOT_GAP: int = 6
@@ -34,6 +62,14 @@ signal selection_changed(kind: String, value: int)
 
 var categories: Array = []   # [{ "name": String, "slots": Array, "selected": int }]
 var current_category: int = 0
+
+# Inventory reference for `item_apply` slots — set by main.gd at _ready
+# AFTER player_inventory is constructed. Used by _is_slot_disabled() so
+# the slot visually dims when the player has 0 of the item.
+# NOT required for hotbar startup — a null reference just means slots
+# never dim (safe fallback for tests / scripted scenes without inventory).
+const SLOT_DIM_ALPHA: float = 0.35   # opacity multiplier for inventory-empty item_apply slots
+var player_inventory: Inventory = null
 
 func _ready() -> void:
 	_build_categories()
@@ -98,6 +134,20 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.BRIQUETTER },
 			{ "kind": "building", "value": Buildings.Type.YEAST_CULTURE },
 			{ "kind": "building", "value": Buildings.Type.SUGAR_PRESS },
+		],
+		"selected": 0,
+	})
+
+	# Soil exhaustion arc (session-soil-exhaustion-3): Composter (production)
+	# + hand-apply compost slots (NEW item_apply kind — see file header).
+	# Fertilizer Applicator deferred to Session 3.5 / Session 4 per "manual
+	# mechanic before automation" pattern (mirrors manual-mining → drill arc).
+	categories.append({
+		"name": "Soil",
+		"slots": [
+			{ "kind": "building",   "value": Buildings.Type.COMPOSTER },
+			{ "kind": "item_apply", "value": Items.Type.COMPOST_LOW, "label": "Apply Low Compost" },
+			{ "kind": "item_apply", "value": Items.Type.COMPOST_MID, "label": "Apply Rich Compost" },
 		],
 		"selected": 0,
 	})
@@ -210,13 +260,41 @@ func clear_selection() -> void:
 # ---------- visual ----------
 
 func _color_for(slot: Dictionary) -> Color:
-	return Terrain.overlay_color(slot["value"]) if slot["kind"] == "terrain" else Buildings.swatch_color_of(slot["value"])
+	match str(slot.get("kind", "")):
+		"terrain":
+			return Terrain.overlay_color(int(slot["value"]))
+		"building":
+			return Buildings.swatch_color_of(int(slot["value"]))
+		"item_apply":
+			return Items.color_of(int(slot["value"]))
+	return Color.MAGENTA   # unknown kind — visible bug indicator
 
 func _label_for(slot: Dictionary) -> String:
 	# Explicit per-slot label wins (e.g. "Wheat Planter" instead of "Planter").
 	if slot.has("label"):
 		return slot["label"]
-	return Terrain.overlay_name(slot["value"]) if slot["kind"] == "terrain" else Buildings.name_of(slot["value"])
+	match str(slot.get("kind", "")):
+		"terrain":
+			return Terrain.overlay_name(int(slot["value"]))
+		"building":
+			return Buildings.name_of(int(slot["value"]))
+		"item_apply":
+			return Items.name_of(int(slot["value"]))
+	return "?"
+
+## True if the slot is currently unusable and should be visually dimmed.
+## Today: only `item_apply` slots dim (when the player has 0 of the item).
+## Building / terrain slots are never dimmed — placement-validity is
+## checked at click-time with a toast, since hover-tile context matters.
+##
+## Wired by main.gd setting `player_inventory` after _ready. If the
+## inventory ref is null (tests, scripted scenes), nothing dims.
+func _is_slot_disabled(slot: Dictionary) -> bool:
+	if str(slot.get("kind", "")) != "item_apply":
+		return false
+	if player_inventory == null:
+		return false
+	return player_inventory.total_of(int(slot["value"])) <= 0
 
 func _draw() -> void:
 	var font: Font = ThemeDB.fallback_font
@@ -252,22 +330,36 @@ func _draw() -> void:
 		var border_width: float = 3.0 if i == selected_idx else 1.5
 		draw_rect(slot_rect, border, false, border_width)
 
+		# Disabled-state dim modulate (item_apply slot with empty inventory).
+		# Apply to color swatch + label below; selection border remains full
+		# brightness so the player still sees what's currently selected.
+		var disabled: bool = _is_slot_disabled(slots[i])
+		var swatch_alpha: float = SLOT_DIM_ALPHA if disabled else 1.0
+		var label_color: Color = Color(0.9, 0.9, 0.85, swatch_alpha)
+
 		# Color swatch.
 		var swatch_rect: Rect2 = Rect2(x + 8, row_y + 8, SLOT_SIZE - 16, SLOT_SIZE - 28)
-		draw_rect(swatch_rect, _color_for(slots[i]), true)
+		var swatch_color: Color = _color_for(slots[i])
+		swatch_color.a *= swatch_alpha
+		draw_rect(swatch_rect, swatch_color, true)
 		if slots[i]["kind"] == "building":
-			draw_rect(swatch_rect, Color.BLACK, false, 1.5)
+			var border_c: Color = Color.BLACK
+			border_c.a *= swatch_alpha
+			draw_rect(swatch_rect, border_c, false, 1.5)
 
 		# Slot number.
 		draw_string(font, Vector2(x + 6, row_y + SLOT_SIZE - 6), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 		# Centered, optionally two-line label below the slot.
-		_draw_label_below(canvas_font_or(font), Vector2(x, row_y + SLOT_SIZE + 4), _label_for(slots[i]))
+		_draw_label_below(canvas_font_or(font), Vector2(x, row_y + SLOT_SIZE + 4), _label_for(slots[i]), label_color)
 
 ## Helper: render a label centered below the slot, wrapping to a second line
 ## at the first space if the label has multiple words. Keeps long names like
 ## "Wheat Planter" / "Yeast Culture" aligned without overflow.
-func _draw_label_below(font: Font, top_left: Vector2, label: String) -> void:
-	var color: Color = Color(0.9, 0.9, 0.85)
+##
+## `color` lets the caller pass a dimmed color when the slot is disabled
+## (e.g., empty-inventory item_apply slot). Defaults to the standard text
+## color so existing call sites can omit the parameter.
+func _draw_label_below(font: Font, top_left: Vector2, label: String, color: Color = Color(0.9, 0.9, 0.85)) -> void:
 	# Find first space to split on.
 	var space_idx: int = label.find(" ")
 	if space_idx < 0:

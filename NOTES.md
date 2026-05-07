@@ -6,9 +6,9 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Soil exhaustion arc — Sessions 1+2 shipped (per-tile foundation)
+## Soil exhaustion arc — Sessions 1+2+3 shipped (foundation + fertilizer hand-apply)
 
-**Status:** **Sessions 1 + 2 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, save v16, hard-fail v15.
+**Status:** **Sessions 1 + 2 + 3 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, fertilizer chain (Composter + hand-apply), per-tile boost state with timed decay, save v17, hard-fail v16.
 
 ### Architecture (current)
 
@@ -19,22 +19,26 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 - **Soil-zero gate**: planter at `growth == 0` AND `tile_soil_health(b.anchor) <= 0` stays idle. In-progress crops (growth > 0) finish gracefully.
 - **Single-planter oscillation**: idle planter on dead tile → tile regens to 1 → planter activates → consumes → tile drops → idle → cycle. PlanterPanel mini-grid flicker IS the player feedback.
 
-### What's shipped (sessions 1 + 2)
+### What's shipped (sessions 1 + 2 + 3)
 
 - Per-tile storage + helpers (`tile_soil_health`, `deplete_tile_soil`, `deplete_planter_area`).
 - `Planter.CROP_DATA` with `growth_ticks` + `soil_cost` per crop.
 - `Planter.tick(b, world)` + `Planter.try_extract(b, world)` plumbed for per-tile access.
 - `Planter.is_active(b)` helper — used by regen blocking.
-- `_tick_soil_regen(delta)` — per-frame regen iteration.
-- Visual rendering: tint pass in `GridWorld._draw`; level-aware Q-inspect; PlanterPanel 3×3 mini-grid.
-- Save schema v14 → v15 → v16 (region scope reversed at v16).
-- Tests: 25/25 with 17 sub-suites (depletion + falloff + multi-planter overlap + boundary exactness + regen + oscillation + save round-trip + level thresholds).
+- `_tick_soil_regen(delta)` — per-frame regen iteration with fertilizer multiplier (Session 3).
+- Visual rendering: tint pass in `GridWorld._draw`; level-aware Q-inspect; PlanterPanel 3×3 mini-grid; fertilizer green-tint overlay (Session 3).
+- Composter building + 3 recipes (wheat/flax → LOW, sugar_beet → MID); 12th ProcessorPanel consumer.
+- `tile_fertilizer_state` dict + `try_apply_fertilizer` + `_tick_fertilizer_decay` (Session 3).
+- NEW `item_apply` hotbar kind + Soil category (3 slots: Composter + 2 hand-apply) + dim-on-empty inventory (Session 3).
+- Q-inspect fertilizer line with multiplier + remaining time (Session 3).
+- Save schema v14 → v15 → v16 → v17 (region scope reversed at v16; fertilizer state added at v17).
+- Tests: 27/27 with 17 sub-suites (depletion + falloff + multi-planter overlap + boundary exactness + regen + oscillation + save round-trip + level thresholds) **plus 5 fertilizer sub-suites** (composter recipe + hand-apply state + stacking + boost regen + save v17).
 
 ### Remaining sessions in the arc
 
-- **Session 3 — Fertilizer chain (per-tile).** Compost building (consumes straw/scraps → compost item), Fertilizer Spreader (consumes compost, accelerates regen on a per-tile area — likely 5×5 or larger to differentiate from planter's 3×3). Connects bread/cloth chains to soil management via cross-chain item flow. Save bump if Spreader needs duration/intensity state.
-- **Session 4 — Wasteland mechanics (per-tile).** Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`.
-- **Optional Session 5 — Crop rotation / legumes (per-tile).** Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Player learns "wheat → flax → legume" rotation as the sustainable per-tile pattern.
+- **Session 3.5 (or merged with Session 4) — Fertilizer Applicator.** 1×1 footprint, 5×5 coverage, belt-fed compost input, auto-applies to most-depleted eligible tile in coverage at rate-limited intervals (1 application per ~5 sec). Most of the design already worked out (see Session 3 PROJECT_LOG entry — pre-cut spec). Validates the manual-before-automation pattern: hand-apply ships first to playtest the mechanic, then automation builds on the validated foundation (mirrors mining-manual → mining-drill).
+- **Session 4 — Wasteland mechanics (per-tile).** Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`. THIS is when bread-as-waste makes thematic sense for HIGH-tier compost (refined goods become wasteland-recovery material).
+- **Optional Session 5 — Crop rotation / legumes (per-tile).** Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Fertilizer chain is orthogonal — legumes are an alternative to fertilization, not a replacement. Player learns "wheat → flax → legume + fertilize the dying patches" as the sustainable per-tile pattern.
 
 All three Sessions 3-5 INHERIT per-tile semantics. Region-based versions of these would have been fundamentally different (per-region fertilizer; per-region wasteland; per-region rotation healing) — none of them transferable. **Catching the reversal at Session 2 was load-bearing for the entire arc.**
 
@@ -109,6 +113,39 @@ The next response MUST be specific behavioral verification BEFORE any design pas
 In all OK cases, the spec already exists or the reference points to in-codebase behavior. The dangerous form is reference-as-spec: when the entire feature definition relies on the listener's interpretation of the reference.
 
 **Failure mode of skipping this protocol:** the listener does the design pass with their own mental model of the reference, the user nods because "exactly like X" sounds right to them too, implementation ships, playtest reveals the divergence. By that point, the cost is sunk. **Cost of unpacking the reference upfront: 5–15 minutes of dialogue. Cost of NOT unpacking: ~2 sessions of dead work in the worst case (reversal #6 evidence).**
+
+---
+
+## Protocol: manual mechanic before automation (within an arc)
+
+**Codified at session-soil-exhaustion-3** after the second instance of the pattern. Earlier instance: `session-mining-manual` (Spacebar-to-mine-while-adjacent) shipped before `session-mining-drill` (Mining Drill building automates extraction). Soil arc applies the same pattern: `session-soil-exhaustion-3` ships hand-apply fertilizer; Fertilizer Applicator deferred to Session 3.5 / 4.
+
+**Pattern:** when a session's scope contains BOTH a foundational mechanic AND its automation, ship the foundational mechanic alone first. Automation lands in the next session. Two sessions instead of one — but each smaller, each individually validatable, and the foundation gets playtested before automation builds on top of it.
+
+**Why this works:**
+
+1. **Playtest reveals foundation issues.** Hand-apply fertilizer in Session 3 might reveal "the boost is too short" or "the stacking rules feel wrong." If we'd built the Applicator on top of those rules in the same session, the rework cost would multiply. With separate sessions, we can adjust the foundation without unwinding the automation layer.
+2. **Scope discipline.** A session that ships "manual + automation" almost always over-runs and gets mid-session-cut anyway. Pre-cutting at design pass is cheaper than mid-session triage. The cut is RECOVERED in the next session, not lost.
+3. **Each session has a clear ship moment.** "Hand-apply fertilizer works" is a coherent, testable, demoable session. "Hand-apply + Applicator" is a longer session whose ship moment is fuzzier ("automation works for the simple case, breaks edge case X").
+4. **The foundational mechanic teaches the player BEFORE the automation hides it.** Player learns "compost tiles to boost regen" by hand-applying. Then Applicator becomes "the thing that does what I was doing manually," not "a new mysterious building."
+
+**Protocol:**
+
+- At design-pass time, scan the proposed scope for "automation of a new manual mechanic." If both are present, propose splitting at design pass.
+- The split is: ship the manual mechanic this session; defer automation to a follow-up.
+- Document in PROJECT_LOG that automation was deferred + WHY (not as scope creep — as deliberate manual-before-automation discipline).
+- The follow-up session is small (~30–80% of the original scope's automation portion) because the foundation is already in place. Don't underestimate it, but don't oversell it either.
+
+**Two instances so far:**
+1. **Mining arc:** `session-mining-manual` (Spacebar-to-mine, ore drains from deposits adjacent to player) → `session-mining-drill` (1×1 building auto-extracts from coverage). Worked perfectly.
+2. **Soil arc:** `session-soil-exhaustion-3` (hand-apply fertilizer via NEW item_apply hotbar kind) → Session 3.5 / 4 (Fertilizer Applicator: 5×5 coverage, belt-fed). Pre-cut spec is in PROJECT_LOG entry for soil-3.
+
+**When NOT to apply this pattern:**
+- The "automation" is a trivial wrapper around the manual (e.g., a hotkey for what would otherwise require multiple clicks). Ship in the same session.
+- The "manual mechanic" is too painful to use without automation (e.g., manual belt-by-belt routing of every item in a factory). Ship together; the manual is just the spec for the automation.
+- Both are tiny (e.g., `manual = 2 clicks per use`, `automation = 1-line config flag`). Ship together; splitting is more ceremony than the work.
+
+**Failure mode:** trying to ship both in one session, hitting scope creep at PAUSE time, then choosing between (a) shipping only the manual and pretending the automation was always Session N+1, or (b) shipping both half-done. Either is worse than the pre-cut.
 
 ---
 

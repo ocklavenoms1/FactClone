@@ -100,7 +100,16 @@ extends RefCounted
 ##              position, not a region coord. Sparse — absent tiles default
 ##              to TILE_SOIL_FULL (100). Hard-fail v15 saves; no migration
 ##              (region values would synthesize artificial uniform tiles).
-const SAVE_VERSION: int = 16
+##   v16 → v17: Fertilizer chain (session-soil-exhaustion-3). New top-level
+##              field `tile_fertilizer_state`: sparse Array of
+##              [x, y, tier_int, remaining_float] where tier_int is an
+##              Items.Type (COMPOST_LOW or COMPOST_MID), and remaining is
+##              the seconds left on the active boost. Absent tile = no
+##              boost (default behavior, regen at 1×). v16 saves don't have
+##              the field — hard-fail with OS.alert per existing policy.
+##              Items enum gained COMPOST_LOW + COMPOST_MID at the end
+##              (append-only — no enum-int reuse risk for v16 ints).
+const SAVE_VERSION: int = 17
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -151,6 +160,15 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	for pos in grid_world.tile_soil_modifications.keys():
 		tile_soil_data.append([pos.x, pos.y, int(grid_world.tile_soil_modifications[pos])])
 
+	# v17: serialize tile_fertilizer_state. Sparse — only tiles with active
+	# boost appear. Shape: Array of [x, y, tier, remaining_sec] where tier
+	# is an Items.Type (COMPOST_LOW or COMPOST_MID) and remaining is the
+	# seconds left until the boost expires. Absent tile = no boost.
+	var tile_fert_data: Array = []
+	for pos in grid_world.tile_fertilizer_state.keys():
+		var s: Dictionary = grid_world.tile_fertilizer_state[pos]
+		tile_fert_data.append([pos.x, pos.y, int(s["tier"]), float(s["remaining"])])
+
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"world_seed": grid_world.world_seed,
@@ -160,6 +178,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"tile_modifications": modifications_data,
 		"resource_state_modifications": resource_mods_data,
 		"tile_soil_modifications": tile_soil_data,
+		"tile_fertilizer_state": tile_fert_data,
 		"explored_regions": explored_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
@@ -287,6 +306,19 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	for entry in data.get("tile_soil_modifications", []):
 		var soil_tile := Vector2i(int(entry[0]), int(entry[1]))
 		grid_world.tile_soil_modifications[soil_tile] = int(entry[2])
+
+	# v17: restore tile_fertilizer_state. Sparse — absent tiles have no
+	# active boost (default behavior, regen at 1×). Default-empty get() so
+	# v16 saves promoted to v17 (after a hard-fail + manual delete + fresh
+	# game) just have an empty dict. Pre-v17 saves hard-fail at version
+	# check above.
+	grid_world.tile_fertilizer_state.clear()
+	for entry in data.get("tile_fertilizer_state", []):
+		var fert_tile := Vector2i(int(entry[0]), int(entry[1]))
+		grid_world.tile_fertilizer_state[fert_tile] = {
+			"tier": int(entry[2]),
+			"remaining": float(entry[3]),
+		}
 
 	# v12: restore explored regions as fog. Active state will be set by
 	# main.gd's vision update after load completes (running update_vision

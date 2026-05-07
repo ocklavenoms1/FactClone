@@ -261,6 +261,19 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 	draw_string(font, Vector2(PADDING, y), soil_text,
 		HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, soil_color)
 
+	# Fertilizer line (session-soil-exhaustion-3) — only when active boost
+	# is on this tile. Shown directly under the soil line so the cause-of-
+	# accelerated-regen is visible. Color matches the SOIL_REGEN_COLOR
+	# (green) to reinforce "this is good news."
+	var fert_tier: int = world.tile_fertilizer_tier(target_anchor)
+	if fert_tier >= 0:
+		var remaining: float = world.tile_fertilizer_remaining(target_anchor)
+		var multiplier: float = GridWorld.fertilizer_multiplier(fert_tier)
+		var fert_text: String = "Fertilizer: %s (%.0fs remaining, %.1fx regen)" % [
+			Items.name_of(fert_tier), remaining, multiplier]
+		draw_string(font, Vector2(PADDING, y + 14), fert_text,
+			HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, SOIL_REGEN_COLOR)
+
 func _resource_lines(t: Tile) -> Array:
 	var lines: Array = []
 	var state: Dictionary = world.resource_state.get(target_anchor, {})

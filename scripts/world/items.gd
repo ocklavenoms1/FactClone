@@ -46,6 +46,12 @@ enum Type {
 	# --- smelting (session-smelter) ---
 	IRON_INGOT,
 	COPPER_INGOT,
+	# --- soil exhaustion arc (session-soil-exhaustion-3): fertilizer chain.
+	# Two tiers this session; HIGH tier deferred to Session 4 (wasteland)
+	# when bread-as-waste recovery makes thematic sense. Enum is append-
+	# only so a future HIGH slot doesn't break v17 saves.
+	COMPOST_LOW,
+	COMPOST_MID,
 }
 
 const DATA: Dictionary = {
@@ -78,6 +84,11 @@ const DATA: Dictionary = {
 	# materials (CLOTH, BREAD, FUEL_BRIQUETTE), not bulk raw (RAW_STONE/CLAY 200).
 	Type.IRON_INGOT:     { "name": "Iron Ingot",     "color": Color(0.55, 0.55, 0.62), "max_stack": 100 },
 	Type.COPPER_INGOT:   { "name": "Copper Ingot",   "color": Color(0.78, 0.55, 0.40), "max_stack": 100 },
+	# --- composted fertilizer (session-soil-exhaustion-3) ---
+	# Brown gradient: LOW = lighter (less concentrated), MID = darker (richer).
+	# Stack 100 matches refined materials (FLOUR, CLOTH, FUEL_BRIQUETTE).
+	Type.COMPOST_LOW:    { "name": "Low Compost",    "color": Color(0.55, 0.40, 0.25), "max_stack": 100 },
+	Type.COMPOST_MID:    { "name": "Rich Compost",   "color": Color(0.38, 0.27, 0.16), "max_stack": 100 },
 }
 
 static func name_of(t: int) -> String:

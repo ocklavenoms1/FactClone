@@ -87,6 +87,43 @@ const TILE_SOIL_FULL: int = 100
 var tile_regen_progress: Dictionary = {}    # Vector2i (tile) -> float (0..1+)
 const SECONDS_PER_SOIL_POINT: float = 30.0
 
+# Per-tile fertilizer state (session-soil-exhaustion-3). Sparse — only
+# tiles with active boost appear. Decays in real time independently of
+# soil state; expired tiles are erased.
+#
+# Shape: Vector2i (tile) -> { "tier": Items.Type (LOW or MID), "remaining": float (sec) }
+#
+# Save format: `tile_fertilizer_state` field at v17. Sparse Array of
+# [x, y, tier_int, remaining_float]. v16 hard-fails (no migration).
+#
+# Storage choice (parallel sparse dict, NOT extending tile_soil_modifications):
+# fertilizer + soil have different lifetimes (fertilizer expires after
+# 30-60 sec; soil mods can persist for the full game). Coupling them
+# in one dict creates entry-erase ordering bugs. Mirrors the Tree
+# regrowth pattern (separate `resource_state_modifications` dict).
+var tile_fertilizer_state: Dictionary = {}
+
+# Fertilizer per-tier configuration is inlined in the two static helpers
+# below. Two tiers this session (LOW/MID); HIGH deferred to Session 4.
+# Tier value IS the Items.Type so stacking comparisons are direct (MID >
+# LOW because COMPOST_MID enum value > COMPOST_LOW enum value — both
+# appended at this session, so order is locked).
+
+## Returns the regen multiplier for a given fertilizer tier (item type).
+## Returns 1.0 for unknown tiers (defensive — old saves with future tiers
+## should regen at normal rate, not crash).
+static func fertilizer_multiplier(tier: int) -> float:
+	if tier == Items.Type.COMPOST_LOW: return 2.0
+	if tier == Items.Type.COMPOST_MID: return 4.0
+	return 1.0
+
+## Returns the active-boost duration (sec) for a given fertilizer tier.
+## Returns 0.0 for unknown tiers (defensive).
+static func fertilizer_duration(tier: int) -> float:
+	if tier == Items.Type.COMPOST_LOW: return 30.0
+	if tier == Items.Type.COMPOST_MID: return 60.0
+	return 0.0
+
 ## Soil level enum (per-tile). Pure function of soil_health value; NOT
 ## related to nearby planter state. Used by visual rendering and Q-inspect
 ## status labels.
@@ -575,6 +612,75 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 				continue
 			deplete_tile_soil(Vector2i(anchor.x + dx, anchor.y + dy), neighbor_cost)
 
+# ---------- fertilizer (per-tile, session-soil-exhaustion-3) ----------
+
+## Apply a fertilizer item to a tile. Caller (main.gd) is responsible for
+## the inventory check + consumption — this function only validates the
+## stacking rule and writes/refreshes the per-tile boost state.
+##
+## Stacking rules (locked design Q5):
+##   - tile has no active boost → set new boost.
+##   - same tier as active     → refresh timer (full duration).
+##   - higher tier than active → upgrade (replace tier + reset timer).
+##   - lower tier than active  → REJECT (don't waste lower-tier on richer
+##                               boost). Caller toasts "already has higher".
+##
+## Returns true if the boost was applied (caller should consume 1 from
+## inventory). Returns false if rejected (caller should toast and NOT
+## consume).
+func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
+	if fertilizer_duration(tier) <= 0.0:
+		return false   # unknown tier — defensive guard
+	var current = tile_fertilizer_state.get(pos)
+	if current == null:
+		tile_fertilizer_state[pos] = {"tier": tier, "remaining": fertilizer_duration(tier)}
+		return true
+	var current_tier: int = int(current["tier"])
+	if tier < current_tier:
+		return false   # lower-tier rejected; caller surfaces toast
+	# Same tier (refresh) or higher tier (upgrade): both write fresh state.
+	tile_fertilizer_state[pos] = {"tier": tier, "remaining": fertilizer_duration(tier)}
+	return true
+
+## Read the active fertilizer tier on a tile. Returns -1 if no active boost.
+func tile_fertilizer_tier(pos: Vector2i) -> int:
+	var s = tile_fertilizer_state.get(pos)
+	return int(s["tier"]) if s != null else -1
+
+## Read remaining seconds on a tile's active boost. Returns 0.0 if none.
+func tile_fertilizer_remaining(pos: Vector2i) -> float:
+	var s = tile_fertilizer_state.get(pos)
+	return float(s["remaining"]) if s != null else 0.0
+
+## Per-frame decay of all active fertilizer states. Called from _process
+## alongside _tick_soil_regen. Decays in real time INDEPENDENT of soil
+## state — fertilizer expires whether or not the tile is currently being
+## regenerated. Matches real-world fertilizer behavior (boost diminishes
+## with time, not with use).
+func _tick_fertilizer_decay(delta: float) -> void:
+	if tile_fertilizer_state.is_empty():
+		return
+	# Snapshot keys() so we can erase mid-iteration.
+	var to_remove: Array[Vector2i] = []
+	for pos in tile_fertilizer_state.keys():
+		var s: Dictionary = tile_fertilizer_state[pos]
+		var new_remaining: float = float(s["remaining"]) - delta
+		if new_remaining <= 0.0:
+			to_remove.append(pos)
+		else:
+			s["remaining"] = new_remaining
+	for pos in to_remove:
+		tile_fertilizer_state.erase(pos)
+
+## Per-tile regen multiplier from any active fertilizer boost. Returns 1.0
+## (no boost) when no fertilizer state is present. Keep cheap — called
+## once per modified tile per frame in _tick_soil_regen.
+func _fertilizer_boost_multiplier(pos: Vector2i) -> float:
+	var s = tile_fertilizer_state.get(pos)
+	if s == null:
+		return 1.0
+	return fertilizer_multiplier(int(s["tier"]))
+
 ## Recompute active-vs-fog for the current player region. Returns the list
 ## of regions whose visibility CHANGED so the map texture can be marked
 ## dirty for those regions only (avoids full rebuild).
@@ -801,6 +907,12 @@ func _draw_harvest_indicator() -> void:
 
 func _process(delta: float) -> void:
 	_tick_regrowth(delta)
+	# Fertilizer decay must run BEFORE soil regen so boost-expired tiles
+	# are no longer in tile_fertilizer_state when _tick_soil_regen reads
+	# the multiplier. Otherwise a tile fires its last boosted regen tick
+	# AFTER its timer hit 0 — small bug, but eliminates a 1-frame edge
+	# case where fertilizer "leaks" past expiry by one frame's regen.
+	_tick_fertilizer_decay(delta)
 	_tick_soil_regen(delta)
 	queue_redraw()
 
@@ -854,8 +966,12 @@ func _tick_soil_regen(delta: float) -> void:
 			tile_regen_progress.erase(pos)
 			continue
 
-		# Accumulate progress.
-		var prog: float = float(tile_regen_progress.get(pos, 0.0)) + delta / SECONDS_PER_SOIL_POINT
+		# Accumulate progress, scaled by any active fertilizer boost
+		# (session-soil-exhaustion-3). Multiplier is 1.0 (no boost),
+		# 2.0 (LOW), or 4.0 (MID) per fertilizer_multiplier(). Cheap
+		# dict lookup per modified tile; no boost = early-return 1.0.
+		var boost: float = _fertilizer_boost_multiplier(pos)
+		var prog: float = float(tile_regen_progress.get(pos, 0.0)) + (delta * boost) / SECONDS_PER_SOIL_POINT
 		var increment: int = int(prog)
 		if increment > 0:
 			var current: int = int(tile_soil_modifications[pos])
@@ -928,6 +1044,11 @@ func _is_tile_actively_farmed(pos: Vector2i) -> bool:
 const SOIL_TINT_DAMAGED: Color = Color(0.95, 0.85, 0.55, 0.40)   # yellow-brown
 const SOIL_TINT_DYING: Color   = Color(0.75, 0.55, 0.35, 0.55)   # brown
 const SOIL_TINT_DEAD: Color    = Color(0.50, 0.32, 0.20, 0.85)   # dark cracked-earth
+# Fertilizer tints (session-soil-exhaustion-3) — overlaid ON TOP of soil
+# tints. A damaged-but-fertilized tile shows red-ish + green-ish blend.
+# Cooler-and-saturated for higher tier so the tier is visible at a glance.
+const FERT_TINT_LOW: Color     = Color(0.40, 0.70, 0.30, 0.20)   # light green, faint
+const FERT_TINT_MID: Color     = Color(0.20, 0.55, 0.20, 0.30)   # saturated green
 
 ## Compute the soil tint for a tile at `pos`. Returns a transparent color
 ## (alpha 0) when no tint should render — the caller skips the draw.
@@ -1136,6 +1257,18 @@ func _draw() -> void:
 		var tint: Color = _soil_tint_for_tile(pos)
 		if tint.a > 0.0:
 			draw_rect(Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE), tint, true)
+
+	# Fertilizer tint pass (session-soil-exhaustion-3). Overlaid on top of
+	# the soil tint so a damaged-but-fertilized tile shows blended red+green.
+	# Iterates the sparse fertilizer dict (typically empty or a few tiles).
+	for pos in tile_fertilizer_state.keys():
+		if pos.x < min_tile.x or pos.x > max_tile.x:
+			continue
+		if pos.y < min_tile.y or pos.y > max_tile.y:
+			continue
+		var ft: int = int(tile_fertilizer_state[pos]["tier"])
+		var ftint: Color = FERT_TINT_LOW if ft == Items.Type.COMPOST_LOW else FERT_TINT_MID
+		draw_rect(Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE), ftint, true)
 
 	# Grid lines — width in world units so the line scales with the tile.
 	# At low zoom this fades the line slightly (sub-pixel anti-aliased),

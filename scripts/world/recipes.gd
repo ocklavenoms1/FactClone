@@ -202,6 +202,47 @@ const DATA: Dictionary = {
 		"output_capacity": 8,
 		"display_name": "Copper Ore (W) → Copper Ingot (E)",
 	},
+	# --- composting (session-soil-exhaustion-3) ---
+	# Multi-recipe building (like Smelter): Composter selects a recipe at
+	# runtime based on what input arrives. No prefer_dir on inputs/outputs
+	# (Composter is 1×1 non-rotatable; Processor falls back to any-side
+	# accept). No fuel; biological process.
+	#
+	# Heaviest soil-cost crop (sugar beet) → richest compost — thematic
+	# closure of the soil cycle: what depleted the soil heals it most.
+	"composter_low_wheat": {
+		"id": "composter_low_wheat",
+		"building_type": Buildings.Type.COMPOSTER,
+		"inputs_solid":  [[Items.Type.WHEAT, 2]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COMPOST_LOW, 1]],
+		"time_ticks": 100,        # 5s @ 20 tps
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "2× Wheat → Low Compost",
+	},
+	"composter_low_flax": {
+		"id": "composter_low_flax",
+		"building_type": Buildings.Type.COMPOSTER,
+		"inputs_solid":  [[Items.Type.FLAX, 2]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COMPOST_LOW, 1]],
+		"time_ticks": 100,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "2× Flax → Low Compost",
+	},
+	"composter_mid_beet": {
+		"id": "composter_mid_beet",
+		"building_type": Buildings.Type.COMPOSTER,
+		"inputs_solid":  [[Items.Type.SUGAR_BEET, 2]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COMPOST_MID, 1]],
+		"time_ticks": 140,        # 7s — premium tier slower
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "2× Sugar Beet → Rich Compost",
+	},
 }
 
 ## Look up a recipe by id. Returns {} (empty dict) if not found.

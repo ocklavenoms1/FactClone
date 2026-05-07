@@ -87,6 +87,9 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 @onready var thresher_panel: Control = $HUD/ThresherPanel
 @onready var planter_panel: Control = $HUD/PlanterPanel
 @onready var harvester_panel: Control = $HUD/HarvesterPanel
+# Soil exhaustion arc (session-soil-exhaustion-3): Composter feeds the
+# fertilizer chain. ProcessorPanel-based — no specialized layout needed.
+@onready var composter_panel: Control = $HUD/ComposterPanel
 @onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
@@ -147,12 +150,16 @@ func _ready() -> void:
 	inventory_grid.toast_callback = _show_toast
 	# Shared cursor — same instance used by every building panel.
 	inventory_grid.cursor = cursor
+	# Hotbar gets a player_inventory ref so item_apply slots dim when the
+	# player has 0 of the item (session-soil-exhaustion-3). Optional —
+	# slots fall back to never-dim if ref is null.
+	hotbar.player_inventory = player_inventory
 	# Building panels share the same cursor + player inventory + toast.
 	# Session 2: chest, mill, oven, proofer, packager, mixer panels join.
 	# Session 3: loom, tailor, briquetter, sugar_press, retter, yeast_culture.
 	# Session 4: thresher, planter, harvester. Multi-session UI arc COMPLETE.
 	var all_panels: Array = [
-		building_panel, smelter_panel, drill_panel,
+		building_panel, smelter_panel, drill_panel, composter_panel,
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
@@ -393,7 +400,16 @@ func _process(delta: float) -> void:
 		if Input.is_action_just_pressed("place_tile"):
 			_try_open_building_ui(hover_tile, player_tile)
 	else:
-		if Input.is_action_pressed("place_tile"):
+		# `item_apply` slots use `just_pressed` (discrete consume per click) —
+		# holding the button would otherwise drain inventory at frame rate.
+		# Terrain / building slots use `pressed` (drag-to-paint / drag-to-
+		# place semantics — placement at the same tile is idempotent).
+		var trigger_pressed: bool
+		if hotbar.current_kind() == "item_apply":
+			trigger_pressed = Input.is_action_just_pressed("place_tile")
+		else:
+			trigger_pressed = Input.is_action_pressed("place_tile")
+		if trigger_pressed:
 			_try_place(hover_tile)
 	if Input.is_action_pressed("remove_tile"):
 		_try_remove(hover_tile)
@@ -576,12 +592,52 @@ func _try_place(pos: Vector2i) -> void:
 				for dx in fp.x:
 					for dy in fp.y:
 						map_panel.mark_tile_dirty(Vector2i(pos.x + dx, pos.y + dy))
+		"item_apply":
+			# Hand-apply consumable item (session-soil-exhaustion-3): consumes
+			# 1 of the item from player inventory + applies its effect to the
+			# tile. Today: fertilizer (COMPOST_LOW / COMPOST_MID). Future
+			# kinds (seeds, wasteland restorers, etc.) extend the dispatch
+			# inside _try_apply_item.
+			_try_apply_item(pos, hotbar.current_value())
 
 func _try_remove(pos: Vector2i) -> void:
 	if not grid_world.clear_tile(pos):
 		_rate_limited_fail_toast(grid_world.last_remove_error)
 	else:
 		map_panel.mark_tile_dirty(pos)
+
+## Hand-apply a hotbar item_apply slot to a tile (session-soil-exhaustion-3).
+## Dispatches by item type — today only fertilizers (COMPOST_LOW/MID) are
+## valid; future item_apply kinds (seeds, wasteland restorers, etc.) add
+## cases here.
+##
+## Behavior contract per item_type:
+##   1. Confirm player_inventory has at least 1 of the item.
+##   2. Apply effect to tile via grid_world helper. Helper returns whether
+##      the application succeeded (lower-tier-onto-higher-tier rejected).
+##   3. On success: consume 1 from inventory + toast.
+##   4. On rejection: toast, do NOT consume.
+##   5. If no inventory: toast (the dim-on-empty hotbar slot is the upstream
+##      hint; this toast is the click-time confirmation).
+func _try_apply_item(pos: Vector2i, item_type: int) -> void:
+	# Inventory check first — dim-on-empty hotbar slot is the upstream
+	# affordance, but we double-check here in case the player clicked a
+	# previously-not-empty slot whose count just dropped to 0 (e.g., after
+	# a previous fertilizer apply this same drag).
+	if player_inventory.total_of(item_type) <= 0:
+		_rate_limited_fail_toast("No %s in inventory." % Items.name_of(item_type))
+		return
+	# Fertilizer dispatch — only kind today.
+	if item_type == Items.Type.COMPOST_LOW or item_type == Items.Type.COMPOST_MID:
+		var applied: bool = grid_world.try_apply_fertilizer(pos, item_type)
+		if not applied:
+			_rate_limited_fail_toast("Tile already has higher-tier compost.")
+			return
+		player_inventory.remove(item_type, 1)
+		_show_toast("Applied %s." % Items.name_of(item_type))
+		return
+	# Unknown item_apply type — defensive.
+	_rate_limited_fail_toast("(No effect for %s yet.)" % Items.name_of(item_type))
 
 ## Rate-limit toasts during drag-place / drag-remove so they don't spam per tick.
 func _rate_limited_fail_toast(msg: String) -> void:
@@ -701,7 +757,7 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 ## is-open checks, close-active dispatch, and shared-cursor wiring.
 func _all_building_panels() -> Array:
 	return [
-		building_panel, smelter_panel, drill_panel,
+		building_panel, smelter_panel, drill_panel, composter_panel,
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
@@ -781,6 +837,8 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			planter_panel.open(b, grid_world)
 		Buildings.Type.HARVESTER:
 			harvester_panel.open(b, grid_world)
+		Buildings.Type.COMPOSTER:
+			composter_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-

@@ -9,6 +9,93 @@ Each entry has three sections:
 
 ---
 
+## Soil exhaustion — Session 3 of multi-session arc (save v16 → v17) — **FERTILIZER CHAIN (HAND-APPLY ONLY)**
+
+**Date:** 2026-05-06
+**Tag:** `session-soil-exhaustion-3`
+
+Third session of the soil arc adds the fertilizer chain: crops → Composter → Compost item → hand-applied to soil → boosts per-tile regen rate for a duration. Closes the soil cycle thematically — heaviest depletion crop (sugar beet) becomes the richest compost, healing what it took.
+
+**Scope reduced after design pass.** Original design (per pre-session brief) included a Fertilizer Applicator building for automation. User cut scope at design-pass time per the "manual mechanic before automation" pattern (mirrors the manual-mining → drill arc): foundation first, automation later. Applicator deferred to Session 3.5 or merged with Session 4 (wasteland).
+
+### What shipped
+
+**2 new items** (`scripts/world/items.gd`):
+- `COMPOST_LOW` — "Low Compost", brown, stack 100. Made from wheat or flax (2 → 1).
+- `COMPOST_MID` — "Rich Compost", darker brown, stack 100. Made from sugar beet (2 → 1). HIGH tier deferred to Session 4 (wasteland) — there's no clean "waste" item in today's chain that maps thematically to high-tier compost.
+
+**1 new building** (`scripts/world/composter.gd` + `scripts/world/buildings.gd` enum + DATA):
+- `Buildings.Type.COMPOSTER` — 1×1 footprint, "small farm operation" feel. Multi-recipe like Smelter (auto-selects based on input). No fuel; biological process. Reuses `Processor.tick` via thin shim that wraps it with `_maybe_select_recipe` (second multi-recipe processor in the codebase; pattern is now established).
+- Visual: wooden compost bin with central heap mound that brightens when running, plank slats for texture, progress arc when running.
+
+**3 new recipes** (`scripts/world/recipes.gd`):
+- `composter_low_wheat`: WHEAT × 2 → COMPOST_LOW × 1, 100 ticks (5s).
+- `composter_low_flax`: FLAX × 2 → COMPOST_LOW × 1, 100 ticks.
+- `composter_mid_beet`: SUGAR_BEET × 2 → COMPOST_MID × 1, 140 ticks (7s — premium tier slower).
+
+**1 new ProcessorPanel consumer** (`scripts/ui/composter_panel.gd`): 5-line `extends ProcessorPanel`, no overrides. **12th ProcessorPanel consumer** (joins Mill, Oven, Proofer, Packager, Loom, Tailor, Briquetter, Sugar Press, Retter, Yeast Culture, Thresher).
+
+**Per-tile fertilizer state** (`scripts/world/grid_world.gd`):
+- New sparse dict `tile_fertilizer_state: Dictionary[Vector2i → {tier: int, remaining: float}]`.
+- Helpers: `try_apply_fertilizer(pos, tier) -> bool` (with stacking rules — see Decisions), `tile_fertilizer_tier(pos)`, `tile_fertilizer_remaining(pos)`, `_fertilizer_boost_multiplier(pos)`.
+- Static helpers `fertilizer_multiplier(tier)` and `fertilizer_duration(tier)` — inline 2-tier table (LOW = 2× / 30s, MID = 4× / 60s).
+- New `_tick_fertilizer_decay(delta)` runs in `_process` BEFORE `_tick_soil_regen` (decay-then-regen ordering — see Decisions).
+- `_tick_soil_regen` modified: regen accumulator now multiplied by `_fertilizer_boost_multiplier(pos)` per tile.
+
+**Hand-apply via NEW hotbar kind** (`scripts/ui/hotbar.gd`):
+- Third hotbar kind: `item_apply` joins `terrain` (paint overlay) and `building` (place building). Documented at the top of `hotbar.gd` with full extension protocol for future kinds (seeds, wasteland restorers, etc.).
+- New "Soil" category between "Refining" and "Storage" with 3 slots: Composter (building) + Apply Low Compost + Apply Rich Compost (item_apply).
+- `Hotbar.player_inventory` ref wired by main.gd at `_ready` so `item_apply` slots **dim when the player has 0 of the item** (Factorio-style "can't use this" affordance — better UX than "click → toast → click → toast" loop). Falls back to never-dim when inventory ref is null (tests / scripted scenes).
+
+**Hand-apply trigger** (`scripts/main.gd`):
+- New `_try_apply_item(pos, item_type)` dispatched from `_try_place(pos)` for `item_apply` slots.
+- Uses `Input.is_action_just_pressed("place_tile")` (not `pressed`) — fertilizer is a discrete consume per click; holding LMB would otherwise drain inventory at frame rate. Terrain (drag-paint) and building (drag-place) keep their `pressed` semantics.
+- On apply success: consumes 1 from player_inventory + toast. On lower-tier-rejected: toast + no consumption. On empty-inventory click: toast (the dim-on-empty hotbar slot is the upstream affordance).
+
+**Visual + Q-inspect feedback**:
+- New `FERT_TINT_LOW` / `FERT_TINT_MID` overlays in `GridWorld._draw` (light green / saturated green, 20% / 30% alpha) — applied AFTER soil tint so a damaged-but-fertilized tile blends red+green.
+- `info_panel.gd` Q-inspect adds a fertilizer line under the soil line when active boost is on the tile: "Fertilizer: Low Compost (Xs remaining, 2.0x regen)" in green text (matching SOIL_REGEN_COLOR — "this is good news").
+
+**Save schema v16 → v17**:
+- New top-level field `tile_fertilizer_state`: sparse Array of `[x, y, tier_int, remaining_float]`.
+- `SAVE_VERSION = 17`. v16 saves hard-fail with OS.alert per existing policy. Migration log entry added.
+
+**Tests: 26 → 27 passing.** New `test_fertilizer_chain.gd` (5 sub-suites): composter recipe selection (multi-recipe), hand-apply state set correctly, stacking rules (refresh / upgrade / reject), boost regen rate (2× LOW + 4× MID + 1× control + decay), save round-trip preserves v17 state.
+
+### Decisions
+
+- **Defer Fertilizer Applicator to Session 3.5 / Session 4 (manual before automation).** Original design included an Applicator building (1×1 footprint, 5×5 coverage, consumes compost from belt input, auto-fertilizes most-depleted eligible tile in coverage). User cut at design-pass time per the manual-before-automation pattern (mirrors `session-mining-manual` → `session-mining-drill`). Validates the mechanic in playtest before committing to automation. NOTES.md captures the pattern as a project protocol.
+- **2-tier compost this session, defer HIGH to Session 4.** Low = wheat/flax base; Mid = sugar beet (heaviest depletion → richest compost — thematic closure). HIGH would need a "waste/excess" input that doesn't exist in today's chain; bread-as-waste only makes sense in Session 4 when wasteland recovery becomes a separate vertical. Enum is append-only so HIGH adds without breaking saves.
+- **Boost is acceleration, NOT refill.** LOW = 2× regen for 30 sec → up to 2 soil points recovered. MID = 4× regen for 60 sec → up to 8 points. Both intentionally short relative to total depletion (a wheat planter at -29 aggregate per harvest). Prevents "infinite fertilizer = infinite farming" exploit; the player still has to give the land time.
+- **Stacking rules**: same tier refreshes timer; higher tier upgrades; LOWER tier on active higher REJECTS (no inventory consumption + toast). Prevents wasted LOW compost on already-MID-fertilized tiles.
+- **Parallel sparse dict for `tile_fertilizer_state`, NOT extending `tile_soil_modifications`.** Different lifetimes (soil mods can persist for the whole game; fertilizer expires in 30–60s). Coupling them creates entry-erase ordering bugs. Mirrors the existing Tree-regrowth pattern (separate `resource_state_modifications` dict).
+- **Decay-before-regen ordering in `_process`.** Fertilizer decay runs FIRST so a tile doesn't fire its last regen tick AFTER the boost expired (1-frame "leak"). In production this is invisible (per-frame deltas are tiny so a tile gets ~1800 boosted ticks before its 1-tick expiry). Also affects testing — the test exposes boost-rate via direct state-set with long `remaining` to isolate from decay (see `test_fertilizer_chain.gd` sub-suite 4a comments).
+- **`item_apply` is a NEW third hotbar kind**, NOT a new menu or right-click-in-inventory mechanic. Matches the existing hotbar paradigm (player selects → click tile to use). Hotbar.gd's file header now documents the 3-kind extension protocol for future kinds (seeds, wasteland restorers, etc.).
+- **Hotbar slot dims when inventory has 0 of the item**, matching Factorio. Cleaner affordance than "click → toast → click → toast." Implementation: `_is_slot_disabled(slot)` checks `player_inventory.total_of(item_type) <= 0`; draw pass applies `SLOT_DIM_ALPHA = 0.35` to swatch + label.
+- **`item_apply` uses `just_pressed`**, not `pressed`. Discrete consume per click. Holding LMB on a fertilizer slot would otherwise drain inventory at frame rate. Terrain/building keep `pressed` semantics (drag-to-paint / drag-to-place are intended).
+- **Composter is multi-recipe like Smelter, NOT single-recipe like Mill.** Recipe auto-selects from input via `_maybe_select_recipe` — pattern duplicated from Smelter (now 2 multi-recipe processors). NOTES.md flags: if a third multi-recipe processor lands, factor out `MultiRecipeProcessor.tick(b, world, input_to_recipe_map)` to avoid the third copy.
+
+### Lessons
+
+- **The "manual before automation" pattern earned its name.** This is the second time it's saved a session from over-scoping. Mining-manual shipped before mining-drill; soil-fertilizer hand-apply ships before applicator. Both times: foundation gets validated in playtest before automation gets built on top of it. Codified in NOTES.md as project protocol.
+- **Reduced scope at the design-pass writeup, not silently in code.** When the user cut the Applicator at design pass, all references to it were stripped from the implementation order before any code was written. Reversal #6 (zoom-to-map) caught a similar over-scope at PAUSE 2 — much later, ~2 sessions of dead work. Catching at the design pass is the cheapest possible time.
+- **Float precision bites tests with many small increments.** First version of the boost-regen test ran 30 iterations of `_tick_soil_regen(1.0)`; the accumulator landed at 0.99999... instead of 1.0, no soil increment fired. Fix: use single-call deltas with the full duration where possible (`_tick_soil_regen(30.0)` lands at exactly 1.0). When per-frame iteration is necessary (e.g., to drive multiple systems simultaneously), use larger-step increments (5.0 sec × 6, not 1.0 sec × 30). Production frames are tiny so this never bites at runtime — but tests amplify the precision sensitivity.
+- **Class registration race bit again on first launch after adding `class_name Composter`.** Tests failed with "Identifier 'Composter' not declared" until `--headless --import` rebuilt the global script class cache. This is now the third time this race has caught a session (zoom-to-map's MapBackdrop, soil-2's PlanterPanel during refactor, and now Composter). Adding `--headless --import` to the post-class_name workflow is the right reflex; documented in PROJECT_LOG history but not yet codified as a hard protocol — could become a pre-test step in future sessions.
+
+### Roadmap implications
+
+- **Session 3.5 (or merged into Session 4)**: Fertilizer Applicator. 1×1 footprint, 5×5 coverage, belt-fed compost input, auto-applies to most-depleted eligible tile in coverage at rate-limited intervals. Most of the design is already worked out (see this session's pre-cut design pass for spec); implementation is straightforward once the manual mechanic is playtested.
+- **Session 4 (wasteland)**: tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. THIS is when bread-as-waste makes thematic sense for HIGH-tier compost (refined goods get composted into wasteland-recovery material). Unclamps `max(0, ...)` in `deplete_tile_soil`.
+- **Session 5 (legumes / crop rotation)**: legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Fertilizer chain is orthogonal — legumes are an alternative to fertilization, not a replacement. Player learns "wheat → flax → legume + fertilize the dying patches" as the sustainable per-tile pattern.
+
+### Known follow-ups
+
+- Stacking rule edge case: at floating-point boundary where `remaining` ≈ 0 but state hasn't been erased yet, `try_apply_fertilizer` would treat the tile as "currently fertilized" and apply stacking rules. In practice this is a 1-frame window (decay erases the state immediately). Not worth a fix unless playtest exposes a visible artifact.
+- Composter visual is currently identical regardless of which recipe is running. Future polish: tint the heap mound based on output tier (lighter brown for LOW, darker for MID).
+- ApplicatorPanel design (5×5 coverage grid) is already worked out for Session 3.5 — see this session's pre-cut design pass spec.
+
+---
+
 ## Zoom-to-map — wheel-trigger of M-key modal — **30 LINES OF CODE, ~2 SESSIONS OF DEAD WORK**
 
 **Date:** 2026-05-06
