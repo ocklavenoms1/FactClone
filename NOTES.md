@@ -6,9 +6,27 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Dev Console — SHIPPED (session-dev-console)
+
+**Status:** SHIPPED. 12 commands, debug-build-only, in-memory history, 29/29 tests passing. Manual smoke deferred to first real-use session per session-end decision.
+
+**Commands:** `help`, `seed`, `tile [radius]`, `give`, `place`, `destroy`, `tp`, `set_soil`, `deplete_area`, `fertilize`, `clear`, `tick_speed`. See PROJECT_LOG entry for full table + design rationale.
+
+**Manual-smoke-at-first-use note:** test coverage was the commit gate. Bugs in the UI layer (panel position, scrollback rendering, history navigation, edge cases in command outputs) will surface organically next time the console is used during a real testing session — log + patch as discovered. **First-use session: anticipated to be Session 4 (wasteland) or save migration framework.**
+
+**File-size finding:** `console.gd` ended up at 657 lines vs the 300–400 design-pass estimate. Two underestimates:
+- **UI layer underestimated** (~80 lines for Godot Control / RichTextLabel / LineEdit setup — anchors, theme overrides, signal wiring, color-bbcode helpers).
+- **Command bodies averaged 22 lines, not 10** (validation discipline non-negotiable: 2–4 arg checks + 2–3 error returns + the operation per command).
+
+If `console.gd` grows beyond ~800 lines (e.g., adding more commands or richer UI), split into `console.gd` (UI + activation) + `console_commands.gd` (parser + command implementations). ~30-min refactor when triggered. Today the single-file shape is more convenient for adding commands; defer the split.
+
+**Strategic value receipt:** Session 4 (wasteland) and save migration framework both unblocked by console. Replaces 5–10 min "build a chain to test" loops with 3-line console state setup. Cost recovered within 2–3 future sessions.
+
+---
+
 ## Schema-mismatch UX — quick fix SHIPPED, migration framework pending
 
-**Status (post-3.5 hotfix):** quick fix landed as a standalone post-Session-3.5 hotfix. Migration framework remains a queued full session, deferred until after Dev Console.
+**Status (post-3.5 hotfix):** quick fix landed as a standalone post-Session-3.5 hotfix. Migration framework remains a queued full session — **now unblocked by Dev Console** (rapid migration testing was the primary defer rationale).
 
 ### Quick fix — SHIPPED (~10 LOC)
 
@@ -22,7 +40,7 @@ When loaded `version < SAVE_VERSION`, run a chain of migration steps (`migrate_v
 
 **Why this is still worth doing post-quick-fix:** the quick fix protects players from being stranded in an empty world, but their save data is still LOST on every schema bump (fresh world = clean slate). Migration framework preserves player progress across schema changes — load-bearing for any non-dev player.
 
-**Defer rationale:** real session work (~80–120 LOC + tests + per-version migration logic). Want Dev Console first so migration steps can be tested rapidly via console commands rather than building full save scenarios manually.
+**Defer rationale (resolved):** wanted Dev Console first so migration steps can be tested rapidly via console commands rather than building full save scenarios manually. Console SHIPPED at `session-dev-console`. Migration framework is now the next natural session after the soil arc closes (Session 4 wasteland is also a candidate — could happen in either order).
 
 ### First-encounter receipt
 

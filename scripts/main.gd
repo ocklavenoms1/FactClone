@@ -95,6 +95,10 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # panel renders the coverage grid + status; extends BuildingPanel.
 @onready var applicator_panel: Control = $HUD/FertilizerApplicatorPanel
 @onready var minimap: Control = $HUD/Minimap
+# Dev Console (session-dev-console). Backtick toggles. Debug-build-only —
+# activation gated in _unhandled_input. Replaces "build a chain to test"
+# with one-line console state setup. See PROJECT_LOG entry for design.
+@onready var dev_console: Control = $HUD/DevConsole
 
 var player_inventory: Inventory
 var toast_timer: float = 0.0
@@ -193,6 +197,15 @@ func _ready() -> void:
 	# Resource depletion → map dirty hookup. When mining changes a tile's
 	# resource state, the map texture for that tile's region needs redraw.
 	grid_world.resource_changed.connect(_on_resource_changed)
+	# Dev Console wiring (session-dev-console). Wire game-state references
+	# AFTER they exist (player_inventory was just constructed). Activation
+	# gating happens in _unhandled_input.
+	dev_console.grid_world = grid_world
+	dev_console.player = player
+	dev_console.player_inventory = player_inventory
+	# Player gates movement on dev_console.is_open() so WASD doesn't move
+	# the player while the LineEdit captures keystrokes as text.
+	player.dev_console = dev_console
 	# Initialize zoom from whatever the camera was authored at, so target
 	# tracking starts in lockstep instead of snapping on first wheel input.
 	target_zoom = camera.zoom.x
@@ -522,6 +535,22 @@ func _process(delta: float) -> void:
 ## below is belt-and-suspenders — keeps the design intent visible if
 ## the InventoryGrid's mouse_filter ever changes.
 func _unhandled_input(event: InputEvent) -> void:
+	# Dev Console toggle (session-dev-console). Debug-build-only: production
+	# exports never see the console at all. Backtick (`/~ key) toggles.
+	# Done BEFORE the inventory-grid early-return so the player can still
+	# open the console while another modal is up (and using the console
+	# actively bypasses normal-flow gating — that's the dev workflow).
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_QUOTELEFT:   # backtick
+			if dev_console != null:
+				dev_console.toggle()
+				get_viewport().set_input_as_handled()
+				return
+	# When the console is open, suppress all other input (place, zoom,
+	# rotate, etc.). Console handles its own Escape via the LineEdit's
+	# focus + KEY_ESCAPE branch in console.gd's _input.
+	if dev_console != null and dev_console.is_open():
+		return
 	if inventory_grid != null and inventory_grid.is_open():
 		return
 	if event is InputEventMouseButton and event.pressed:

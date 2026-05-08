@@ -23,14 +23,25 @@ const TICK_INTERVAL_SEC: float = 1.0 / float(TICKS_PER_SECOND)
 var current_tick: int = 0
 var paused: bool = false
 
+# Tick rate multiplier (session-dev-console). Console `tick_speed N`
+# sets this to N to fast-forward (or slow down) simulation. 1.0 = normal
+# 20 tps, 2.0 = 40 tps, 0.5 = 10 tps. Clamped at the console layer to
+# [0.1, 10.0] — values above 10× start breaking tick-dependent systems
+# (belt timing, animations, etc.). Default 1.0 preserves prior behavior.
+var tick_rate_multiplier: float = 1.0
+
 var _accumulator: float = 0.0
 
 func _process(delta: float) -> void:
 	if paused:
 		return
-	_accumulator += delta
+	# Multiplier applies on the accumulator-feed step rather than the
+	# threshold so paused/un-paused transitions don't lose accumulated
+	# fractional progress. multiplier=2.0 → accumulator fills twice as
+	# fast → twice as many ticks emit per real second.
+	_accumulator += delta * tick_rate_multiplier
 	# Advance as many ticks as the accumulator allows. This keeps simulation
-	# at a consistent 20Hz even if the renderer hitches.
+	# at a consistent 20Hz × multiplier even if the renderer hitches.
 	while _accumulator >= TICK_INTERVAL_SEC:
 		_accumulator -= TICK_INTERVAL_SEC
 		current_tick += 1

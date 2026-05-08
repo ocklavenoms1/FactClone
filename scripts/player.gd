@@ -17,10 +17,15 @@ var building_panels: Array = []
 # Set by main.gd at _ready. Used for tile-based passability checks
 # (water blocks movement; future obstacles via Tile.is_passable()).
 var grid_world: GridWorld = null
+# Dev Console (session-dev-console). When the console is open, gate
+# movement so the LineEdit can capture WASD as text without the player
+# walking off-screen behind the panel. Optional ref — defensive null-check.
+var dev_console: Control = null
 
 func _physics_process(delta: float) -> void:
 	var modal_open: bool = (inventory_grid != null and inventory_grid.is_open()) \
-		or (map_panel != null and map_panel.is_open())
+		or (map_panel != null and map_panel.is_open()) \
+		or (dev_console != null and dev_console.is_open())
 	if not modal_open:
 		for bp in building_panels:
 			if bp != null and bp.is_open():

@@ -9,6 +9,85 @@ Each entry has three sections:
 
 ---
 
+## Dev Console — **TOOLING INVESTMENT, NOT GAMEPLAY**
+
+**Date:** 2026-05-08
+**Tag:** `session-dev-console`
+**Save:** v17 (no schema bump — console is a runtime tool only)
+
+In-game console for development testing. Press backtick (`` ` ``) to toggle. Type commands to manipulate game state directly instead of slow farm-to-test setup. Debug-build-only — gated by `OS.is_debug_build()`. Production exports never see the console.
+
+This is a **tooling session**, not a gameplay session. The payoff is every subsequent session: replacing 5–10 min of "build a planter chain to feed a composter to feed an applicator to test wasteland reclamation" with 3-line console setup (`set_soil 0 0 0; place applicator 0 0; give compost_mid 5`). Cost recovered within 2–3 future sessions.
+
+### What shipped
+
+**12 commands** registered in a single `_commands` Dict for tokenize-and-dispatch:
+
+| Command | Form | Behavior |
+|---|---|---|
+| `help` | `help [<cmd>]` | List 12 commands or show usage for one |
+| `seed` | `seed` | Print current world seed |
+| `tile` | `tile <x> <y> [radius]` | Tile detail (radius 0) or soil grid (radius >0) |
+| `give` | `give <item> <count>` | Add items to player inventory |
+| `place` | `place <building> <x> <y> [dir]` | Place building at tile; auto-sets STONE overlay if needed |
+| `destroy` | `destroy <x> <y>` | Remove building at tile, no drops |
+| `tp` | `tp <x> <y>` | Teleport player to tile |
+| `set_soil` | `set_soil <x> <y> <value>` | Direct write to tile_soil_modifications, clamped 0..100 |
+| `deplete_area` | `deplete_area <x> <y> <radius> [amount]` | Bulk deplete Chebyshev-radius square (default 50) |
+| `fertilize` | `fertilize <x> <y> <tier>` | Direct write to tile_fertilizer_state, tier=low/mid |
+| `clear` | `clear inventory \| clear chest <x> <y>` | Wipe inventory or named chest |
+| `tick_speed` | `tick_speed <multiplier>` | Multiply tick rate, clamped [0.1, 10.0] |
+
+**Files added:**
+- `scripts/ui/console.gd` (657 lines): UI panel + parser + 12 command implementations + arg-parsing helpers + `_format_tile_detail` / `_format_tile_grid`.
+- `scripts/tests/test_console.gd` (182 lines): parser tokenization, item/building/dir name resolution, error message structure, tick_speed clamp, give end-to-end (inventory mutation), tp end-to-end (position mutation).
+
+**Files modified:**
+- `scripts/systems/tick_system.gd`: added `tick_rate_multiplier: float = 1.0`. Console writes to it for fast-forward testing.
+- `scripts/main.gd`: backtick activation in `_unhandled_input` (gated by `OS.is_debug_build()`); console reference + game-state wiring; modal-open input gating.
+- `scripts/player.gd`: movement gates on `dev_console.is_open()` so WASD doesn't move the player while LineEdit captures keystrokes.
+- `scenes/main.tscn`: `DevConsole` node under HUD, ext_resource for the script.
+- `scripts/tests/test_runner.gd`: registered `test_console.gd`.
+
+**Tests: 28 → 29 passing.** New `test_console.gd` covers ~25 sub-checks.
+
+### Decisions
+
+- **One file (console.gd) for UI + parser + commands.** Considered splitting into `console.gd` (UI) + `console_commands.gd` (parser + dispatch). At 657 lines, kept as single file — splitting becomes worth it past ~800 lines (queued in NOTES.md). Right now the dispatcher and command bodies live in the same head, which is convenient for adding commands.
+- **Tokenize-and-dispatch over regex.** All 12 commands have 0–4 whitespace-separated args. Regex would be over-engineering. Each `_cmd_*` method does its own type validation, returns String for output.
+- **Strict debug-build gate (Q2 confirmed).** `OS.is_debug_build()` wraps the activation. Production exports won't have the console at all. Future "creative mode" or modding system would expose state manipulation through a designed UI; until then, dev-only.
+- **Split `give` from `place` (Q3 confirmed).** Buildings aren't items — they're placed directly via hotbar, not held in inventory. Forcing `give <building>` would have required inventing fake "building items." `place <building> <x> <y> [dir]` matches the actual game model.
+- **`clear` requires explicit target (Q3 confirmed).** Unqualified `clear` is footgun. `clear inventory` and `clear chest <x> <y>` are unambiguous.
+- **`tile <x> <y> [radius]` (per design pushback addition).** Default 0 prints single-tile detail. Radius >0 prints `(2r+1)×(2r+1)` grid of soil values with `B` for buildings, `L`/`M` for fertilized tiles, `---` for out-of-bounds. Useful for "diagnose what's happening in this region" workflows in future Session 4 wasteland or Session 5 legumes.
+- **`destroy` (per design pushback addition).** Without it, test sessions accumulate leftover buildings. Standard usage: `place applicator 0 0; destroy 0 0`. No drops — clean test removal.
+- **`tick_speed` clamped to [0.1, 10.0] (per design pushback addition).** Multipliers above 10× start breaking belt timing math, animations, save format invariants. Out-of-range returns: `tick_speed must be between 0.1 and 10.0 (got X). Multipliers above 10x may break tick-dependent systems.`
+- **In-memory history only (Q7 confirmed).** Up/down arrow walks 50-entry history. Not persisted across launches. If console becomes daily driver tooling, persist via `user://console_history.txt`. Defer.
+- **Manual smoke deferred to first real-use session.** Test coverage alone is the commit gate. Bugs in the UI layer surface organically next time the console is used during a real testing session, captured + patched as discovered. Pragmatic given this session's framing as tooling investment.
+
+### Lessons
+
+- **Console.gd at 657 lines vs ~300–400 estimate.** Two underestimates:
+  - **UI layer underestimated.** Godot's Control + RichTextLabel + LineEdit setup is ~80 lines of anchors / theme overrides / signal wiring / color-bbcode helpers. Design pass treated this as "trivial overlay"; it isn't. Lesson: when estimating LOC for a new UI component, account for ~50–100 lines of Godot scaffolding before the actual logic.
+  - **Command bodies averaged 22 lines, not 10.** Each command has 2–4 arg validations, 2–3 error-return branches, plus the actual operation. Validation discipline is non-negotiable (no crashes on typos, no panics on missing world references), so the lines are real. 12 commands × 22 lines = ~264 lines for command bodies alone. Lesson: when estimating "N commands at K lines," K should include validation overhead, not just the success path.
+- **Test-coverage-as-commit-gate is reasonable for tooling.** Manual smoke deferred to first-use is a sensible trade for dev-only tools where bugs surface in low-stakes contexts. The 29/29 test pass demonstrates parser correctness + 2 representative end-to-end commands work. UI-layer bugs (panel position, scrollback rendering, history navigation) are visual-only and trivially observable — capturing-on-encounter is cheaper than testing exhaustively up front.
+- **The `class_name DevConsole` race did NOT bite this session.** Importing the new class via the existing post-class-name workflow (`--headless --import` after creating the file) prevented the parse-error cascade we hit in Sessions 3 and 3.5. Pattern is now muscle memory.
+- **Mid-implementation rename caught a virtual-method collision.** Originally named the LineEdit `_input` (matches the field's role); collided with Godot's `Control._input(event)` virtual method. Caught immediately on file review (before run), renamed to `_input_field`, re-grepped to verify the virtual method method name was preserved. Lesson: when naming private fields, watch for collision with framework virtual methods (`_input`, `_process`, `_ready`, `_draw`, `_unhandled_input`).
+
+### Roadmap implications
+
+- **Session 4 (wasteland) becomes much faster.** Setup that previously needed "deplete a 5×5 area to soil 0 and observe wasteland transition" can now be `set_soil 50 50 -1; tile 50 50` (assuming wasteland mechanic permits negative soil). Testing edge cases ("does the planter on soil 0 transition correctly when fertilized?") becomes a 4-line console session.
+- **Save migration framework session unblocked.** Was deferred until "after dev console" specifically because rapid migration testing was a primary use case. Now achievable: `set_soil 50 50 30; save; edit version; load; assert state migrated correctly` becomes a quick console + manual JSON edit + relaunch loop instead of "build a full factory, save, edit, reload, manually verify."
+- **TickSystem rate multiplier is reusable.** Future "speed up" UI (a slider in dev settings, or a "fast-forward" gameplay mode) can write to `TickSystem.tick_rate_multiplier` directly. The clamp lives in console.gd; if a UI surface wants different bounds, it sets directly without going through the console.
+
+### Known follow-ups
+
+- **Manual smoke at first real-use** (per session-end decision). When a future session needs the console, exercise the 12 commands + UI behaviors. Log any bugs as discovered and patch as needed. Captured in NOTES.md.
+- **Persistent command history** (Q7 deferred). Implement via `user://console_history.txt` if console becomes daily-driver tooling.
+- **Console split if file grows past ~800 lines.** Cut: `console.gd` keeps UI + LineEdit + activation; `console_commands.gd` (new) gets the parser + 12 command implementations. ~30-min refactor when triggered.
+- **Save migration framework** (still queued from post-3.5). Now unblocked by this session.
+
+---
+
 ## Soil exhaustion — Session 3.5 — **FERTILIZER APPLICATOR (AUTOMATION TIER)**
 
 **Date:** 2026-05-07
