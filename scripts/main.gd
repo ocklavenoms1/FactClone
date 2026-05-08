@@ -203,23 +203,19 @@ func _ready() -> void:
 			_apply_loaded_progression(result.player_progression)
 			_show_toast("World loaded from save (seed %d)" % grid_world.world_seed)
 		else:
-			_show_toast(result.error_message if result.error_message != "" else "Save file present but failed to load")
+			# Hotfix (post-3.5, NOTES.md "Schema-mismatch UX gap"): when load
+			# fails (schema mismatch, corrupt JSON, missing fields, etc.),
+			# fall through to fresh-world generation. Previous behavior left
+			# the world in default empty state — player thought "world has
+			# no resources" rather than "save load failed." Error from
+			# load_game is already surfaced via OS.alert + push_error in
+			# save_system.gd; we add a toast and proceed.
+			push_warning("Save load failed (%s) — generating fresh world." % result.error_message)
+			var fail_msg: String = "Save incompatible — fresh world (seed %d)" % _generate_fresh_world()
+			_show_toast(fail_msg)
 	else:
-		# Fresh game: random seed, then procedurally generate the world via WorldGenerator.
-		# Save persists the seed; loads regenerate the world from it (procgen rehydration).
-		grid_world.world_seed = randi()
-		var gen_start_msec: int = Time.get_ticks_msec()
-		var generator: WorldGenerator = WorldGenerator.new()
-		generator.generate(grid_world, grid_world.world_seed)
-		var gen_elapsed: int = Time.get_ticks_msec() - gen_start_msec
-		# Initial reveal: mark the spawn-vicinity 7×7 region area as fog so the
-		# map shows context on first M-press, not all-black.
-		grid_world.initial_reveal()
-		# Spawn position: seeded-random from passable tiles near origin so
-		# the player isn't dropped into water/lakes. Same seed → same spawn;
-		# different seeds → different spawn (gives fresh-start variety).
-		player.global_position = _safe_spawn_position()
-		_show_toast("New world (seed %d, gen %dms) · 1-9 build · Tab · R rotate · F5 save · B bag · M map" % [grid_world.world_seed, gen_elapsed])
+		var seed_msg: int = _generate_fresh_world()
+		_show_toast("New world (seed %d) · 1-9 build · Tab · R rotate · F5 save · B bag · M map" % seed_msg)
 
 	# Run an initial vision update from the player's spawn position — upgrades
 	# the 5×5 around player from fog (or unrevealed) to active. Same call site
@@ -260,6 +256,27 @@ func _on_resource_changed(pos: Vector2i) -> void:
 const SPAWN_SEARCH_RADIUS: int = 30
 const SPAWN_PICK_TOP_N: int = 20
 const SPAWN_SEED_OFFSET: int = 999
+
+## Fresh-world generation. Called from `_ready` for both the no-save path
+## AND the save-load-failed-fallthrough path (hotfix post-3.5: schema-
+## mismatch UX gap). Returns the generated seed so callers can include
+## it in their toast.
+##
+## Side effects: assigns grid_world.world_seed, runs WorldGenerator.generate,
+## sets initial reveal radius, places player at a safe spawn. Idempotent
+## relative to a default-state grid_world (loaded but empty after a failed
+## load is fine — generate() rebuilds tiles from the seed).
+func _generate_fresh_world() -> int:
+	grid_world.world_seed = randi()
+	var generator: WorldGenerator = WorldGenerator.new()
+	generator.generate(grid_world, grid_world.world_seed)
+	# Initial reveal: mark the spawn-vicinity 7×7 region area as fog so the
+	# map shows context on first M-press, not all-black.
+	grid_world.initial_reveal()
+	# Spawn position: seeded-random from passable tiles near origin so the
+	# player isn't dropped into water/lakes.
+	player.global_position = _safe_spawn_position()
+	return grid_world.world_seed
 
 func _safe_spawn_position() -> Vector2:
 	var candidates: Array[Vector2i] = []

@@ -6,22 +6,27 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Schema-mismatch UX gap (queued follow-ups)
+## Schema-mismatch UX — quick fix SHIPPED, migration framework pending
 
-**Status:** UNFIXED. Hits every dev test session after a schema bump.
+**Status (post-3.5 hotfix):** quick fix landed as a standalone post-Session-3.5 hotfix. Migration framework remains a queued full session, deferred until after Dev Console.
 
-**Symptom:** when `SaveSystem.load_game` fails on a schema-version mismatch (existing v(N-1) save file vs current v(N) code), `main.gd:_ready` does NOT fall through to fresh-world generation. World stays in its default empty state — no buildings, no resource nodes, no terrain features beyond the GridWorld defaults. Player sees "empty world" rather than "fresh world" or a clear actionable error in-game.
+### Quick fix — SHIPPED (~10 LOC)
 
-The `OS.alert + push_error` from `save_system.gd` does fire, but in practice it's dismissable / easy to miss; the player ends up in the empty world thinking the world has no resources rather than realizing the save load failed.
+When `SaveSystem.load_game` returns `result.success == false` (schema mismatch, corrupt JSON, missing fields, anything), `main.gd:_ready` now falls through to a `_generate_fresh_world()` helper instead of leaving the world in default empty state. Toast surfaces "Save incompatible — fresh world (seed N)" so the player knows what happened. The `OS.alert + push_error` from `save_system.gd` still fires first (informative), then the fallthrough generates a usable world.
 
-**First confirmed encounter:** session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from before Session 3's bump to v17, relaunched after Session 3 work, saw an empty world during Applicator smoke testing. Burned ~10 min on diagnosis (was there a bug from Session 3.5 changes?) before checking the launch's stderr. Session 3.5 changes were innocent; the gap is the post-fail fallthrough.
+Verified by writing a deliberately-invalid `version: 99` save and launching: `push_error` + `OS.alert` fire as before, then `push_warning("Save load failed... — generating fresh world.")` fires, and the player sees a populated world rather than an empty one.
 
-**Two follow-ups queued:**
+### Migration framework — PENDING (full session, deferred)
 
-1. **Quick fix (~5 lines in `main.gd`).** When `SaveSystem.load_game` returns `result.success == false`, fall through to the `else` branch logic (random seed, `WorldGenerator.generate`, `initial_reveal`, `_safe_spawn_position`). Show a toast like "Save incompatible — generating fresh world (seed N)" so the player knows what happened. Hotfix slot: immediately after Session 3.5 commits.
-2. **Proper fix (full session, deferred).** Save migration framework. When loaded `version < SAVE_VERSION`, run a chain of migration steps (`migrate_v15_to_v16`, `migrate_v16_to_v17`, etc.) that mutate the parsed Dictionary in place before applying it to the world. Each migration step is its own static function with documented field changes. Replaces hard-fail with graceful upgrade. Real session work — defer until after dev console (so we have machinery for fast-iteration testing of migrations).
+When loaded `version < SAVE_VERSION`, run a chain of migration steps (`migrate_v15_to_v16`, `migrate_v16_to_v17`, …) that mutate the parsed Dictionary in place before applying it to the world. Each migration step is its own static function with documented field changes. Replaces hard-fail with graceful upgrade.
 
-**Why this matters strategically:** every session that bumps `SAVE_VERSION` will burn ~5–15 min of testing time on this UX gap until the quick fix lands. Migration framework removes the hard-fail entirely (saves preserve player progress across schema changes) — load-bearing for any non-dev player.
+**Why this is still worth doing post-quick-fix:** the quick fix protects players from being stranded in an empty world, but their save data is still LOST on every schema bump (fresh world = clean slate). Migration framework preserves player progress across schema changes — load-bearing for any non-dev player.
+
+**Defer rationale:** real session work (~80–120 LOC + tests + per-version migration logic). Want Dev Console first so migration steps can be tested rapidly via console commands rather than building full save scenarios manually.
+
+### First-encounter receipt
+
+session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from before Session 3's bump to v17, relaunched after Session 3 work, saw an empty world during Applicator smoke testing. Burned ~10 min on diagnosis (was there a bug from Session 3.5 changes?) before checking the launch's stderr. Session 3.5 changes were innocent; the gap was the post-fail fallthrough. Quick fix shipped immediately after 3.5.
 
 ---
 
