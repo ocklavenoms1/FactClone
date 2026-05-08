@@ -138,14 +138,18 @@ func _build_categories() -> void:
 		"selected": 0,
 	})
 
-	# Soil exhaustion arc (session-soil-exhaustion-3): Composter (production)
-	# + hand-apply compost slots (NEW item_apply kind — see file header).
-	# Fertilizer Applicator deferred to Session 3.5 / Session 4 per "manual
-	# mechanic before automation" pattern (mirrors manual-mining → drill arc).
+	# Soil exhaustion arc:
+	#   Session 3 — Composter (building) + hand-apply compost slots (NEW
+	#               item_apply kind — see file header).
+	#   Session 3.5 — Fertilizer Applicator (building) added per the
+	#                 manual-before-automation pattern (mirrors mining-
+	#                 manual → mining-drill arc).
+	# Slot order: buildings grouped first, then consumable hand-apply items.
 	categories.append({
 		"name": "Soil",
 		"slots": [
 			{ "kind": "building",   "value": Buildings.Type.COMPOSTER },
+			{ "kind": "building",   "value": Buildings.Type.FERTILIZER_APPLICATOR },
 			{ "kind": "item_apply", "value": Items.Type.COMPOST_LOW, "label": "Apply Low Compost" },
 			{ "kind": "item_apply", "value": Items.Type.COMPOST_MID, "label": "Apply Rich Compost" },
 		],

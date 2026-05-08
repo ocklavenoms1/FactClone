@@ -39,6 +39,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_soil_exhaustion.gd"),
 	preload("res://scripts/tests/test_zoom_trigger_map.gd"),
 	preload("res://scripts/tests/test_fertilizer_chain.gd"),
+	preload("res://scripts/tests/test_fertilizer_applicator.gd"),
 ]
 
 func _ready() -> void:

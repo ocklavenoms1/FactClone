@@ -43,8 +43,13 @@ const RUNNING_TINT: Color = Color(1.0, 0.85, 0.45)       # warm glow when active
 ## _maybe_select_recipe based on what the player is feeding in.
 ## Mirrors Smelter's "" default. Old saves predating Composter don't exist
 ## (this is the first session it ships in), so no backfill needed.
-static func make(pos: Vector2i) -> Building:
-	return Building.new(Buildings.Type.COMPOSTER, pos, Processor.make_state(""))
+##
+## `dir` is the building's orientation (Belt.DIR_E etc). Stored in state
+## so output prefer_dir rotates with the building. Default 0 (canonical
+## east) — also matches old session-soil-exhaustion-3 saves where dir
+## wasn't a field; Buildings.world_dir falls back to 0 for absent fields.
+static func make(pos: Vector2i, dir: int = 0) -> Building:
+	return Building.new(Buildings.Type.COMPOSTER, pos, Processor.make_state("", dir))
 
 static func tick(b: Building, world) -> void:
 	# Pre-step: when IDLE (no recipe in flight), auto-select based on what's

@@ -54,6 +54,15 @@ enum Type {
 	# COMPOST_LOW, sugar_beet → COMPOST_MID. No fuel; biological process.
 	# Reuses Processor.tick + ProcessorPanel like Mill (29-line shim).
 	COMPOSTER,
+	# Soil exhaustion arc (session-soil-exhaustion-3-5): automation tier
+	# for fertilizer chain. 1×1 footprint, 5×5 coverage area, consumes
+	# COMPOST_LOW/MID from belt input or drag-drop, applies to most-
+	# depleted eligible tile in coverage at rate-limited interval (1 per
+	# 5 sec). Custom tick (NOT Processor.tick — no recipe). Mirrors the
+	# manual-before-automation pattern: hand-apply (Session 3) shipped
+	# first to validate the mechanic; this session adds automation on
+	# the same `tile_fertilizer_state` foundation.
+	FERTILIZER_APPLICATOR,
 }
 
 const DATA: Dictionary = {
@@ -459,7 +468,13 @@ const DATA: Dictionary = {
 		"swatch_color": Color(0.40, 0.30, 0.18),    # warm dirt-brown
 		"footprint": Vector2i(1, 1),                 # "small farm operation" — fits anywhere
 		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
-		"supports_direction": false,
+		# Rotatable so output prefer_dir (canonical E) rotates with R, and so
+		# the composter never pushes outputs backward onto its input belt
+		# when downstream jams — outputs go ONLY to the rotated east edge,
+		# and stay buffered if that edge is full. Input is multi-side (no
+		# prefer_dir on recipe inputs), so wheat/flax/sugar_beet can arrive
+		# from any belt — only the OUTPUT direction is constrained.
+		"supports_direction": true,
 		"player_drainable": false,
 		# Building Interaction UI (session-soil-exhaustion-3):
 		# Multi-recipe processor like Smelter — input accepts wheat / flax /
@@ -477,6 +492,27 @@ const DATA: Dictionary = {
 				"id": "output", "kind": "output",
 				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID],
 				"max_stack": 8, "state_field": "out_buffer",
+			},
+		],
+	},
+	Type.FERTILIZER_APPLICATOR: {
+		"name": "Fertilizer Applicator",
+		"swatch_color": Color(0.55, 0.70, 0.55),    # sage / sprinkler-green
+		"footprint": Vector2i(1, 1),                 # 1×1 — small but reaches far (5×5)
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,                  # input port rotates with R
+		"player_drainable": false,
+		# Building Interaction UI (session-soil-exhaustion-3-5):
+		# Single input slot accepting both compost tiers. NO output slot —
+		# applicator is pure consumer (writes to tile_fertilizer_state via
+		# GridWorld.try_apply_fertilizer, not to belt). Specialized panel
+		# renders 5×5 coverage grid + status; standard slot kind for input
+		# pull. max_stack 16 ≈ 80 sec of operation buffered (1 per 5 sec).
+		"slot_layout": [
+			{
+				"id": "input", "kind": "input",
+				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID],
+				"max_stack": 16, "state_field": "in_buffer",
 			},
 		],
 	},
@@ -647,7 +683,9 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 		Type.SMELTER:
 			return Smelter.make(pos, dir)
 		Type.COMPOSTER:
-			return Composter.make(pos)
+			return Composter.make(pos, dir)
+		Type.FERTILIZER_APPLICATOR:
+			return FertilizerApplicator.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -674,6 +712,10 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Multi-recipe like Smelter — needs auto-select wrapper before
 			# Processor.tick. (Composter has no fuel, so no Burner glue.)
 			Composter.tick(b, world)
+		Type.FERTILIZER_APPLICATOR:
+			# Custom tick (no recipe — applies fertilizer directly to
+			# tile_fertilizer_state via GridWorld.try_apply_fertilizer).
+			FertilizerApplicator.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -725,6 +767,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Smelter.draw(b, canvas, world_pos, tile_size)
 		Type.COMPOSTER:
 			Composter.draw(b, canvas, world_pos, tile_size)
+		Type.FERTILIZER_APPLICATOR:
+			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -921,6 +965,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 		Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
 		Type.RETTER, Type.LOOM, Type.TAILOR, Type.COMPOSTER:
 			return Processor.info_lines(b, world)
+		Type.FERTILIZER_APPLICATOR:
+			return FertilizerApplicator.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)
 		Type.SMELTER:

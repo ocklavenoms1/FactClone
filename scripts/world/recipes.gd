@@ -210,38 +210,44 @@ const DATA: Dictionary = {
 	#
 	# Heaviest soil-cost crop (sugar beet) → richest compost — thematic
 	# closure of the soil cycle: what depleted the soil heals it most.
+	# Composter outputs declare prefer_dir = canonical E so the rotated
+	# east edge is the only push target. Without prefer_dir, a jammed
+	# downstream belt would cause Processor._try_push_outputs to fall
+	# through to other directions — including pushing compost BACKWARD
+	# onto the input belt, mixing wheat with compost. Recipe inputs stay
+	# direction-free so feeders can arrive from any side.
 	"composter_low_wheat": {
 		"id": "composter_low_wheat",
 		"building_type": Buildings.Type.COMPOSTER,
 		"inputs_solid":  [[Items.Type.WHEAT, 2]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.COMPOST_LOW, 1]],
+		"outputs_solid": [[Items.Type.COMPOST_LOW, 1, Belt.DIR_E]],
 		"time_ticks": 100,        # 5s @ 20 tps
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "2× Wheat → Low Compost",
+		"display_name": "2× Wheat → Low Compost (E)",
 	},
 	"composter_low_flax": {
 		"id": "composter_low_flax",
 		"building_type": Buildings.Type.COMPOSTER,
 		"inputs_solid":  [[Items.Type.FLAX, 2]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.COMPOST_LOW, 1]],
+		"outputs_solid": [[Items.Type.COMPOST_LOW, 1, Belt.DIR_E]],
 		"time_ticks": 100,
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "2× Flax → Low Compost",
+		"display_name": "2× Flax → Low Compost (E)",
 	},
 	"composter_mid_beet": {
 		"id": "composter_mid_beet",
 		"building_type": Buildings.Type.COMPOSTER,
 		"inputs_solid":  [[Items.Type.SUGAR_BEET, 2]],
 		"inputs_fluid":  [],
-		"outputs_solid": [[Items.Type.COMPOST_MID, 1]],
+		"outputs_solid": [[Items.Type.COMPOST_MID, 1, Belt.DIR_E]],
 		"time_ticks": 140,        # 7s — premium tier slower
 		"input_capacity":  8,
 		"output_capacity": 8,
-		"display_name": "2× Sugar Beet → Rich Compost",
+		"display_name": "2× Sugar Beet → Rich Compost (E)",
 	},
 }
 

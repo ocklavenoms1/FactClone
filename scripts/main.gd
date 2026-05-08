@@ -90,6 +90,10 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # Soil exhaustion arc (session-soil-exhaustion-3): Composter feeds the
 # fertilizer chain. ProcessorPanel-based — no specialized layout needed.
 @onready var composter_panel: Control = $HUD/ComposterPanel
+# Soil exhaustion arc (session-soil-exhaustion-3-5): Fertilizer Applicator
+# auto-applies compost to depleted tiles in 5×5 coverage. Specialized
+# panel renders the coverage grid + status; extends BuildingPanel.
+@onready var applicator_panel: Control = $HUD/FertilizerApplicatorPanel
 @onready var minimap: Control = $HUD/Minimap
 
 var player_inventory: Inventory
@@ -159,7 +163,7 @@ func _ready() -> void:
 	# Session 3: loom, tailor, briquetter, sugar_press, retter, yeast_culture.
 	# Session 4: thresher, planter, harvester. Multi-session UI arc COMPLETE.
 	var all_panels: Array = [
-		building_panel, smelter_panel, drill_panel, composter_panel,
+		building_panel, smelter_panel, drill_panel, composter_panel, applicator_panel,
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
@@ -757,7 +761,7 @@ func _try_inspect(hover_tile: Vector2i) -> void:
 ## is-open checks, close-active dispatch, and shared-cursor wiring.
 func _all_building_panels() -> Array:
 	return [
-		building_panel, smelter_panel, drill_panel, composter_panel,
+		building_panel, smelter_panel, drill_panel, composter_panel, applicator_panel,
 		chest_panel, mill_panel, oven_panel, proofer_panel, packager_panel, mixer_panel,
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
@@ -839,6 +843,8 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			harvester_panel.open(b, grid_world)
 		Buildings.Type.COMPOSTER:
 			composter_panel.open(b, grid_world)
+		Buildings.Type.FERTILIZER_APPLICATOR:
+			applicator_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-

@@ -9,6 +9,79 @@ Each entry has three sections:
 
 ---
 
+## Soil exhaustion — Session 3.5 — **FERTILIZER APPLICATOR (AUTOMATION TIER)**
+
+**Date:** 2026-05-07
+**Tag:** `session-soil-exhaustion-3-5`
+**Save:** v17 (no schema bump — applicator state is standard JSON-clean fields)
+
+Automation tier of the fertilizer chain. Hand-apply (Session 3) shipped first to validate the mechanic; this session adds the Fertilizer Applicator on the validated foundation. Third instance of the manual-before-automation pattern (mining-manual → mining-drill, soil-3 → soil-3.5).
+
+**Plus:** mid-PAUSE-6 fix to a latent Composter design bug (output without `prefer_dir` → backward contamination of input belts when downstream jams). Caught by the user during PAUSE-6 smoke when compost started flowing onto the wheat-supply belt. Fixed by giving composter recipes `Belt.DIR_E` prefer_dir and making the building rotatable.
+
+### What shipped
+
+**1 new building** (`scripts/world/fertilizer_applicator.gd` ~250 lines):
+- `Buildings.Type.FERTILIZER_APPLICATOR` — 1×1 footprint, 5×5 coverage. NOT a Processor (no recipe; writes directly to `tile_fertilizer_state` via `GridWorld.try_apply_fertilizer`). Custom tick mirrors MiningDrill's structure.
+- Single input slot accepts COMPOST_LOW + COMPOST_MID. No output slot — pure consumer.
+- Pulls from canonical W input port (rotates with R). 1-pull-per-tick rate-limit, 16-stack input buffer (~80 sec of operation).
+- Three-state machine: IDLE (no input) / SCANNING (counting toward apply) / BLOCKED (no eligible tiles in coverage).
+- **BLOCKED polling** (per design pushback at design-pass): when BLOCKED, scan_progress holds at threshold (100); applicator re-checks eligibility every tick and fires immediately when a tile becomes eligible. Avoids the "Next apply" UI countdown jumping backwards.
+- Visual: sage-green sprinkler body, central nozzle with 4 spray lines radiating cardinally; state tints (gray IDLE, yellow BLOCKED).
+
+**1 new specialized panel** (`scripts/ui/fertilizer_applicator_panel.gd` ~200 lines):
+- Extends BuildingPanel directly (NOT ProcessorPanel — no recipe, custom layout).
+- 5×5 coverage mini-grid (46×46px cells, 2px gaps). Cell colors: dim sage (pristine) / mustard (eligible) / light-green (LOW fertilized) / dark-green (MID fertilized) / near-black (impassable). Anchor cell gets bright yellow border.
+- Header: "Coverage: 5×5 (25 tiles)" + "Eligible: N (for X tier)" + "Next apply: in X.Xs" (only when SCANNING — BLOCKED suppresses the countdown to avoid panel-overflow UI weirdness).
+- Single input slot centered below the grid.
+- Status line + facing indicator at the bottom.
+
+**Tier preference + most-depleted-first targeting:**
+- `_select_fertilizer_from_buffer(b)` — two-pass: prefer COMPOST_MID, fall back to COMPOST_LOW. Static + pure, tested directly.
+- `_pick_most_depleted_eligible_tile(b, world, tier)` — sorts by soil_health ascending, tiebreak topmost-leftmost (Vector2i compare on y then x). Filters out-of-bounds tiles (world-edge applicator placement is safe). Static + pure.
+
+**Hotbar:** 4th slot in the Soil category, between Composter and the hand-apply slots: buildings grouped first, then consumable item-apply slots.
+
+**Composter prefer_dir fix** (mid-PAUSE-6, separate from the applicator work):
+- All 3 composter recipes (`composter_low_wheat`, `composter_low_flax`, `composter_mid_beet`) gained `Belt.DIR_E` prefer_dir on outputs. Without this, `Processor._try_push_outputs` falls through to other directions when the east belt jams — pushing compost BACKWARD onto the input belt, contaminating the wheat supply.
+- `Buildings.DATA[COMPOSTER].supports_direction = true` and `Composter.make(pos, dir)` accepts a rotation. Outputs go to the rotated east edge (player can press R for different layouts). Recipe inputs stay direction-free so feeders can arrive from any side.
+- Old (Session 3) composter saves still load — buildings without a `dir` field default to 0 (canonical east), preserving Session 3 placement intent.
+
+**Tests: 27 → 28 passing.** New `test_fertilizer_applicator.gd` (4 sub-suites): apply rate (5 applies in 30 sec) + BLOCKED steady-state, tier preference (MID before LOW + fallthrough), most-depleted-first targeting (with topmost-leftmost tiebreak), world-edge placement (out-of-bounds tiles excluded from scan, no crash). Existing fertilizer-chain tests pass unchanged with the prefer_dir fix.
+
+### Decisions
+
+- **Custom tick (not Processor.tick).** Applicator has no recipe — it consumes input and writes per-tile state. Recipe-driven `Processor.tick` doesn't fit (no time_ticks, no out_buffer, no recipe lookup). Mirroring MiningDrill's pattern (custom `tick` with bespoke pull/apply logic) is the right shape.
+- **BLOCKED polls every tick at threshold, doesn't roll back scan_progress.** Original design pulled scan_progress back to (APPLY_INTERVAL - 20) on entering BLOCKED, which would have made the UI "Next apply" countdown jump backward from 5.0s to 1.0s. User pushback at design pass: keep scan_progress at threshold, re-check eligibility per tick (O(25), trivial), fire immediately when conditions change (e.g., player just hand-applied to a different tile, freeing one for upgrade). Cleaner state machine + faster response.
+- **Tier preference: MID first, then LOW.** Prevents wasted MID compost on tiles that LOW could handle. Same stacking rules as hand-apply — applicator's targeting filter (`current_tier < selected_tier`) means it only targets tiles where the available tier would actually upgrade or freshly apply.
+- **Most-depleted-first with topmost-leftmost tiebreak.** Deterministic ordering matches MiningDrill's pattern. Player can't predict applicator behavior to "game" it, but tiebreak determinism means save/load preserves which tile gets fertilized next.
+- **No save schema bump.** All applicator state (in_buffer, scan_progress, dir, state) is standard `Building.state` fields — already JSON-clean and serialized via existing v17 schema.
+- **Composter rotatable to fix backward-push bug.** Could have just added `prefer_dir = Belt.DIR_E` and kept `supports_direction: false` — but rotatable is strictly more flexible (player can build north-pointing or south-pointing composters), and the cost is minimal (one new state field, default 0 backwards-compat). Mirrors Thresher pattern exactly.
+- **Combined PAUSE 5 + PAUSE 6 in implementation order.** Originally split: PAUSE 5 (mechanics + UI) → tests → PAUSE 6 (full chain). Compressed to single PAUSE per pause point because the panel layout was new enough to warrant visual verification before tests, and the full chain just needed connecting working pieces.
+- **Composter input belt contamination caught at PAUSE 6 by user, not by tests.** Fixed mid-session per "fix root-cause issues that surface during smoke" protocol — not deferred. Latent across all 12 ProcessorPanel consumers but only Composter's specific topology (input + output on the same straight-line belt run) made it visible. Other Processors (Mill, Mixer, Thresher etc.) either have prefer_dir on outputs already or have multi-side input access that masks the issue.
+
+### Lessons
+
+- **Custom tick saved real complexity.** Using `Processor.tick` would have required a fake recipe with time_ticks, out_buffer that gets emptied somehow, etc. The applicator has fundamentally different shape (no recipe, no output flow) and forcing it into Processor would have produced if-flag branches inside the shared tick. Mirroring Drill's standalone-tick pattern was the right call. Pattern: when a building's flow shape (in/out/timing) doesn't match Processor's, write a custom tick — don't bend Processor.
+- **The "panel is too wide" UI bug appeared at PAUSE 5, fixed in 5 lines.** Original panel layout drew `BLOCKED — no eligible tiles in coverage` in the header at `hx + 240` with no width clip; the text overflowed past the panel right edge. Real fix: don't show countdown text in the header during BLOCKED — the bottom Status line already says it. Lesson: when the same state info appears in two UI surfaces, prefer the dedicated one and suppress duplicates rather than fighting the layout.
+- **The composter contamination bug was found by EYE-TESTING, not unit tests.** All 27 prior tests passed; the composter test in particular ran the recipe and verified compost output, but never checked WHICH adjacent belt received the compost when downstream was jammed. Belt-routing tests would have to set up a multi-belt topology and check buffer contents per-belt — heavyweight. Eye-testing during PAUSE 6 caught it in 30 seconds. Lesson: PAUSE-time eye-testing complements unit tests — they catch different classes of bug.
+- **The schema-mismatch UX gap (NOTES.md) hit during PAUSE 5** — user had a v16 save lingering after Session 3's bump to v17, world spawned empty. ~10 min lost to "is my Session 3.5 work broken?" diagnosis before checking stderr. Captured in NOTES.md with two queued fixes (5-line graceful fallthrough + full migration framework session). This entry of PROJECT_LOG also reinforces: every session that bumps SAVE_VERSION will hit this UX gap until the quick fix lands.
+- **Manual-before-automation worked on its third instance.** Hand-apply (Session 3) had ~2 hours of playtest before Session 3.5 started. By the time the applicator landed, the per-tile fertilizer state was already validated — no second-guessing of the Session 3 mechanics, just plumbing automation onto a known-good foundation. Each instance has been smoother than the last. Pattern is now codified in NOTES.md and earned its keep.
+
+### Roadmap implications
+
+- **Soil arc almost complete:** Sessions 1+2+3+3.5 shipped. Remaining: Session 4 (wasteland) — tiles below soil 0 enter wasteland state, require fertilizer to reclaim, unclamps `max(0, ...)`. Optional Session 5 (legumes / crop rotation) — negative-soil-cost crops heal their 3×3 instead of depleting. Both can use the existing `tile_fertilizer_state` and applicator infrastructure unchanged.
+- **Composter prefer_dir fix unlocks any future "linear chain" Processor placement.** Player can now confidently place a composter inline with a single belt run without worrying about backward contamination. Pattern extends to any future Processor with similar topology constraints.
+
+### Known follow-ups
+
+- **Schema-mismatch UX gap quick fix** (queued in NOTES.md): when load fails on schema mismatch, fall through to fresh-world generation instead of leaving an empty world. ~5 lines in `main.gd`. Hotfix slot before the next schema bump.
+- **Save migration framework** (queued in NOTES.md): full session work, deferred until after the dev console session. Replaces hard-fail with chained migration steps (`migrate_v15_to_v16`, `migrate_v16_to_v17`, …).
+- **Audit other Processors for backward-push risk.** Mill, Mixer, Thresher, etc. — most already have prefer_dir, but a quick recipes.gd grep confirms which don't, and whether the topology actually exposes the bug. ~15-min audit at start of next session.
+- **Multi-applicator UX**: overlapping coverage works (each applicator independently scans + applies), but no visual cue that two applicators share coverage of a tile. Defer to playtest feedback.
+
+---
+
 ## Soil exhaustion — Session 3 of multi-session arc (save v16 → v17) — **FERTILIZER CHAIN (HAND-APPLY ONLY)**
 
 **Date:** 2026-05-06

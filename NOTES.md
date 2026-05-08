@@ -6,9 +6,28 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## Soil exhaustion arc — Sessions 1+2+3 shipped (foundation + fertilizer hand-apply)
+## Schema-mismatch UX gap (queued follow-ups)
 
-**Status:** **Sessions 1 + 2 + 3 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, fertilizer chain (Composter + hand-apply), per-tile boost state with timed decay, save v17, hard-fail v16.
+**Status:** UNFIXED. Hits every dev test session after a schema bump.
+
+**Symptom:** when `SaveSystem.load_game` fails on a schema-version mismatch (existing v(N-1) save file vs current v(N) code), `main.gd:_ready` does NOT fall through to fresh-world generation. World stays in its default empty state — no buildings, no resource nodes, no terrain features beyond the GridWorld defaults. Player sees "empty world" rather than "fresh world" or a clear actionable error in-game.
+
+The `OS.alert + push_error` from `save_system.gd` does fire, but in practice it's dismissable / easy to miss; the player ends up in the empty world thinking the world has no resources rather than realizing the save load failed.
+
+**First confirmed encounter:** session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from before Session 3's bump to v17, relaunched after Session 3 work, saw an empty world during Applicator smoke testing. Burned ~10 min on diagnosis (was there a bug from Session 3.5 changes?) before checking the launch's stderr. Session 3.5 changes were innocent; the gap is the post-fail fallthrough.
+
+**Two follow-ups queued:**
+
+1. **Quick fix (~5 lines in `main.gd`).** When `SaveSystem.load_game` returns `result.success == false`, fall through to the `else` branch logic (random seed, `WorldGenerator.generate`, `initial_reveal`, `_safe_spawn_position`). Show a toast like "Save incompatible — generating fresh world (seed N)" so the player knows what happened. Hotfix slot: immediately after Session 3.5 commits.
+2. **Proper fix (full session, deferred).** Save migration framework. When loaded `version < SAVE_VERSION`, run a chain of migration steps (`migrate_v15_to_v16`, `migrate_v16_to_v17`, etc.) that mutate the parsed Dictionary in place before applying it to the world. Each migration step is its own static function with documented field changes. Replaces hard-fail with graceful upgrade. Real session work — defer until after dev console (so we have machinery for fast-iteration testing of migrations).
+
+**Why this matters strategically:** every session that bumps `SAVE_VERSION` will burn ~5–15 min of testing time on this UX gap until the quick fix lands. Migration framework removes the hard-fail entirely (saves preserve player progress across schema changes) — load-bearing for any non-dev player.
+
+---
+
+## Soil exhaustion arc — Sessions 1+2+3+3.5 shipped (foundation + fertilizer hand-apply + automation)
+
+**Status:** **Sessions 1 + 2 + 3 + 3.5 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, fertilizer chain (Composter + hand-apply at Session 3, Fertilizer Applicator automation at Session 3.5), per-tile boost state with timed decay, save v17 (no bump at 3.5).
 
 ### Architecture (current)
 
@@ -19,7 +38,7 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 - **Soil-zero gate**: planter at `growth == 0` AND `tile_soil_health(b.anchor) <= 0` stays idle. In-progress crops (growth > 0) finish gracefully.
 - **Single-planter oscillation**: idle planter on dead tile → tile regens to 1 → planter activates → consumes → tile drops → idle → cycle. PlanterPanel mini-grid flicker IS the player feedback.
 
-### What's shipped (sessions 1 + 2 + 3)
+### What's shipped (sessions 1 + 2 + 3 + 3.5)
 
 - Per-tile storage + helpers (`tile_soil_health`, `deplete_tile_soil`, `deplete_planter_area`).
 - `Planter.CROP_DATA` with `growth_ticks` + `soil_cost` per crop.
@@ -27,16 +46,16 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 - `Planter.is_active(b)` helper — used by regen blocking.
 - `_tick_soil_regen(delta)` — per-frame regen iteration with fertilizer multiplier (Session 3).
 - Visual rendering: tint pass in `GridWorld._draw`; level-aware Q-inspect; PlanterPanel 3×3 mini-grid; fertilizer green-tint overlay (Session 3).
-- Composter building + 3 recipes (wheat/flax → LOW, sugar_beet → MID); 12th ProcessorPanel consumer.
+- Composter building + 3 recipes (wheat/flax → LOW, sugar_beet → MID); 12th ProcessorPanel consumer. **At Session 3.5: gained `prefer_dir = Belt.DIR_E` on outputs + `supports_direction = true` (rotatable) to fix backward-contamination bug when downstream jams.**
 - `tile_fertilizer_state` dict + `try_apply_fertilizer` + `_tick_fertilizer_decay` (Session 3).
-- NEW `item_apply` hotbar kind + Soil category (3 slots: Composter + 2 hand-apply) + dim-on-empty inventory (Session 3).
+- NEW `item_apply` hotbar kind + Soil category (4 slots after 3.5: Composter + Fertilizer Applicator + 2 hand-apply) + dim-on-empty inventory.
 - Q-inspect fertilizer line with multiplier + remaining time (Session 3).
-- Save schema v14 → v15 → v16 → v17 (region scope reversed at v16; fertilizer state added at v17).
-- Tests: 27/27 with 17 sub-suites (depletion + falloff + multi-planter overlap + boundary exactness + regen + oscillation + save round-trip + level thresholds) **plus 5 fertilizer sub-suites** (composter recipe + hand-apply state + stacking + boost regen + save v17).
+- **Fertilizer Applicator (Session 3.5):** 1×1 footprint, 5×5 coverage, belt-fed or drag-drop compost input, auto-applies to most-depleted eligible tile at 1-per-5-sec rate. Tier-preference (MID before LOW). Three-state machine (IDLE / SCANNING / BLOCKED). Specialized panel with 5×5 coverage mini-grid + cell color states (pristine/eligible/LOW-fertilized/MID-fertilized/impassable).
+- Save schema v14 → v15 → v16 → v17 (region scope reversed at v16; fertilizer state added at v17; **no bump at 3.5** — applicator state is standard JSON-clean fields).
+- Tests: 28/28 — 17 soil sub-suites + 5 fertilizer-chain sub-suites + **4 fertilizer-applicator sub-suites** (apply rate + tier preference + most-depleted-first + world-edge placement).
 
 ### Remaining sessions in the arc
 
-- **Session 3.5 (or merged with Session 4) — Fertilizer Applicator.** 1×1 footprint, 5×5 coverage, belt-fed compost input, auto-applies to most-depleted eligible tile in coverage at rate-limited intervals (1 application per ~5 sec). Most of the design already worked out (see Session 3 PROJECT_LOG entry — pre-cut spec). Validates the manual-before-automation pattern: hand-apply ships first to playtest the mechanic, then automation builds on the validated foundation (mirrors mining-manual → mining-drill).
 - **Session 4 — Wasteland mechanics (per-tile).** Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`. THIS is when bread-as-waste makes thematic sense for HIGH-tier compost (refined goods become wasteland-recovery material).
 - **Optional Session 5 — Crop rotation / legumes (per-tile).** Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Fertilizer chain is orthogonal — legumes are an alternative to fertilization, not a replacement. Player learns "wheat → flax → legume + fertilize the dying patches" as the sustainable per-tile pattern.
 
@@ -136,9 +155,11 @@ In all OK cases, the spec already exists or the reference points to in-codebase 
 - Document in PROJECT_LOG that automation was deferred + WHY (not as scope creep — as deliberate manual-before-automation discipline).
 - The follow-up session is small (~30–80% of the original scope's automation portion) because the foundation is already in place. Don't underestimate it, but don't oversell it either.
 
-**Two instances so far:**
+**Three instances so far:**
 1. **Mining arc:** `session-mining-manual` (Spacebar-to-mine, ore drains from deposits adjacent to player) → `session-mining-drill` (1×1 building auto-extracts from coverage). Worked perfectly.
-2. **Soil arc:** `session-soil-exhaustion-3` (hand-apply fertilizer via NEW item_apply hotbar kind) → Session 3.5 / 4 (Fertilizer Applicator: 5×5 coverage, belt-fed). Pre-cut spec is in PROJECT_LOG entry for soil-3.
+2. **Soil arc — fertilizer:** `session-soil-exhaustion-3` (hand-apply fertilizer via NEW item_apply hotbar kind) → `session-soil-exhaustion-3-5` (Fertilizer Applicator: 5×5 coverage, belt-fed, tier-preference, most-depleted-first targeting). Worked perfectly. By 3.5, the per-tile fertilizer state was already validated by ~2 hours of Session 3 playtest — automation just plumbed onto a known-good foundation.
+
+**Pattern observation across the three instances:** each session is incrementally smoother than the last. By the third instance, the design pass writes itself (most decisions inherit from the manual mechanic) and the automation session is mostly plumbing. **The pattern earns its keep specifically when the manual mechanic has design uncertainty** — if the foundation might need adjustment after playtest, building automation on top first means double the rework. With three confirmed wins, treat this as the default for any "manual + automation in same scope" proposal.
 
 **When NOT to apply this pattern:**
 - The "automation" is a trivial wrapper around the manual (e.g., a hotkey for what would otherwise require multiple clicks). Ship in the same session.
