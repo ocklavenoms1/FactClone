@@ -677,14 +677,24 @@ func _try_apply_item(pos: Vector2i, item_type: int) -> void:
 	if player_inventory.total_of(item_type) <= 0:
 		_rate_limited_fail_toast("No %s in inventory." % Items.name_of(item_type))
 		return
-	# Fertilizer dispatch — only kind today.
-	if item_type == Items.Type.COMPOST_LOW or item_type == Items.Type.COMPOST_MID:
+	# Fertilizer dispatch — three tiers as of Session 4.
+	if item_type == Items.Type.COMPOST_LOW or item_type == Items.Type.COMPOST_MID or item_type == Items.Type.COMPOST_HIGH:
+		# Capture wasteland state BEFORE applying so we can surface
+		# "Restored wasteland tile" feedback on the de-wasteland path.
+		var was_wasteland: bool = grid_world.is_wasteland_at(pos)
 		var applied: bool = grid_world.try_apply_fertilizer(pos, item_type)
 		if not applied:
-			_rate_limited_fail_toast("Tile already has higher-tier compost.")
+			# Two reject reasons: lower-tier-on-higher OR non-HIGH on wasteland.
+			if grid_world.is_wasteland_at(pos):
+				_rate_limited_fail_toast("Tile is wasteland — only Premium Compost restores it.")
+			else:
+				_rate_limited_fail_toast("Tile already has higher-tier compost.")
 			return
 		player_inventory.remove(item_type, 1)
-		_show_toast("Applied %s." % Items.name_of(item_type))
+		if was_wasteland:
+			_show_toast("Restored wasteland tile %s with %s." % [str(pos), Items.name_of(item_type)])
+		else:
+			_show_toast("Applied %s." % Items.name_of(item_type))
 		return
 	# Unknown item_apply type — defensive.
 	_rate_limited_fail_toast("(No effect for %s yet.)" % Items.name_of(item_type))

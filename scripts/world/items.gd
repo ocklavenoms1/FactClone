@@ -52,6 +52,10 @@ enum Type {
 	# only so a future HIGH slot doesn't break v17 saves.
 	COMPOST_LOW,
 	COMPOST_MID,
+	# --- soil exhaustion Session 4 (wasteland). HIGH tier activated:
+	# food-waste in (bread / loaf_pack) → restoration fuel out. Restores
+	# scarred wasteland tiles + provides 8× regen for 120s.
+	COMPOST_HIGH,
 }
 
 const DATA: Dictionary = {
@@ -89,6 +93,9 @@ const DATA: Dictionary = {
 	# Stack 100 matches refined materials (FLOUR, CLOTH, FUEL_BRIQUETTE).
 	Type.COMPOST_LOW:    { "name": "Low Compost",    "color": Color(0.55, 0.40, 0.25), "max_stack": 100 },
 	Type.COMPOST_MID:    { "name": "Rich Compost",   "color": Color(0.38, 0.27, 0.16), "max_stack": 100 },
+	# Premium Compost (Session 4): near-black brown — top of the gradient.
+	# Made from food waste (bread / loaf_pack); restores wasteland.
+	Type.COMPOST_HIGH:   { "name": "Premium Compost", "color": Color(0.22, 0.16, 0.10), "max_stack": 100 },
 }
 
 static func name_of(t: int) -> String:

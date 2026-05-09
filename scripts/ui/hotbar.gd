@@ -144,14 +144,17 @@ func _build_categories() -> void:
 	#   Session 3.5 — Fertilizer Applicator (building) added per the
 	#                 manual-before-automation pattern (mirrors mining-
 	#                 manual → mining-drill arc).
-	# Slot order: buildings grouped first, then consumable hand-apply items.
+	#   Session 4 — Apply Premium Compost slot for wasteland recovery.
+	# Slot order: buildings grouped first, then consumable hand-apply
+	# items in tier order (LOW → MID → HIGH).
 	categories.append({
 		"name": "Soil",
 		"slots": [
 			{ "kind": "building",   "value": Buildings.Type.COMPOSTER },
 			{ "kind": "building",   "value": Buildings.Type.FERTILIZER_APPLICATOR },
-			{ "kind": "item_apply", "value": Items.Type.COMPOST_LOW, "label": "Apply Low Compost" },
-			{ "kind": "item_apply", "value": Items.Type.COMPOST_MID, "label": "Apply Rich Compost" },
+			{ "kind": "item_apply", "value": Items.Type.COMPOST_LOW,  "label": "Apply Low Compost" },
+			{ "kind": "item_apply", "value": Items.Type.COMPOST_MID,  "label": "Apply Rich Compost" },
+			{ "kind": "item_apply", "value": Items.Type.COMPOST_HIGH, "label": "Apply Premium Compost" },
 		],
 		"selected": 0,
 	})

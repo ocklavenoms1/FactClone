@@ -249,6 +249,34 @@ const DATA: Dictionary = {
 		"output_capacity": 8,
 		"display_name": "2× Sugar Beet → Rich Compost (E)",
 	},
+	# Wasteland recovery tier (session-soil-exhaustion-4). Food-waste
+	# inputs make thematic sense — finished food → top-quality compost.
+	# Both recipes 200 ticks (10s — slowest tier; matches "premium"
+	# framing). Loaf pack is the better deal (1 input vs 2, but 1 loaf
+	# pack costs 4 bread upstream); design pressure to build the full
+	# Packager chain for sustainable wasteland recovery.
+	"composter_high_bread": {
+		"id": "composter_high_bread",
+		"building_type": Buildings.Type.COMPOSTER,
+		"inputs_solid":  [[Items.Type.BREAD, 2]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COMPOST_HIGH, 1, Belt.DIR_E]],
+		"time_ticks": 200,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "2× Bread → Premium Compost (E)",
+	},
+	"composter_high_loafpack": {
+		"id": "composter_high_loafpack",
+		"building_type": Buildings.Type.COMPOSTER,
+		"inputs_solid":  [[Items.Type.LOAF_PACK, 1]],
+		"inputs_fluid":  [],
+		"outputs_solid": [[Items.Type.COMPOST_HIGH, 1, Belt.DIR_E]],
+		"time_ticks": 200,
+		"input_capacity":  8,
+		"output_capacity": 8,
+		"display_name": "Loaf Pack → Premium Compost (E)",
+	},
 }
 
 ## Look up a recipe by id. Returns {} (empty dict) if not found.

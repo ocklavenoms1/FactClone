@@ -104,10 +104,41 @@ const SECONDS_PER_SOIL_POINT: float = 30.0
 var tile_fertilizer_state: Dictionary = {}
 
 # Fertilizer per-tier configuration is inlined in the two static helpers
-# below. Two tiers this session (LOW/MID); HIGH deferred to Session 4.
-# Tier value IS the Items.Type so stacking comparisons are direct (MID >
-# LOW because COMPOST_MID enum value > COMPOST_LOW enum value — both
-# appended at this session, so order is locked).
+# below. Three tiers post-Session-4 (LOW/MID/HIGH). Tier value IS the
+# Items.Type so stacking comparisons are direct (HIGH > MID > LOW because
+# COMPOST_HIGH > COMPOST_MID > COMPOST_LOW in enum order — append-only
+# enum locks the ordering invariant).
+
+# Wasteland state (session-soil-exhaustion-4). Sparse parallel dict —
+# only tiles in grace OR scarred have entries.
+#
+# Shape: Vector2i (tile) -> { "scarred": bool, "decay_remaining": float }
+#   - "scarred" == false, decay_remaining > 0: tile in grace period;
+#     will scar when remaining hits 0.
+#   - "scarred" == true:                       tile is wasteland;
+#     decay_remaining ignored (kept for save-shape stability).
+#
+# Save format: tile_wasteland_state field at v18, sparse Array of
+# [x, y, scarred_bool, decay_remaining_float]. v17 hard-fails (no migration).
+#
+# Trigger: in _tick_soil_regen, any tile in tile_soil_modifications
+# whose soil_health == 0 starts/advances the grace timer. Soil rising
+# above 0 (via fertilizer + regen) before grace expiry erases the entry
+# (no scar). Once scarred, only Premium Compost via try_apply_fertilizer
+# clears the entry (de-wastelanding).
+var tile_wasteland_state: Dictionary = {}
+
+# Grace period before a soil-0 tile scars. 60 sec gives the player ~2
+# wheat-harvest cycles to react. Tunable from playtest data.
+const WASTELAND_GRACE_SEC: float = 60.0
+
+# Soil value Premium Compost snaps a wasteland tile to. Partial restoration
+# (DAMAGED range, not full healing). Combined with the 8× boost / 120s,
+# total wasteland-to-fully-healed is designed at ~21 min:
+#   30 → 62  via 8× boost in 120 sec (32 points)
+#   62 → 100 via natural regen (38 pts × 30 sec/pt) ≈ 19 min
+# This is intentional — wasteland is a real loss. Tunable from playtest.
+const WASTELAND_RESTORE_SOIL: int = 30
 
 ## Returns the regen multiplier for a given fertilizer tier (item type).
 ## Returns 1.0 for unknown tiers (defensive — old saves with future tiers
@@ -115,6 +146,7 @@ var tile_fertilizer_state: Dictionary = {}
 static func fertilizer_multiplier(tier: int) -> float:
 	if tier == Items.Type.COMPOST_LOW: return 2.0
 	if tier == Items.Type.COMPOST_MID: return 4.0
+	if tier == Items.Type.COMPOST_HIGH: return 8.0
 	return 1.0
 
 ## Returns the active-boost duration (sec) for a given fertilizer tier.
@@ -122,6 +154,7 @@ static func fertilizer_multiplier(tier: int) -> float:
 static func fertilizer_duration(tier: int) -> float:
 	if tier == Items.Type.COMPOST_LOW: return 30.0
 	if tier == Items.Type.COMPOST_MID: return 60.0
+	if tier == Items.Type.COMPOST_HIGH: return 120.0
 	return 0.0
 
 ## Soil level enum (per-tile). Pure function of soil_health value; NOT
@@ -618,12 +651,22 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 ## the inventory check + consumption — this function only validates the
 ## stacking rule and writes/refreshes the per-tile boost state.
 ##
-## Stacking rules (locked design Q5):
+## Stacking rules (locked design Q5, extended Session 4):
 ##   - tile has no active boost → set new boost.
 ##   - same tier as active     → refresh timer (full duration).
 ##   - higher tier than active → upgrade (replace tier + reset timer).
 ##   - lower tier than active  → REJECT (don't waste lower-tier on richer
 ##                               boost). Caller toasts "already has higher".
+##
+## **Wasteland branch (session 4):** when `tier == COMPOST_HIGH` AND the
+## tile is scarred (wasteland), the call ALSO de-wastelands: erases the
+## scarred flag and snaps soil to WASTELAND_RESTORE_SOIL (30). Then
+## proceeds to apply the boost normally. Single function, two effects.
+##
+## **Grace rescue (test 14i):** applying any tier during the grace
+## period interacts with `_tick_soil_regen` cleanly — fertilizer
+## doesn't directly clear grace state, but the boost adds soil → regen
+## tick lifts soil > 0 → grace entry erased on the next regen pass.
 ##
 ## Returns true if the boost was applied (caller should consume 1 from
 ## inventory). Returns false if rejected (caller should toast and NOT
@@ -631,6 +674,20 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
 	if fertilizer_duration(tier) <= 0.0:
 		return false   # unknown tier — defensive guard
+	# Wasteland branch: HIGH on scarred tile triggers de-wastelanding
+	# BEFORE the normal apply path. _restore_wasteland erases the scarred
+	# flag and snaps soil to 30; apply path then writes the boost state.
+	# Lower-than-HIGH tiers on a scarred tile fall through to the normal
+	# stacking-rule path, which (since scarred tiles never have an active
+	# boost — fertilizer state is decoupled) would freshly apply LOW or
+	# MID. But that's useless: scarred tiles don't regen, so the boost
+	# multiplies zero progress. We REJECT lower-than-HIGH on wasteland
+	# explicitly so the player isn't silently wasting their compost.
+	if is_wasteland_at(pos):
+		if tier != Items.Type.COMPOST_HIGH:
+			return false   # only Premium Compost restores wasteland
+		_restore_wasteland(pos)
+		# Fall through to apply HIGH boost on the now-restored tile.
 	var current = tile_fertilizer_state.get(pos)
 	if current == null:
 		tile_fertilizer_state[pos] = {"tier": tier, "remaining": fertilizer_duration(tier)}
@@ -671,6 +728,40 @@ func _tick_fertilizer_decay(delta: float) -> void:
 			s["remaining"] = new_remaining
 	for pos in to_remove:
 		tile_fertilizer_state.erase(pos)
+
+# ---------- wasteland (session-soil-exhaustion-4) ----------
+
+## True if `pos` is fully scarred (post-grace wasteland). Read-only.
+func is_wasteland_at(pos: Vector2i) -> bool:
+	var s = tile_wasteland_state.get(pos)
+	return s != null and bool(s.get("scarred", false))
+
+## Read grace-period remaining (seconds). Returns 0.0 if not in grace
+## (either healthy soil OR already scarred). Used by Q-inspect to show
+## the "DEAD — will scar in Xs" countdown.
+func tile_wasteland_grace_remaining(pos: Vector2i) -> float:
+	var s = tile_wasteland_state.get(pos)
+	if s == null or bool(s.get("scarred", false)):
+		return 0.0
+	return float(s["decay_remaining"])
+
+## Restore a wasteland tile to soil = WASTELAND_RESTORE_SOIL (30) and
+## erase the scarred flag. Called from try_apply_fertilizer when a
+## Premium Compost (HIGH) is applied to a scarred tile. Caller is
+## responsible for applying the boost separately (try_apply_fertilizer
+## does the boost write after this restore step).
+##
+## Returns true if the tile was scarred and is now restored, false if
+## tile wasn't scarred (caller should fall through to normal apply).
+func _restore_wasteland(pos: Vector2i) -> bool:
+	if not is_wasteland_at(pos):
+		return false
+	tile_wasteland_state.erase(pos)
+	# Snap soil to 30 — partial restoration (DAMAGED range). Combined
+	# with the HIGH-tier 8× boost, climb to fully-healed takes ~21 min.
+	tile_soil_modifications[pos] = WASTELAND_RESTORE_SOIL
+	tile_regen_progress.erase(pos)   # fresh start on regen accumulator
+	return true
 
 ## Per-tile regen multiplier from any active fertilizer boost. Returns 1.0
 ## (no boost) when no fertilizer state is present. Keep cheap — called
@@ -955,21 +1046,60 @@ func _tick_soil_regen(delta: float) -> void:
 			for dy in range(-1, 2):
 				active_tiles[Vector2i(b.anchor.x + dx, b.anchor.y + dy)] = true
 
-	# Second pass: regen non-active depleted tiles.
+	# Second pass: regen non-active depleted tiles + advance wasteland
+	# grace timers for soil-0 tiles.
 	# Snapshot keys() because we may mutate tile_soil_modifications mid-loop
 	# (full-recovery erase). Same iteration pattern as _tick_regrowth.
 	var to_restore: Array[Vector2i] = []
 	for pos in tile_soil_modifications.keys():
+		# Wasteland grace-timer logic (session-soil-exhaustion-4):
+		#   - Tile at soil 0 + not yet scarred → advance grace timer.
+		#     When timer hits 0, tile becomes scarred (persistent).
+		#   - Tile at soil 0 + already scarred → skip ALL regen (no
+		#     passive recovery from wasteland; player must apply HIGH).
+		#   - Tile soil > 0 + has grace entry → erase entry (rescued).
+		var soil_now: int = int(tile_soil_modifications[pos])
+		if soil_now == 0:
+			var ws = tile_wasteland_state.get(pos)
+			if ws == null:
+				# First frame at soil 0 — start grace timer (initialized
+				# at MAX, then decremented THIS tick so behavior is
+				# predictable: 1 tick of dt seconds always = MAX − dt
+				# remaining).
+				ws = {"scarred": false, "decay_remaining": WASTELAND_GRACE_SEC}
+				tile_wasteland_state[pos] = ws
+			if not bool(ws.get("scarred", false)):
+				# Advance timer (also fires on the just-created entry —
+				# init-and-decrement, same tick).
+				ws["decay_remaining"] = float(ws["decay_remaining"]) - delta
+				if ws["decay_remaining"] <= 0.0:
+					ws["scarred"] = true
+					ws["decay_remaining"] = 0.0
+					tile_regen_progress.erase(pos)   # scarred = no carry-over
+		else:
+			# Soil rose above 0 — clear any grace entry that hasn't scarred.
+			# (Scarred tiles can't reach this branch: their soil stays at
+			# 0 because regen is blocked below.)
+			var ws_existing = tile_wasteland_state.get(pos)
+			if ws_existing != null and not bool(ws_existing.get("scarred", false)):
+				tile_wasteland_state.erase(pos)
+
+		# Wasteland-scarred tiles skip regen entirely. Even with active
+		# fertilizer boost, scarred soil doesn't recover — only Premium
+		# Compost via try_apply_fertilizer can restore them.
+		if is_wasteland_at(pos):
+			continue
+
 		if active_tiles.has(pos):
 			# Active farming this frame — clear partial regen so a brief
 			# active period doesn't leave stale progress accumulated.
 			tile_regen_progress.erase(pos)
 			continue
 
-		# Accumulate progress, scaled by any active fertilizer boost
-		# (session-soil-exhaustion-3). Multiplier is 1.0 (no boost),
-		# 2.0 (LOW), or 4.0 (MID) per fertilizer_multiplier(). Cheap
-		# dict lookup per modified tile; no boost = early-return 1.0.
+		# Accumulate progress, scaled by any active fertilizer boost.
+		# Multiplier is 1.0 (no boost), 2.0 (LOW), 4.0 (MID), or 8.0
+		# (HIGH) per fertilizer_multiplier(). Cheap dict lookup per
+		# modified tile; no boost = early-return 1.0.
 		var boost: float = _fertilizer_boost_multiplier(pos)
 		var prog: float = float(tile_regen_progress.get(pos, 0.0)) + (delta * boost) / SECONDS_PER_SOIL_POINT
 		var increment: int = int(prog)
@@ -981,6 +1111,16 @@ func _tick_soil_regen(delta: float) -> void:
 				to_restore.append(pos)
 			else:
 				tile_soil_modifications[pos] = new_val
+				# Same-tick grace rescue (session-soil-exhaustion-4): if
+				# this tick lifted soil from 0 to >0 AND we're still in
+				# grace, erase the grace entry. Without this, grace state
+				# would persist to the next tick (where soil_now reads as
+				# >0 and the else branch above clears it). Same-tick
+				# erasure makes "rescue during grace" feel responsive.
+				if new_val > 0:
+					var ws_post = tile_wasteland_state.get(pos)
+					if ws_post != null and not bool(ws_post.get("scarred", false)):
+						tile_wasteland_state.erase(pos)
 		else:
 			tile_regen_progress[pos] = prog
 
@@ -1049,6 +1189,12 @@ const SOIL_TINT_DEAD: Color    = Color(0.50, 0.32, 0.20, 0.85)   # dark cracked-
 # Cooler-and-saturated for higher tier so the tier is visible at a glance.
 const FERT_TINT_LOW: Color     = Color(0.40, 0.70, 0.30, 0.20)   # light green, faint
 const FERT_TINT_MID: Color     = Color(0.20, 0.55, 0.20, 0.30)   # saturated green
+const FERT_TINT_HIGH: Color    = Color(0.10, 0.45, 0.18, 0.40)   # deep saturated green
+# Wasteland (session-soil-exhaustion-4): distinct from DEAD. DEAD is
+# "soil at 0, recoverable"; wasteland is "scarred, only HIGH compost
+# restores." Near-black brown undertone + faint X-shaped crack lines.
+const WASTELAND_TINT: Color    = Color(0.18, 0.13, 0.10, 0.95)
+const WASTELAND_CRACK: Color   = Color(0.05, 0.03, 0.02, 1.00)
 
 ## Compute the soil tint for a tile at `pos`. Returns a transparent color
 ## (alpha 0) when no tint should render — the caller skips the draw.
@@ -1258,17 +1404,44 @@ func _draw() -> void:
 		if tint.a > 0.0:
 			draw_rect(Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE), tint, true)
 
-	# Fertilizer tint pass (session-soil-exhaustion-3). Overlaid on top of
-	# the soil tint so a damaged-but-fertilized tile shows blended red+green.
-	# Iterates the sparse fertilizer dict (typically empty or a few tiles).
+	# Fertilizer tint pass (session-soil-exhaustion-3, extended Session 4).
+	# Overlaid on top of the soil tint so a damaged-but-fertilized tile
+	# shows blended red+green. Iterates the sparse fertilizer dict.
 	for pos in tile_fertilizer_state.keys():
 		if pos.x < min_tile.x or pos.x > max_tile.x:
 			continue
 		if pos.y < min_tile.y or pos.y > max_tile.y:
 			continue
 		var ft: int = int(tile_fertilizer_state[pos]["tier"])
-		var ftint: Color = FERT_TINT_LOW if ft == Items.Type.COMPOST_LOW else FERT_TINT_MID
+		var ftint: Color = FERT_TINT_LOW
+		if ft == Items.Type.COMPOST_MID:
+			ftint = FERT_TINT_MID
+		elif ft == Items.Type.COMPOST_HIGH:
+			ftint = FERT_TINT_HIGH
 		draw_rect(Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE), ftint, true)
+
+	# Wasteland tint + crack pattern pass (session-soil-exhaustion-4).
+	# Drawn ABOVE soil + fertilizer tints — wasteland is the dominant
+	# visual state. Crack pattern: 2 short diagonal lines forming a
+	# faint X near tile center, suggesting "broken earth."
+	for pos in tile_wasteland_state.keys():
+		if pos.x < min_tile.x or pos.x > max_tile.x:
+			continue
+		if pos.y < min_tile.y or pos.y > max_tile.y:
+			continue
+		if not bool(tile_wasteland_state[pos].get("scarred", false)):
+			continue   # in-grace tile — keep the existing DEAD tint, no wasteland visual yet
+		var rect: Rect2 = Rect2(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+		draw_rect(rect, WASTELAND_TINT, true)
+		# X-shaped cracks: 2 diagonal lines from the tile corners, inset
+		# by 6 px so the cracks live within the tile interior.
+		var inset: float = 6.0
+		var p_tl: Vector2 = rect.position + Vector2(inset, inset)
+		var p_tr: Vector2 = rect.position + Vector2(rect.size.x - inset, inset)
+		var p_bl: Vector2 = rect.position + Vector2(inset, rect.size.y - inset)
+		var p_br: Vector2 = rect.position + Vector2(rect.size.x - inset, rect.size.y - inset)
+		draw_line(p_tl, p_br, WASTELAND_CRACK, 1.5)
+		draw_line(p_tr, p_bl, WASTELAND_CRACK, 1.5)
 
 	# Grid lines — width in world units so the line scales with the tile.
 	# At low zoom this fades the line slightly (sub-pixel anti-aliased),

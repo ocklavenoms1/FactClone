@@ -12,7 +12,7 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 **Commands:** `help`, `seed`, `tile [radius]`, `give`, `place`, `destroy`, `tp`, `set_soil`, `deplete_area`, `fertilize`, `clear`, `tick_speed`. See PROJECT_LOG entry for full table + design rationale.
 
-**Manual-smoke-at-first-use note:** test coverage was the commit gate. Bugs in the UI layer (panel position, scrollback rendering, history navigation, edge cases in command outputs) will surface organically next time the console is used during a real testing session — log + patch as discovered. **First-use session: anticipated to be Session 4 (wasteland) or save migration framework.**
+**Manual-smoke-at-first-use note:** ✅ **COMPLETED at session-soil-exhaustion-4 PAUSE 1.** First real-use was the wasteland session, exactly as anticipated. Caught 2 real bugs (Bug 1: `tile` command displayed raw enum ints; Bug 2 CRITICAL: Premium Compost hotbar slot was missing — wasteland recovery path unreachable via hand-apply). Both fixed before that session's commit. The "ship tooling without exhaustive UI testing, surface bugs on first real use" pattern paid off — UI bugs surfaced in a low-stakes context (one session's PAUSE) rather than blocking gameplay forever. **Validated this protocol for future tooling sessions.**
 
 **File-size finding:** `console.gd` ended up at 657 lines vs the 300–400 design-pass estimate. Two underestimates:
 - **UI layer underestimated** (~80 lines for Godot Control / RichTextLabel / LineEdit setup — anchors, theme overrides, signal wiring, color-bbcode helpers).
@@ -48,9 +48,11 @@ session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from befor
 
 ---
 
-## Soil exhaustion arc — Sessions 1+2+3+3.5 shipped (foundation + fertilizer hand-apply + automation)
+## Soil exhaustion arc — **COMPLETE (Sessions 1–4 shipped)**
 
-**Status:** **Sessions 1 + 2 + 3 + 3.5 SHIPPED.** Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, fertilizer chain (Composter + hand-apply at Session 3, Fertilizer Applicator automation at Session 3.5), per-tile boost state with timed decay, save v17 (no bump at 3.5).
+**Status:** **ARC CLOSED at session-soil-exhaustion-4.** Sessions 1+2+3+3.5+4 ship the complete stewardship loop: deplete fast → grace warning → wasteland scarring → Premium Compost restoration. Real failure state, real recovery path. Optional Session 5 (legumes) deferred indefinitely as polish.
+
+Per-tile soil (NOT region-based — Session 1's region scope was reversed at Session 2; see PROJECT_LOG reversal #5). Foundation includes depletion-on-harvest with 3×3 falloff, fallow regeneration, visual tints showing dead zones, fertilizer chain (Composter + hand-apply at Session 3, Fertilizer Applicator automation at Session 3.5), per-tile boost state with timed decay, **wasteland mechanics + Premium Compost recovery at Session 4**, save v18.
 
 ### Architecture (current)
 
@@ -61,7 +63,7 @@ session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from befor
 - **Soil-zero gate**: planter at `growth == 0` AND `tile_soil_health(b.anchor) <= 0` stays idle. In-progress crops (growth > 0) finish gracefully.
 - **Single-planter oscillation**: idle planter on dead tile → tile regens to 1 → planter activates → consumes → tile drops → idle → cycle. PlanterPanel mini-grid flicker IS the player feedback.
 
-### What's shipped (sessions 1 + 2 + 3 + 3.5)
+### What's shipped (sessions 1 + 2 + 3 + 3.5 + 4)
 
 - Per-tile storage + helpers (`tile_soil_health`, `deplete_tile_soil`, `deplete_planter_area`).
 - `Planter.CROP_DATA` with `growth_ticks` + `soil_cost` per crop.
@@ -73,30 +75,27 @@ session-soil-exhaustion-3-5 PAUSE 5 — user had a v16 save lingering from befor
 - `tile_fertilizer_state` dict + `try_apply_fertilizer` + `_tick_fertilizer_decay` (Session 3).
 - NEW `item_apply` hotbar kind + Soil category (4 slots after 3.5: Composter + Fertilizer Applicator + 2 hand-apply) + dim-on-empty inventory.
 - Q-inspect fertilizer line with multiplier + remaining time (Session 3).
-- **Fertilizer Applicator (Session 3.5):** 1×1 footprint, 5×5 coverage, belt-fed or drag-drop compost input, auto-applies to most-depleted eligible tile at 1-per-5-sec rate. Tier-preference (MID before LOW). Three-state machine (IDLE / SCANNING / BLOCKED). Specialized panel with 5×5 coverage mini-grid + cell color states (pristine/eligible/LOW-fertilized/MID-fertilized/impassable).
-- Save schema v14 → v15 → v16 → v17 (region scope reversed at v16; fertilizer state added at v17; **no bump at 3.5** — applicator state is standard JSON-clean fields).
-- Tests: 28/28 — 17 soil sub-suites + 5 fertilizer-chain sub-suites + **4 fertilizer-applicator sub-suites** (apply rate + tier preference + most-depleted-first + world-edge placement).
+- **Fertilizer Applicator (Session 3.5):** 1×1 footprint, 5×5 coverage, belt-fed or drag-drop compost input, auto-applies to most-depleted eligible tile at 1-per-5-sec rate. Tier-preference (MID before LOW). Three-state machine (IDLE / SCANNING / BLOCKED). Specialized panel with 5×5 coverage mini-grid + cell color states (pristine/eligible/LOW-fertilized/MID-fertilized/impassable). **Session 4: input slot accepts HIGH alongside LOW + MID.**
+- **Wasteland mechanics (Session 4):** tile soil at 0 for 60 sec → scarred (persistent). Wasteland blocks all passive regen. Distinct visual (near-black tint + X-shaped crack pattern). Q-inspect: "DEAD — will scar in Xs" during grace, "WASTELAND" once scarred. PlanterPanel: "IDLE — tile is WASTELAND" + action prompt.
+- **Premium Compost / COMPOST_HIGH (Session 4):** 8× regen for 120s (top tier). On wasteland: snap soil to 30 + erase scarred flag + apply boost (~21 min total recovery designed). On healthy tile: just a stronger MID. Recipes: BREAD × 2 → HIGH (5s? actually 10s), LOAF_PACK × 1 → HIGH (10s — same time, better deal). Stacking: HIGH > MID > LOW; lower-on-higher rejected. LOW/MID on wasteland REJECTED (only HIGH restores).
+- Save schema v14 → v15 → v16 → v17 → v18 (wasteland state added at v18). 4 schema bumps in the arc; migration framework still queued.
+- Tests: 31 sub-suites total — 17 soil + 5 fertilizer-chain + 4 fertilizer-applicator + **9 wasteland sub-suites** (trigger + grace + recovery + planter idle + save v18 + composter HIGH recipes + stacking + grace-rescue).
 
 ### Remaining sessions in the arc
 
-- **Session 4 — Wasteland mechanics (per-tile).** Tiles below soil 0 enter wasteland state — render distinctly (cracked-earth blacker), block planter placement, require fertilizer to reclaim. Unclamps `max(0, ...)` in `deplete_tile_soil`. THIS is when bread-as-waste makes thematic sense for HIGH-tier compost (refined goods become wasteland-recovery material).
-- **Optional Session 5 — Crop rotation / legumes (per-tile).** Legume crops with negative `soil_cost` heal their 3×3 area instead of depleting. Fertilizer chain is orthogonal — legumes are an alternative to fertilization, not a replacement. Player learns "wheat → flax → legume + fertilize the dying patches" as the sustainable per-tile pattern.
+- **Optional Session 5 — Crop rotation / legumes (per-tile). DEFERRED INDEFINITELY.** Polish, not core. Legume crops with negative `soil_cost` would heal their 3×3 area instead of depleting. Fertilizer chain is orthogonal — legumes are an alternative to fertilization, not a replacement. The arc is COMPLETE without this; revisit only if playtest pressure surfaces a gap. Hooks ready: `Planter.CROP_DATA` accepts negative `soil_cost`, `deplete_tile_soil` clamps at 0 today (easy to extend to negative for legume healing).
 
-All three Sessions 3-5 INHERIT per-tile semantics. Region-based versions of these would have been fundamentally different (per-region fertilizer; per-region wasteland; per-region rotation healing) — none of them transferable. **Catching the reversal at Session 2 was load-bearing for the entire arc.**
+**All Sessions 3-5 INHERITED per-tile semantics.** Region-based versions of these would have been fundamentally different (per-region fertilizer; per-region wasteland; per-region rotation healing) — none transferable. **Catching the reversal at Session 2 was load-bearing for the entire arc.**
 
-### Architectural hooks already in place for the arc
+### Lessons captured during the arc (gameplay testing notes)
 
-- Sparse storage with default-100 baseline survives unclamp at Session 4.
-- `Planter.CROP_DATA` extension model: legumes add an entry with `soil_cost: -3` or similar.
-- `_soil_tint_for_tile` is the central rendering hook — future Session 4 wasteland tint extends this single method.
-- Save schema is additive: future sessions can add per-tile fertilizer level fields without reshaping the existing tile_soil_modifications field.
-- `SoilLevel` / `SoilActivity` enums extend cleanly for new states (WASTELAND for Session 4, FERTILIZED for Session 3).
+- **Worldgen quirk: `tile (0, 0)` is grass at worldgen v4** (Session 4 fixed the Session 3-era issue where the spawn-area-safety-net often placed a fallback lake at origin). For console testing flows, `(0, 0)` is now a reliable "fresh tile" starting point. **If something seems off, run `tile <x> <y>` first to verify the tile's actual state** — never assume.
 
-### What's NOT yet decided (defer to design pass at session start)
+- **Wasteland trigger requires soil-stuck-at-0**, NOT just briefly-at-0. The grace timer counts down only while soil == 0; regen lifts soil to 1 within 30 sec of reaching 0 if no active planter overlaps. So a single console `set_soil 0 0 0` won't trigger wasteland — soil regens before grace expires. Two reliable test paths:
+  1. **`wasteland <x> <y>` console command** (added Session 4) — directly forces scarred state, bypasses 60-sec grace. Use for quick UI/visual verification.
+  2. **Set up an active planter cluster** that keeps the tile depleted (overlapping 3×3 areas blocking regen). Use for "natural play" testing of the grace-period mechanic itself.
 
-- **Fertilizer Spreader area** — 3×3 like planter? 5×5 to be larger/more strategic? 7×7 for "big infrastructure"? Decide at Session 3.
-- **Compost recipe shape** — straw + scraps → compost? Just straw? Item costs? Decide at Session 3.
-- **Wasteland recovery cost** — fertilizer X → soil 0; X+Y → soil pristine? Or wasteland is permanent until paved over?  Decide at Session 4.
+- **Tests don't replace smoke for end-to-end UX flows.** Bug 2 from session-soil-exhaustion-4 PAUSE 1 (Premium Compost hotbar slot missing) was invisible at the data layer (`try_apply_fertilizer` works) but broken at the UX layer (no slot to click). The whole wasteland recovery path was unreachable via hand-apply. **Protocol for future sessions: when adding a new tier or category, smoke the full PLAYER path (click hotbar → see toast → check tile state), not just the data path (`assert apply succeeded`).** The "ship tooling without exhaustive UI testing, surface bugs on first real use" pattern from session-dev-console was validated: 2 real bugs caught on the Dev Console's first deployment, both fixed before commit.
 
 ---
 

@@ -28,7 +28,7 @@ extends RefCounted
 ## number genuinely needs adjusting, bump VERSION, document the diff in
 ## PROJECT_LOG, and tell the user to delete their save.
 
-const VERSION: int = 3   # v1 = per-tile noise (deprecated). v2 = patch placement. v3 = + ambient scattered trees.
+const VERSION: int = 4   # v1 = per-tile noise (deprecated). v2 = patch placement. v3 = + ambient scattered trees. v4 = fallback-lake inner-exclusion (no water at spawn origin).
 
 # ---------- world bounds ----------
 const WORLD_MIN: int = -256
@@ -144,6 +144,16 @@ const SPAWN_AREA_MIN_WATER: int = 12
 const SPAWN_AREA_MAX_WATER: int = 900  # 25% of 60×60
 const FALLBACK_LAKE_SIZE:   int = 4    # 4×4 = 16 tiles, comfortably above MIN
 const FALLBACK_PICK_TOP_N:  int = 10
+# Worldgen v4 (Session 4): fallback lake anchors must be at least this
+# many tiles from origin (Chebyshev). Without this, the fallback
+# selector — which sorts candidates by distance ASC — would consistently
+# place water AT or NEAR (0, 0) on low-natural-water seeds. The console
+# `tile 0 0` / `wasteland 0 0` testing flow expects a clean origin tile.
+# Players also tend to do their first builds near spawn; a forced lake
+# directly underfoot is a UX paper-cut. The exclusion radius doesn't
+# meaningfully affect the safety-net guarantee — there's plenty of room
+# in the rest of the spawn area to place 16 water tiles.
+const FALLBACK_LAKE_ORIGIN_EXCLUSION: int = 6   # tiles (Chebyshev)
 
 # ---------- seed offsets ----------
 # Each independent random source uses a distinct offset so they don't correlate.
@@ -427,10 +437,16 @@ func _ensure_spawn_area_water(world: GridWorld, seed: int) -> void:
 		return
 
 	# Collect eligible 4×4 grass anchors in spawn area.
+	# Worldgen v4: anchors within FALLBACK_LAKE_ORIGIN_EXCLUSION of origin
+	# are skipped — keeps spawn tile + small buffer dry across all seeds.
 	var candidates: Array[Vector2i] = []
 	var bound: int = SPAWN_AREA_RADIUS - FALLBACK_LAKE_SIZE
 	for ax in range(-bound, bound + 1):
 		for ay in range(-bound, bound + 1):
+			# Chebyshev distance check — exclude any anchor whose 4×4
+			# footprint would overlap the spawn-buffer zone.
+			if max(abs(ax), abs(ay)) < FALLBACK_LAKE_ORIGIN_EXCLUSION:
+				continue
 			if _is_NxN_clear(world, Vector2i(ax, ay), FALLBACK_LAKE_SIZE):
 				candidates.append(Vector2i(ax, ay))
 	if candidates.is_empty():

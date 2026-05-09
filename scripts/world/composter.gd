@@ -30,6 +30,9 @@ const _INPUT_TO_RECIPE: Dictionary = {
 	Items.Type.WHEAT:      "composter_low_wheat",
 	Items.Type.FLAX:       "composter_low_flax",
 	Items.Type.SUGAR_BEET: "composter_mid_beet",
+	# Session 4 wasteland tier — food-waste inputs:
+	Items.Type.BREAD:      "composter_high_bread",
+	Items.Type.LOAF_PACK:  "composter_high_loafpack",
 }
 
 # Visual constants — earthy compost-bin look.

@@ -256,10 +256,35 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 			if level == GridWorld.SoilLevel.HEALTHY:
 				soil_color = SOIL_REGEN_COLOR
 
+	# Wasteland override (session-soil-exhaustion-4): wasteland and grace
+	# get their own status text + color. Wasteland completely replaces the
+	# soil-line label; grace adds a "will scar in Xs" countdown.
+	var is_wasteland: bool = world.is_wasteland_at(target_anchor)
+	var grace_remaining: float = world.tile_wasteland_grace_remaining(target_anchor)
+	if is_wasteland:
+		level_label = " (WASTELAND)"
+		soil_color = SOIL_DEPLETED_COLOR
+		activity_label = ""   # wasteland blocks regen — activity label is misleading
+	elif grace_remaining > 0.0:
+		level_label = " (DEAD — will scar in %.0fs)" % grace_remaining
+		soil_color = SOIL_DEPLETED_COLOR
+		activity_label = ""
+
 	var soil_text: String = "Soil: %d / %d%s%s" % [
 		soil, GridWorld.TILE_SOIL_FULL, level_label, activity_label]
 	draw_string(font, Vector2(PADDING, y), soil_text,
 		HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, soil_color)
+
+	# Wasteland action prompt (session-soil-exhaustion-4): tells the
+	# player how to recover. Shown directly under the soil line, replaces
+	# the fertilizer line for wasteland tiles (fertilizer state is
+	# meaningless on scarred soil — no regen runs).
+	var prompt_y: float = y + 14
+	if is_wasteland:
+		draw_string(font, Vector2(PADDING, prompt_y),
+			"Apply Premium Compost to restore.",
+			HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, SOIL_DEPLETED_COLOR)
+		return   # don't render fertilizer line on wasteland
 
 	# Fertilizer line (session-soil-exhaustion-3) — only when active boost
 	# is on this tile. Shown directly under the soil line so the cause-of-
@@ -271,7 +296,7 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 		var multiplier: float = GridWorld.fertilizer_multiplier(fert_tier)
 		var fert_text: String = "Fertilizer: %s (%.0fs remaining, %.1fx regen)" % [
 			Items.name_of(fert_tier), remaining, multiplier]
-		draw_string(font, Vector2(PADDING, y + 14), fert_text,
+		draw_string(font, Vector2(PADDING, prompt_y), fert_text,
 			HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, SOIL_REGEN_COLOR)
 
 func _resource_lines(t: Tile) -> Array:

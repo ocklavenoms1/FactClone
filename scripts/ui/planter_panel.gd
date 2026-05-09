@@ -106,9 +106,17 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 
 	# Status text. Soil-zero behavior keys off CENTER tile soil (the gate
 	# logic in Planter.tick checks tile_soil_health(b.anchor)).
+	# Wasteland (session-soil-exhaustion-4) is the most prominent state —
+	# overrides the soil-zero messaging because it's a more permanent
+	# loss that requires a specific recovery action.
+	var center_wasteland: bool = world != null and world.is_wasteland_at(building.anchor)
 	var status_text: String
 	var status_color: Color
-	if ripe:
+	if center_wasteland and growth == 0:
+		# Wasteland blocks new cycles entirely — Premium Compost required.
+		status_text = "Status: IDLE — tile %s is WASTELAND" % str(building.anchor)
+		status_color = STATUS_DEPLETED
+	elif ripe:
 		if center_soil <= 0:
 			status_text = "Status: Ripe — extract; center soil depleted, no new crop"
 			status_color = STATUS_DEPLETED
@@ -126,6 +134,12 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 		status_color = STATUS_GROWING
 	draw_string(font, Vector2(x, area.position.y + 168),
 		status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, status_color)
+	# Wasteland action prompt — second line below the status, only when
+	# the planter is wasteland-idled.
+	if center_wasteland and growth == 0:
+		draw_string(font, Vector2(x, area.position.y + 184),
+			"Action: Apply Premium Compost to %s." % str(building.anchor),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, STATUS_DEPLETED)
 
 	# "Output:" label above the centered output slot (now at y=200).
 	draw_string(font, Vector2(x, area.position.y + 192),

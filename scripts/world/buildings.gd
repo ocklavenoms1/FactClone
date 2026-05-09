@@ -482,15 +482,18 @@ const DATA: Dictionary = {
 		# arrives. Output buffer accepts both compost tiers (since recipes
 		# differ by input). No fuel — biological process. Reuses
 		# ProcessorPanel default layout (input → progress → output).
+		# Composter input/output accepts grew at session-soil-exhaustion-4:
+		# bread + loaf_pack feed HIGH-tier composting; output buffer accepts
+		# COMPOST_HIGH alongside the existing tiers.
 		"slot_layout": [
 			{
 				"id": "input", "kind": "input",
-				"accepts": [Items.Type.WHEAT, Items.Type.FLAX, Items.Type.SUGAR_BEET],
+				"accepts": [Items.Type.WHEAT, Items.Type.FLAX, Items.Type.SUGAR_BEET, Items.Type.BREAD, Items.Type.LOAF_PACK],
 				"max_stack": 8, "state_field": "in_buffer",
 			},
 			{
 				"id": "output", "kind": "output",
-				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID],
+				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID, Items.Type.COMPOST_HIGH],
 				"max_stack": 8, "state_field": "out_buffer",
 			},
 		],
@@ -511,7 +514,9 @@ const DATA: Dictionary = {
 		"slot_layout": [
 			{
 				"id": "input", "kind": "input",
-				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID],
+				# Session 4: HIGH tier added so applicators can be belt-fed
+				# Premium Compost for wasteland-recovery automation.
+				"accepts": [Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID, Items.Type.COMPOST_HIGH],
 				"max_stack": 16, "state_field": "in_buffer",
 			},
 		],

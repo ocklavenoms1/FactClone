@@ -109,7 +109,16 @@ extends RefCounted
 ##              the field — hard-fail with OS.alert per existing policy.
 ##              Items enum gained COMPOST_LOW + COMPOST_MID at the end
 ##              (append-only — no enum-int reuse risk for v16 ints).
-const SAVE_VERSION: int = 17
+##   v17 → v18: Wasteland mechanics (session-soil-exhaustion-4). New top-
+##              level field `tile_wasteland_state`: sparse Array of
+##              [x, y, scarred_bool, decay_remaining_float]. Absent tile =
+##              healthy (no grace, no scar). Scarred persists; grace is
+##              countdown to scarring.
+##              Items enum gained COMPOST_HIGH (append-only). Composter
+##              now accepts BREAD + LOAF_PACK as recipe inputs.
+##              v17 saves don't have the wasteland field — hard-fail with
+##              OS.alert per existing policy.
+const SAVE_VERSION: int = 18
 const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 
 ## Path used by save_game / load_game / save_exists. Tests override this
@@ -162,12 +171,23 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 	# v17: serialize tile_fertilizer_state. Sparse — only tiles with active
 	# boost appear. Shape: Array of [x, y, tier, remaining_sec] where tier
-	# is an Items.Type (COMPOST_LOW or COMPOST_MID) and remaining is the
-	# seconds left until the boost expires. Absent tile = no boost.
+	# is an Items.Type (COMPOST_LOW, COMPOST_MID, or COMPOST_HIGH at v18)
+	# and remaining is the seconds left until the boost expires. Absent
+	# tile = no boost.
 	var tile_fert_data: Array = []
 	for pos in grid_world.tile_fertilizer_state.keys():
 		var s: Dictionary = grid_world.tile_fertilizer_state[pos]
 		tile_fert_data.append([pos.x, pos.y, int(s["tier"]), float(s["remaining"])])
+
+	# v18: serialize tile_wasteland_state. Sparse — only tiles in grace
+	# OR scarred appear. Shape: Array of [x, y, scarred_bool,
+	# decay_remaining_float]. Both fields persist (grace remaining
+	# survives save/load so a tile mid-scarring picks up where it left
+	# off). Absent tile = healthy.
+	var tile_wasteland_data: Array = []
+	for pos in grid_world.tile_wasteland_state.keys():
+		var ws: Dictionary = grid_world.tile_wasteland_state[pos]
+		tile_wasteland_data.append([pos.x, pos.y, bool(ws.get("scarred", false)), float(ws.get("decay_remaining", 0.0))])
 
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
@@ -179,6 +199,7 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"resource_state_modifications": resource_mods_data,
 		"tile_soil_modifications": tile_soil_data,
 		"tile_fertilizer_state": tile_fert_data,
+		"tile_wasteland_state": tile_wasteland_data,
 		"explored_regions": explored_data,
 		"buildings": buildings_data,
 		"player_inventory": player_inventory.to_array(),
@@ -318,6 +339,18 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		grid_world.tile_fertilizer_state[fert_tile] = {
 			"tier": int(entry[2]),
 			"remaining": float(entry[3]),
+		}
+
+	# v18: restore tile_wasteland_state. Sparse — absent tiles are
+	# healthy (no grace, no scar). Both fields persist so a tile
+	# mid-scarring picks up from its saved decay_remaining. Pre-v18
+	# saves hard-fail at version check above.
+	grid_world.tile_wasteland_state.clear()
+	for entry in data.get("tile_wasteland_state", []):
+		var ws_tile := Vector2i(int(entry[0]), int(entry[1]))
+		grid_world.tile_wasteland_state[ws_tile] = {
+			"scarred": bool(entry[2]),
+			"decay_remaining": float(entry[3]),
 		}
 
 	# v12: restore explored regions as fog. Active state will be set by

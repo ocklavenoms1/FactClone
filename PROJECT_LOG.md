@@ -9,6 +9,140 @@ Each entry has three sections:
 
 ---
 
+## Soil exhaustion — Session 4 — **WASTELAND MECHANICS + ARC CLOSE-OUT**
+
+**Date:** 2026-05-08
+**Tag:** `session-soil-exhaustion-4`
+**Save:** v17 → v18 (hard-fail v17 per existing policy; gracefully regenerates fresh world via post-3.5 hotfix)
+**Worldgen:** v3 → v4 (fallback-lake origin-exclusion — no water at spawn origin)
+
+**This is the close-out of the multi-session soil arc.** Sessions 1–4 ship a complete stewardship loop: deplete fast → grace warning → wasteland scarring → Premium Compost restoration. Real failure state. Real recovery path. Optional Session 5 (legumes) deferred indefinitely as polish — the core mechanic is complete without it.
+
+### What shipped
+
+**Wasteland state machine (the mechanic):**
+- Tile soil at 0 starts a 60-second grace timer (`WASTELAND_GRACE_SEC`).
+- Grace timer counts down ONLY while soil stays at 0; soil rising to ≥1 erases the grace entry (recoverable mid-grace).
+- Grace expiry → tile becomes scarred (persistent `tile_wasteland_state[pos].scarred = true`).
+- Scarred tiles SKIP all passive regen — `_tick_soil_regen` early-continues for them.
+- Visual: `WASTELAND_TINT` (near-black brown) overlaid + 2 diagonal `WASTELAND_CRACK` lines forming an X near tile center. Distinct from the existing DEAD tint (which represents "soil at 0, recoverable").
+- Same-tick rescue path: when regen lifts soil from 0 → >0 in a single tick AND grace was active, the grace state erases at the end of that same tick (no 1-frame delay where grace persists past the rescue).
+
+**`COMPOST_HIGH` ("Premium Compost") activated** (was deferred from Session 3):
+- Items.Type.COMPOST_HIGH appended to enum, color `Color(0.22, 0.16, 0.10)` — top of the brown gradient.
+- Two new Composter recipes (`composter_high_bread`, `composter_high_loafpack`):
+  - `BREAD × 2 → COMPOST_HIGH × 1` at 200 ticks (10 sec)
+  - `LOAF_PACK × 1 → COMPOST_HIGH × 1` at 200 ticks
+- Composter slot_layout `accepts` lists extended; `_INPUT_TO_RECIPE` map gains BREAD + LOAF_PACK entries.
+- Fertilizer Applicator slot accepts HIGH alongside LOW + MID.
+- `fertilizer_multiplier(HIGH) = 8.0`, `fertilizer_duration(HIGH) = 120.0` extending the existing tier table.
+
+**Restoration via `try_apply_fertilizer`:**
+- HIGH on scarred tile → `_restore_wasteland(pos)` erases scarred flag + snaps `tile_soil_modifications[pos]` to **30** (`WASTELAND_RESTORE_SOIL`) + applies HIGH boost (8× for 120s).
+- HIGH on healthy tile → applies HIGH boost (just a stronger MID — no soil snap).
+- LOW or MID on scarred tile → REJECTED with explicit toast ("only Premium Compost restores wasteland"), no inventory consumption. Prevents wasted lower-tier compost on scarred soil where it wouldn't help anyway.
+- Stacking rules extended: HIGH > MID > LOW.
+
+**Recovery timing math (designed, not arbitrary):**
+- Snap-to-30 + 8× boost for 120 sec = 32 soil points recovered in boost window → tile at 62 at boost end.
+- 62 → 100 via natural regen (38 pts × 30 sec/pt) ≈ 19 minutes.
+- **Total wasteland-to-fully-healed: ~21 min.** This is the intended "wasteland is real loss" timing. Tunable from playtest data; do not change without playtest evidence.
+
+**Planter idle gate** (extends Session 1 soil-zero gate):
+- Planter at growth==0 stays IDLE if `tile_soil_health(anchor) <= 0` OR `is_wasteland_at(anchor)`.
+- Wasteland check is structurally redundant (wasteland implies soil 0) but explicit so future soil-gate semantics changes don't accidentally remove the wasteland gate.
+- In-progress crops (growth > 0) still finish gracefully — wasteland blocks NEW cycles only.
+
+**Q-inspect three states** in `info_panel.gd`:
+| State | Soil line | Action prompt |
+|---|---|---|
+| Healthy / damaged / dying | `Soil: N / 100 (level)` + activity suffix | (existing fertilizer line if active) |
+| Soil 0, in grace | `Soil: 0 / 100 (DEAD — will scar in Xs)` red | (existing fertilizer line if active) |
+| Wasteland scarred | `Soil: 0 / 100 (WASTELAND)` red | `Apply Premium Compost to restore.` |
+
+**PlanterPanel wasteland messaging:**
+- `Status: IDLE — tile (X, Y) is WASTELAND` (red)
+- `Action: Apply Premium Compost to (X, Y).` (red, second line)
+
+**Save schema v17 → v18:**
+- New top-level field `tile_wasteland_state`: sparse Array of `[x, y, scarred_bool, decay_remaining_float]`.
+- Both fields persist (mid-scarring tiles resume countdown after load).
+- v17 saves hard-fail with OS.alert; post-3.5 hotfix gracefully regenerates fresh world.
+
+**Worldgen v3 → v4 (`FALLBACK_LAKE_ORIGIN_EXCLUSION = 6`):**
+- The spawn-area-safety-net `_ensure_spawn_area_water` was placing fallback 4×4 lakes at the closest-to-origin candidate, which often centered on (0, 0) on low-natural-water seeds.
+- Caught at PAUSE 1 re-smoke when the user noticed every fresh world had water at origin.
+- Fix: anchors within Chebyshev distance 6 of origin are excluded from the fallback candidate pool. Spawn-safety floor (`SPAWN_AREA_MIN_WATER = 12`) still met from the rest of the spawn area.
+- Bumped `WorldGenerator.VERSION` (procgen change → same-seed-different-output → existing v3 saves hard-fail). Hotfix from post-3.5 catches the fail and regenerates.
+
+**Dev Console additions:**
+- `wasteland <x> <y>` command — directly forces scarred state at a tile (bypasses 60-sec grace). Required for testing wasteland mechanics without setting up active planters to keep soil pinned at 0.
+- `tile <x> <y>` now shows base/overlay names (`Base: GRASS, Overlay: NONE`) instead of raw enum ints.
+- `tile` output gains a wasteland status line (`Wasteland: SCARRED` or `in grace, will scar in Xs`).
+- `fertilize` accepts `high` tier in addition to `low | mid`.
+- `place` auto-overlay-set now picks the first non-NONE overlay from the building's `requires_overlay` list (e.g., SOIL_TILLED for Planter, STONE for Mill) instead of blanket STONE.
+
+**Hotbar Soil category:**
+- Grew from 4 slots to 5: added `Apply Premium Compost` (item_apply for COMPOST_HIGH). Inventory-empty slot dimming works for HIGH same as the existing tiers.
+- This was Bug 2 from PAUSE 1 — the entire wasteland recovery path was unreachable until this slot was added.
+
+**Tests: 30 → 31 passing**, but the new test file (`test_wasteland.gd`) has 9 sub-suites:
+- 1. Trigger: soil 0 + grace expiry → scarred
+- 2. Grace reset: soil rises above 0 before expiry → no scar
+- 3. Wasteland blocks regen: scarred tile + 60 sec ticks, soil stays at 0
+- 4. Planter idle on wasteland: planter on scarred tile, growth stays at 0
+- 5. Premium Compost on wasteland: scarred flag erased, soil → 30, HIGH boost applied; LOW/MID on scarred REJECTED
+- 6. Save round-trip preserves grace + scarred (v18)
+- 7. Composter HIGH recipes: BREAD × 2 → HIGH, LOAF_PACK × 1 → HIGH
+- 8. Stacking: HIGH > MID > LOW (apply MID/LOW to HIGH-fertilized tile rejected)
+- 9. (14i) Grace rescue: LOW boost during grace + 30s regen → grace state erased, no scar
+
+(The "+1 test" goes from 30 → 31 in test_runner output but the file packs 9 sub-suites internally.)
+
+### Decisions
+
+- **60-second grace period.** Player gets ~2 wheat-harvest cycles to react before scarring. Tunable; chosen for "felt like real soil exhaustion" rather than binary on/off.
+- **Snap-to-30 + 8× boost (NOT snap-to-100).** Wasteland recovery should feel like a real loss-recovery cycle, not a minor speed bump. The ~21 min total recovery is the design target. If playtest says "feels too harsh," tune snap-to-50 or extend boost duration. Don't tune without playtest data.
+- **HIGH on healthy tile = stronger MID (8×/120s).** Considered restricting HIGH to wasteland-only ("save your premium compost for emergencies"). Rejected: universal usefulness wins over enforced scarcity. Players paying the upstream cost (bread chain) self-regulate. Could be revisited if playtest reveals exploit pattern (e.g., players HIGH-spam non-wasteland fields for trivial speedup).
+- **Both BREAD AND LOAF_PACK recipes for HIGH.** Loaf pack is the better deal (1 input vs 2, but each loaf_pack costs 4 bread upstream). Intentional design pressure to build the full Packager chain for sustainable wasteland recovery.
+- **Wasteland blocks crop production (planter idles), NOT building placement.** Player can build a composter on a wasteland tile to recover. Wasteland blocks the *crop production* mechanic, not infrastructure. Considered blocking placement; rejected — too restrictive, no thematic reason.
+- **Existing planters stay placed when their tile transitions to wasteland.** Planter goes idle (visible in PlanterPanel + Q-inspect). Considered destroying — rejected, would force players to remember placement positions, bad UX.
+- **Explicit tile_wasteland_state dict (NOT computed from soil 0 + duration).** Both grace progress and scarred flag must persist across saves. Computing from soil-time-at-zero would lose state on every save/load. Sparse parallel dict mirrors existing tile_fertilizer_state pattern.
+- **Same-tick grace rescue** (post-increment check). Without this, grace state would persist for one extra tick after regen lifted soil > 0. Doesn't affect correctness (next tick clears) but affects test predictability and player feel ("I just rescued this tile, why does the panel still say grace?"). Same-tick erasure makes "rescue during grace" feel responsive.
+- **Worldgen v3 → v4 origin-exclusion as a same-session fix.** Caught during PAUSE 1 re-smoke. Could have deferred to a separate hotfix. Shipped here because (a) it directly affects the testing flow this session validates ("`wasteland 0 0` requires (0, 0) to be land"), and (b) the procgen version bump is gracefully handled by the post-3.5 hotfix anyway.
+
+### Lessons
+
+- **PAUSE 1 paid off immediately on first Dev Console use.** Test coverage was the commit gate for the Dev Console session itself; manual smoke deferred to "first real-use." That first real-use was THIS session, and it caught 2 real bugs:
+  - **Bug 1** (display): `tile <x> <y>` showed raw enum ints (`base: 0, overlay: 0`) instead of names. Cosmetic, easy fix.
+  - **Bug 2** (CRITICAL): Premium Compost hotbar slot was MISSING. The entire wasteland recovery path via hand-apply was unreachable. Tests didn't catch this because tests bypass the hotbar layer entirely (call `try_apply_fertilizer` directly). Without smoke, this would have shipped — wasteland-as-a-mechanic, not wasteland-as-a-feature.
+  - The "ship tooling without exhaustive UI testing, surface bugs on first real use" pattern from session-dev-console is now validated. Both classes of bug (cosmetic + critical-feature-gap) were caught in the cheapest possible context.
+- **Tests don't replace smoke for end-to-end UX flows.** Test 5 in `test_wasteland.gd` directly calls `try_apply_fertilizer(pos, COMPOST_HIGH)` and verifies state mutation — and passes. But the player journey is "click hotbar slot → check toast → check tile state." Bug 2 was invisible at the data layer (the apply function works) but broken at the UX layer (no slot to click). **Future protocol: when adding a new tier or category, smoke the full PLAYER path, not just the data path.** Captured in NOTES.md.
+- **Spawn-area worldgen quirks deserve their own watchlist.** "Every world spawns with water at origin" was a latent issue from the spawn-safety-net design — the candidate-sort algorithm picked the closest-to-origin anchor by construction. Hadn't surfaced because previous sessions didn't test directly at (0, 0) — they used arbitrary coordinates. The dev console encourages (0, 0) as the natural test origin, which exposed the issue. **Lesson: as testing tools change, latent issues surface where they couldn't before.**
+- **Three architectural patterns from this arc, all earned:** (a) **per-tile-not-region** (Session 1 → Session 2 reversal #5), (b) **manual-before-automation** (3 instances now: mining, soil hand-apply, soil applicator), (c) **explicit-state-not-computed** (per-tile soil, fertilizer, wasteland — all sparse parallel dicts with persistent state, not derived). All three came from playtest pressure, not advance design. The arc that started as "deplete soil when crops harvest" ended with a complete stewardship-tension system because each session learned from the previous one's playtest. **Multi-session arcs work when each session genuinely learns from the previous one's lived behavior.**
+
+### Roadmap implications — soil arc COMPLETE
+
+| Session | Status | Tag |
+|---|---|---|
+| Session 1 — region-based soil_health (REVERSED) | shipped → reversed | `session-soil-exhaustion-1` |
+| Session 2 — per-tile refactor + visual states + regen | SHIPPED | `session-soil-exhaustion-2` |
+| Session 3 — Composter + hand-apply fertilizer + COMPOST_LOW/MID | SHIPPED | `session-soil-exhaustion-3` |
+| Session 3.5 — Fertilizer Applicator + composter prefer_dir fix | SHIPPED | `session-soil-exhaustion-3-5` |
+| Session 4 — Wasteland + COMPOST_HIGH + arc close-out | **SHIPPED** | `session-soil-exhaustion-4` |
+| Session 5 — Legumes / crop rotation healing | OPTIONAL polish, deferred indefinitely | — |
+
+Save schema arc: v14 → v15 (region) → v16 (per-tile) → v17 (fertilizer) → v18 (wasteland). 4 schema bumps in the arc; one quick-fix UX session (post-3.5 schema-mismatch fallthrough); migration framework still queued.
+
+### Known follow-ups
+
+- **Session 5 (legumes)** deferred indefinitely. Negative-soil-cost crops (legumes) heal their 3×3 area instead of depleting. Player learns "wheat → flax → legume + fertilize the dying patches" rotation. Optional polish — the wasteland mechanic completes the arc on its own.
+- **Migration framework** still queued (now post-Dev Console + post-Session-4). Replaces hard-fail with chained migration steps. Would let players preserve save data across the 4 schema bumps in this arc.
+- **Premium Compost universal-usefulness** could be revisited if playtest reveals HIGH-spam exploit. No change without evidence.
+- **Wasteland recovery timing (~21 min total)** flagged for playtest re-confirmation before any tuning.
+
+---
+
 ## Dev Console — **TOOLING INVESTMENT, NOT GAMEPLAY**
 
 **Date:** 2026-05-08

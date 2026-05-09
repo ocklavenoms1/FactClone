@@ -75,14 +75,20 @@ static func tick(b: Building, world = null) -> void:
 	var max_growth: int = max_growth_for(crop_of(b))
 
 	# Soil-zero gate (session-soil-exhaustion-1, refactored at session 2 to
-	# per-tile): block START of a new growth cycle when the planter's
-	# CENTER tile soil_health is 0. In-progress crops (growth > 0) keep
-	# ticking and finish gracefully. Per design, only the center tile
-	# matters for the gate — the planter's crop is rooted there. Neighbors
-	# can be depleted without blocking this planter.
+	# per-tile, extended at session 4 for wasteland): block START of a
+	# new growth cycle when the planter's CENTER tile soil_health is 0
+	# OR the tile is wasteland (scarred). In-progress crops (growth > 0)
+	# keep ticking and finish gracefully. Per design, only the center
+	# tile matters for the gate — the planter's crop is rooted there.
+	#
+	# The two checks are nearly redundant in practice (wasteland implies
+	# soil 0). Keeping both makes intent explicit and survives any
+	# future change where soil-zero gate semantics shift.
 	if growth == 0 and world != null:
 		if world.tile_soil_health(b.anchor) <= 0:
 			return  # idle: don't start a new cycle in dead soil
+		if world.is_wasteland_at(b.anchor):
+			return  # idle: tile is scarred wasteland — needs Premium Compost
 
 	if growth < max_growth:
 		b.state["growth"] = growth + 1

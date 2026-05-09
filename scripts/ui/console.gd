@@ -293,6 +293,11 @@ func _register_commands() -> void:
 			"usage": "tp <x> <y>",
 			"help": "Teleport the player to tile (x, y).",
 		},
+		"wasteland": {
+			"fn": "_cmd_wasteland",
+			"usage": "wasteland <x> <y>",
+			"help": "Force tile (x, y) into scarred wasteland state. Useful for testing wasteland visuals + Premium Compost recovery without setting up active planters to keep soil at 0. Soil is also forced to 0.",
+		},
 	}
 
 # ---------- arg-parsing helpers ----------
@@ -449,7 +454,7 @@ func _cmd_deplete_area(args: Array) -> String:
 
 func _cmd_fertilize(args: Array) -> String:
 	if args.size() != 3:
-		return "Usage: fertilize <x> <y> <tier> (tier = low or mid)"
+		return "Usage: fertilize <x> <y> <tier> (tier = low | mid | high)"
 	var x_parsed: Array = _parse_int(String(args[0]))
 	var y_parsed: Array = _parse_int(String(args[1]))
 	if not x_parsed[0] or not y_parsed[0]:
@@ -460,8 +465,10 @@ func _cmd_fertilize(args: Array) -> String:
 		tier = Items.Type.COMPOST_LOW
 	elif tier_str == "mid":
 		tier = Items.Type.COMPOST_MID
+	elif tier_str == "high":
+		tier = Items.Type.COMPOST_HIGH
 	else:
-		return "Tier must be 'low' or 'mid' (got '%s')." % args[2]
+		return "Tier must be 'low', 'mid', or 'high' (got '%s')." % args[2]
 	var pos: Vector2i = Vector2i(x_parsed[1], y_parsed[1])
 	if not _in_world_bounds(pos):
 		return "Tile %s is outside world bounds." % str(pos)
@@ -502,15 +509,24 @@ func _cmd_place(args: Array) -> String:
 	if not grid_world.place_building(btype, pos, dir):
 		# place_building set last_building_place_error — surface it.
 		var err: String = grid_world.last_building_place_error
-		# Common: "requires overlay X" — try fixing by setting STONE overlay
-		# (universal acceptance for most buildings). If that doesn't help,
-		# user can debug with `tile <x> <y>` to see what's blocking.
+		# Auto-set the FIRST non-NONE overlay from the building's
+		# requires_overlay list. Buildings differ — Planter wants
+		# SOIL_TILLED, Mill wants STONE/PATH, etc. Try the building's
+		# own preferred overlay rather than blanket STONE.
 		var pre_overlay: int = grid_world.overlay_at(pos)
-		grid_world.set_overlay(pos, Terrain.Overlay.STONE)
-		if grid_world.place_building(btype, pos, dir):
-			return "Placed %s at %s (auto-set STONE overlay)." % [Buildings.name_of(btype), str(pos)]
-		# Restore overlay; placement still fails for some other reason.
-		grid_world.set_overlay(pos, pre_overlay)
+		var data: Dictionary = Buildings.DATA.get(btype, {})
+		var requires_overlay: Array = data.get("requires_overlay", [])
+		var picked_overlay: int = -1
+		for ov in requires_overlay:
+			if int(ov) != Terrain.Overlay.NONE:
+				picked_overlay = int(ov)
+				break
+		if picked_overlay >= 0:
+			grid_world.set_overlay(pos, picked_overlay)
+			if grid_world.place_building(btype, pos, dir):
+				return "Placed %s at %s (auto-set %s overlay)." % [Buildings.name_of(btype), str(pos), Terrain.overlay_name(picked_overlay)]
+			# Restore overlay; placement still fails for some other reason.
+			grid_world.set_overlay(pos, pre_overlay)
 		return "Cannot place %s at %s: %s" % [Buildings.name_of(btype), str(pos), err]
 	return "Placed %s at %s (dir %s)." % [Buildings.name_of(btype), str(pos), Belt.DIR_NAMES[dir]]
 
@@ -582,6 +598,26 @@ func _cmd_tick_speed(args: Array) -> String:
 	TickSystem.tick_rate_multiplier = m
 	return "Tick speed → %.2f× (was %.2fx)." % [m, TickSystem.tick_rate_multiplier]
 
+func _cmd_wasteland(args: Array) -> String:
+	if args.size() != 2:
+		return "Usage: wasteland <x> <y>"
+	var x_parsed: Array = _parse_int(String(args[0]))
+	var y_parsed: Array = _parse_int(String(args[1]))
+	if not x_parsed[0] or not y_parsed[0]:
+		return "Usage: wasteland <x> <y> (both args must be integers)"
+	var pos: Vector2i = Vector2i(x_parsed[1], y_parsed[1])
+	if not _in_world_bounds(pos):
+		return "Tile %s is outside world bounds." % str(pos)
+	if grid_world == null:
+		return "Cannot wasteland — grid_world not wired."
+	# Direct write — soil to 0 + scarred flag set. Bypasses grace timer
+	# entirely. Useful for testing wasteland mechanics without setting
+	# up active planters to keep soil pinned at 0 for 60 sec.
+	grid_world.tile_soil_modifications[pos] = 0
+	grid_world.tile_wasteland_state[pos] = {"scarred": true, "decay_remaining": 0.0}
+	grid_world.tile_regen_progress.erase(pos)
+	return "Tile %s → WASTELAND (scarred). Apply Premium Compost to restore." % str(pos)
+
 func _cmd_tile(args: Array) -> String:
 	if args.size() < 2 or args.size() > 3:
 		return "Usage: tile <x> <y> [radius]"
@@ -617,7 +653,17 @@ func _format_tile_detail(pos: Vector2i) -> String:
 	if fert_tier >= 0:
 		var remaining: float = grid_world.tile_fertilizer_remaining(pos)
 		lines.append("  Fertilizer: %s (%.1fs remaining)" % [Items.name_of(fert_tier), remaining])
-	lines.append("  Base: %d, Overlay: %d" % [grid_world.base_at(pos), grid_world.overlay_at(pos)])
+	# Wasteland line (Session 4) — show scarred / in-grace / no.
+	if grid_world.is_wasteland_at(pos):
+		lines.append("  Wasteland: SCARRED (apply Premium Compost to restore)")
+	else:
+		var grace: float = grid_world.tile_wasteland_grace_remaining(pos)
+		if grace > 0.0:
+			lines.append("  Wasteland: in grace, will scar in %.1fs" % grace)
+	# Base/overlay names instead of raw enum ints.
+	var base: int = grid_world.base_at(pos)
+	var overlay: int = grid_world.overlay_at(pos)
+	lines.append("  Base: %s, Overlay: %s" % [Terrain.base_name(base), Terrain.overlay_name(overlay)])
 	if grid_world.has_building_at(pos):
 		var b: Building = grid_world.building_at(pos)
 		var bname: String = Buildings.name_of(b.type) if b != null else "(?)"
