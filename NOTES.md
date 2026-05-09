@@ -24,9 +24,9 @@ If `console.gd` grows beyond ~800 lines (e.g., adding more commands or richer UI
 
 ---
 
-## Schema-mismatch UX — quick fix SHIPPED, migration framework pending
+## Schema-mismatch UX — both fixes SHIPPED
 
-**Status (post-3.5 hotfix):** quick fix landed as a standalone post-Session-3.5 hotfix. Migration framework remains a queued full session — **now unblocked by Dev Console** (rapid migration testing was the primary defer rationale).
+**Status:** quick fix shipped as a standalone post-3.5 hotfix; migration framework shipped at `session-save-migration`. Both halves of the gap captured in NOTES.md after session-soil-exhaustion-3-5 PAUSE 5 are now closed.
 
 ### Quick fix — SHIPPED (~10 LOC)
 
@@ -34,13 +34,17 @@ When `SaveSystem.load_game` returns `result.success == false` (schema mismatch, 
 
 Verified by writing a deliberately-invalid `version: 99` save and launching: `push_error` + `OS.alert` fire as before, then `push_warning("Save load failed... — generating fresh world.")` fires, and the player sees a populated world rather than an empty one.
 
-### Migration framework — PENDING (full session, deferred)
+### Migration framework — SHIPPED (`session-save-migration`)
 
-When loaded `version < SAVE_VERSION`, run a chain of migration steps (`migrate_v15_to_v16`, `migrate_v16_to_v17`, …) that mutate the parsed Dictionary in place before applying it to the world. Each migration step is its own static function with documented field changes. Replaces hard-fail with graceful upgrade.
+`MIGRATIONS` Dict in `save_system.gd` keys source-version → migration method name. `_try_migrate(data, from, to)` walks the chain one step at a time, verifying each step bumps the version field correctly. `_dispatch_migration(name, data)` routes via match-statement (GDScript static dispatch via `Object.call(name)` doesn't work on static methods — match was the foolproof fix).
 
-**Why this is still worth doing post-quick-fix:** the quick fix protects players from being stranded in an empty world, but their save data is still LOST on every schema bump (fresh world = clean slate). Migration framework preserves player progress across schema changes — load-bearing for any non-dev player.
+`load_game` now: read JSON → if version < SAVE_VERSION, run migrations → if version > SAVE_VERSION, hard-fail (forward-only) → otherwise apply data to world. Worldgen version stays as a separate hard-fail axis (procgen-output changes can't be migrated). When a migration gap exists (e.g., v14 has no MIGRATIONS[14]), `_try_migrate` returns null → load fails → post-3.5 hotfix regenerates fresh world. Player never stranded.
 
-**Defer rationale (resolved):** wanted Dev Console first so migration steps can be tested rapidly via console commands rather than building full save scenarios manually. Console SHIPPED at `session-dev-console`. Migration framework is now the next natural session after the soil arc closes (Session 4 wasteland is also a candidate — could happen in either order).
+**Where migrations live:** centralized in `save_system.gd` for now — single file, easy to grep, all migrations share the same Dictionary→Dictionary signature. **If `MIGRATIONS` grows past ~5 entries OR a single migration exceeds ~80 lines, refactor to per-file modules under `scripts/systems/migrations/v<N>_to_v<N+1>.gd`.** ~30-min refactor when triggered. Today (1 migration, ~10 lines) the single-file shape is right.
+
+**Schema-bump protocol** lives in CONVENTIONS.md → "Save schema" section. Replaces the previous "hard-fail and document why" protocol. New protocol: bump SAVE_VERSION → write migration → register → dispatch case → test → PROJECT_LOG.
+
+**Breaking-change reset point: v17.** Pre-v17 saves are not preserved. Documented in CONVENTIONS.md.
 
 ### First-encounter receipt
 

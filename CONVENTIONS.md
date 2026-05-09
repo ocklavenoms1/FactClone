@@ -95,7 +95,45 @@ If you find yourself mixing direct reads and `.get()` reads on the same dict, le
 
 ## Save schema
 
-`SAVE_VERSION` is bumped in lockstep with any change to the data shape that load can't decode. Old saves hard-fail with `OS.alert` — no migration code. Document the bump in the comment block at the top of `save_system.gd`.
+`SAVE_VERSION` is bumped in lockstep with any change to the data shape that load can't decode. Each schema bump must ship with a forward-migration step so existing saves keep working across game updates.
+
+### Schema-bump protocol
+
+When changing the save format:
+
+1. **Bump `SAVE_VERSION`** in `save_system.gd`.
+2. **Add a migration log entry** at the top of `save_system.gd` (existing comment block — short paragraph describing the diff).
+3. **Write `_migrate_v<N>_to_v<N+1>(data: Dictionary) -> Dictionary`** as a static method on SaveSystem. Add new fields with sensible defaults, transform/restructure as needed, **bump `data["version"]` to N+1 as the last step**.
+4. **Register in `MIGRATIONS`** Dict: `MIGRATIONS[N] = "_migrate_v<N>_to_v<N+1>"`.
+5. **Add a match-case** in `_dispatch_migration(method_name, data)` that routes to the new function. (GDScript static-method dispatch via `Object.call(name)` doesn't work — match-statement is the foolproof pattern.)
+6. **Add at least one test** in `test_save_migration.gd` exercising the new migration's happy path. End-to-end test (write a v(N) save file, call `load_game`, assert state) is high-value.
+7. **PROJECT_LOG entry** documenting the schema diff.
+
+### Migration robustness
+
+Migrations run on player-authored data that may have been hand-edited, partially corrupted, or produced by a slightly different game build. Defensive coding pays off:
+
+- **Use `data.get(key, default)`** when reading fields that didn't exist in the prior version. Direct `data[key]` will crash on a hand-truncated save; `.get()` returns the default.
+- **Validate types before coercing.** A field that was `Array` in v(N) but `Dict` in v(N+1) is a real migration shape — check `typeof(data[key]) == TYPE_ARRAY` before iterating.
+- **Floats round-trip through JSON as floats** (`60.0`, not `60`). When migrating int fields to float (or vice versa), explicit `int()` / `float()` coercion is non-negotiable.
+- **Keep migrations small** (≤80 lines each typical). Bigger migrations are usually a smell that the schema change wants to be split into multiple bumps.
+- **Migrations are PURE** — no game state mutation, no file I/O, no `print()` (use `push_warning` if needed). Input dict in, mutated/new dict out.
+
+### Failure handling
+
+- Migration returns `null` (or a dict with an unexpected version field) → `_try_migrate` aborts the chain → `load_game` returns `success = false` with a descriptive `error_message`.
+- `main.gd`'s post-3.5 hotfix catches this and falls through to fresh-world generation. Player isn't stranded; their save data is genuinely lost in this case.
+- Forward incompatibility (save version > SAVE_VERSION, e.g., older binary against newer save) hard-fails with a clear "update the game" message. Backward migration is out of scope.
+
+### Breaking-change reset point: v17
+
+Saves before v17 are NOT preserved. The v14/v15/v16 schema versions exist only as schema-history reference; no production saves at those versions ever existed (the soil arc reversed v15 → v16 region-scoped data, etc.). A v<17 save reaching `_try_migrate` returns `null` (no `MIGRATIONS[14]` etc.), which hard-fails into the fresh-world fallthrough.
+
+If real production players ever exist before further breaks, the cutoff would need to advance. Document explicitly in the migration log.
+
+### Worldgen version is a separate axis
+
+`worldgen_version` (in `world_generator.gd`) is checked AFTER schema migration and stays as hard-fail. Procgen output changing for the same seed cannot be migrated — applying old building positions onto new terrain produces silent corruption (planters on water, etc.). Better to surface the failure and let the post-3.5 hotfix regenerate fresh.
 
 ## Tick determinism
 

@@ -9,6 +9,73 @@ Each entry has three sections:
 
 ---
 
+## Save Migration Framework — **CLOSE-OUT OF MAJOR TOOLING DEBT**
+
+**Date:** 2026-05-08
+**Tag:** `session-save-migration`
+**Save:** v18 (no schema change this session; framework lets v17 saves migrate forward to v18)
+
+Replaces the prior "hard-fail on schema mismatch" policy with chained migration steps. When loading a save with version < SAVE_VERSION, the framework walks `MIGRATIONS[N] → MIGRATIONS[N+1] → ...` until it reaches the current schema. **Player keeps save state across game updates instead of losing it on every schema bump.**
+
+This closes the second half of the schema-mismatch UX gap captured at session-soil-exhaustion-3-5. The first half (post-3.5 hotfix: graceful fresh-world fallthrough on load failure) protected players from being stranded in an empty world. This session protects their save DATA from being lost.
+
+### What shipped
+
+**`MIGRATIONS` registry** (`save_system.gd`): centralized Dict keyed by source version → migration method name (string). One entry today: `17 → "_migrate_v17_to_v18"`. Grows by one entry per future schema bump.
+
+**`_try_migrate(data, from_version, to_version) -> Variant`**: chain orchestrator. Walks the registry one version at a time, verifying each step produces a `version: N+1` dict before continuing. Returns the migrated Dictionary on success OR `null` on any failure (gap in chain, malformed migration output, etc.). Pure data transformation — no game state mutation, no I/O.
+
+**`_dispatch_migration(method_name, data) -> Variant`**: match-statement router. Each registered migration adds one match case. (See Decisions for why match instead of `Object.call(name)`.)
+
+**`_migrate_v17_to_v18`** — first migration. Schema diff was a single field addition (`tile_wasteland_state`); migration is correspondingly trivial:
+```gdscript
+static func _migrate_v17_to_v18(data: Dictionary) -> Dictionary:
+    data["tile_wasteland_state"] = []
+    data["version"] = 18
+    return data
+```
+
+**`load_game` refactored**: prior single-line version-equality check replaced with the migration chain. Forward-only: a save with version > SAVE_VERSION (newer game build than running binary) hard-fails with a clear "update the game" message. Worldgen version mismatch still hard-fails as a separate axis (covered below).
+
+**`test_save_migration.gd`** (new): 8 sub-suites covering registry shape, the v17→v18 migration's happy path, single-step / no-op / no-path / unknown-dispatch chain orchestration, an end-to-end load_game round-trip (write a synthetic v17 save, load, assert state preserved + tile_wasteland_state defaulted to empty), and forward-incompatibility (v19 save fails with the expected message). **30 → 31 passing in runner**; the test file packs 8 internal sub-suites.
+
+**`CONVENTIONS.md`** — replaced the prior 5-line "Save schema" section with a full schema-bump protocol covering: 7-step bump checklist, migration robustness guidelines (defensive `.get()`, type validation, float-coercion handling, ≤80-line guideline), failure handling, breaking-change reset point (v17), and the worldgen-version-is-separate-axis rule.
+
+**Manual smoke verified:** edited a real saved game from v18 → v17 (changed version field, removed `tile_wasteland_state`), relaunched. Migration ran cleanly: no `OS.alert`, normal "World loaded" toast, all player state preserved (position, inventory, buildings, soil, fertilizer), wasteland dict defaulted to empty. F5 saved back as v18 with the field restored.
+
+### Decisions
+
+- **Centralized registry in `save_system.gd`** (vs per-file modules under `scripts/systems/migrations/`). Single file is right for ≤5 migrations / ≤80 lines each. Per-file split deferred until thresholds breached. Pattern documented in NOTES.md.
+- **Match-statement dispatcher** (`_dispatch_migration`) instead of `SaveSystem.call(method_name, data)`. **Godot static-method quirk:** `Object.call()` is instance-only and errors with "Cannot call non-static function `call()` on the class directly" when invoked on a script class. Tried `Callable(SaveSystem, name)` — also unreliable for static methods. Match-statement is slightly verbose (one new case per migration) but unambiguous, statically checkable, and produces a clean error if a registered migration is missing its dispatch case.
+- **v17 cutoff for migration coverage.** No production players exist; v14/v15/v16 saves only ever existed as schema-history reference (Session 1 region-scoped data was reversed at Session 2 → v16 was the first stable per-tile baseline). Writing back-migrations for v14→v15→v16→v17 would be 3 unused functions. Documented in CONVENTIONS.md under "Breaking-change reset point: v17."
+- **Forward-only migration; backward not in scope.** Older binaries reading newer saves hard-fail with "update the game." Reasonable: if save format diverges across game versions enough that backward migration would matter, the player can simply update.
+- **Worldgen version stays as a separate hard-fail axis.** Procgen-output changes for the same seed cannot be data-migrated — buildings positioned against old terrain would silently end up on water / stone / wrong overlays. Surfacing the failure and falling through to fresh world (existing post-3.5 hotfix) is the only safe behavior. Documented.
+- **Migrations are pure transformations** (Dictionary in, Dictionary out — no game state, no I/O, no `print`). Lets them be tested in isolation without standing up a full GridWorld + Player + Inventory. The end-to-end test layer covers integration; the unit-test layer covers transformation correctness.
+- **Defensive verification at every step** (`_try_migrate` checks new_version == current+1 after each migration). Catches "migration forgot to bump the version" bugs at the failing step (named in error) instead of at downstream-data-shape mismatch points where the cause is opaque.
+
+### Lessons
+
+- **Godot static-method dispatch is a real gotcha.** `SaveSystem.call(method_name, data)` parsed fine but errored at runtime: "Cannot call non-static function `call()` on the class `SaveSystem` directly. Make an instance instead." `Object.call()` is a virtual method on instances; static script classes don't expose it. **Match-statement dispatch is the GDScript-static-friendly pattern** for "call function by name string" — captured in CONVENTIONS.md schema-bump protocol so future migrations follow the pattern automatically.
+- **Test 7 (end-to-end save → mutate to v17 → load) was the highest-value test.** Unit tests of `_migrate_v17_to_v18` are valuable for catching transformation bugs, but the realistic scenario — write a save with the actual `save_game()` machinery, mutate the file to look like v17, run the actual `load_game()` path — exercises the entire integration: JSON round-tripping, sparse Dict serialization, post-migration `tile_wasteland_state.clear() + restore` loop. If any of those broke during the framework refactor, the unit tests would still pass and the bug would only surface in production. The end-to-end test caught zero bugs this session, but its presence is the safety net that lets future refactors of `load_game` proceed confidently.
+- **Manual smoke validated nothing because design + tests were already correct.** Every migration test passed on the first run; manual smoke confirmed in-game behavior matched test expectations. **This is a positive signal**: the design pass anticipated the failure modes (gap in chain, version-bump bug, forward-incompat, end-to-end correctness) and the tests covered them. PAUSE 1 was a confirmation step, not a discovery step. **Pattern: when smoke catches nothing, the design pass + tests did their job. When smoke catches something (cf. session-soil-exhaustion-4 PAUSE 1, 2 bugs), the gap was in the test→smoke coverage seam.**
+- **Tooling debt close-out has compounding payoff.** Save-migration framework was queued post-3.5 hotfix; its prerequisite (Dev Console for rapid migration testing) was queued before that. Both shipped within ~24h of each other, and Session 4 wasteland used the Dev Console to set up scenarios that would have been 30-min builds otherwise. **Investing in tooling pays off across sessions, not within the session that ships the tooling.** Captured pattern: when proposing a new feature, ask "what tooling makes future sessions cheaper?" and consider sequencing the tooling first.
+
+### Roadmap implications
+
+- **Major queued debt: closed.** Migration framework was the largest pending tooling item. NOTES.md "schema-mismatch UX gap" entry now reads "both fixes SHIPPED."
+- **Future schema bumps** follow the protocol in CONVENTIONS.md. Each bump = ~10 LOC migration + ~20 LOC test + 1 PROJECT_LOG entry. Framework cost amortized to near-zero per future bump.
+- **Per-file migration modules deferred** until `MIGRATIONS` grows past 5 entries or a single migration past 80 lines.
+- **Backup-before-migration** still queued as nice-to-have. Defer until production players exist.
+
+### Known follow-ups
+
+- **Per-file migration modules** (when `MIGRATIONS` >5 entries OR single migration >80 lines).
+- **`migrate_test <from_version>` Dev Console command** if migration testing becomes frequent. Currently the manual workflow (edit save JSON, relaunch) is fast enough.
+- **Backup-before-migration** (`save_slot_1.json.bak.pre-v18` written before migration runs, restored on failure). Adds confidence for production players. Niche today; defer.
+- **No production cutoff** documented for when v17-and-earlier saves should be advanced. Will become relevant when real players exist.
+
+---
+
 ## Soil exhaustion — Session 4 — **WASTELAND MECHANICS + ARC CLOSE-OUT**
 
 **Date:** 2026-05-08

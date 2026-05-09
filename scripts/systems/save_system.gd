@@ -126,6 +126,93 @@ const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 ## DEFAULT_SAVE_PATH after the test.
 static var save_path: String = DEFAULT_SAVE_PATH
 
+# ---------- migration framework (session-save-migration) ----------
+#
+# Replaces the prior hard-fail-on-version-mismatch behavior. When loading
+# a save with version < SAVE_VERSION, the chain `_migrate_vN_to_v(N+1)`
+# steps the parsed Dictionary forward one version at a time until it
+# matches the current schema. Each migration is responsible for adding
+# new fields with sensible defaults, transforming/restructuring as
+# needed, and bumping `data["version"]` to its target.
+#
+# **Breaking-change reset point: v17.** Saves before v17 are NOT
+# preserved — the v14/v15/v16 schema versions exist only as schema-
+# history reference; no production saves at those versions ever
+# existed. If a v<17 save is encountered (extremely unlikely), the
+# missing-migration path fires, load fails, and main.gd's post-3.5
+# hotfix regenerates a fresh world. See NOTES.md / CONVENTIONS.md.
+#
+# Forward-only by design: a save with version > SAVE_VERSION (running
+# an OLDER game binary against a NEWER save) hard-fails. Backward
+# migration is out of scope.
+const MIGRATIONS: Dictionary = {
+	# 17 → 18: Wasteland mechanics. New top-level `tile_wasteland_state`
+	# field; absent in v17, populated to empty Array (no scarred tiles).
+	17: "_migrate_v17_to_v18",
+}
+
+## Migrate `data` (parsed save dict) from `from_version` to `to_version`
+## by walking the MIGRATIONS chain one step at a time. Returns the
+## migrated Dictionary on success, OR null on any failure (gap in chain,
+## migration didn't bump version correctly, etc.). Caller surfaces the
+## error and main.gd's hotfix regenerates a fresh world.
+##
+## Pure data transformation — no game state mutation, no I/O.
+##
+## Defensive: each step verifies the migration produced an N+1 version,
+## so a bug in a migration function is caught at the failing step
+## (named in the error) rather than producing a downstream silent
+## corruption.
+static func _try_migrate(data: Dictionary, from_version: int, to_version: int) -> Variant:
+	var current: int = from_version
+	while current < to_version:
+		if not MIGRATIONS.has(current):
+			push_error("SaveSystem._try_migrate: no migration registered from v%d (target v%d)" % [current, to_version])
+			return null
+		var method_name: String = MIGRATIONS[current]
+		# Static method dispatch via match-statement. GDScript's Object.call()
+		# is instance-only and Callable(SaveSystem, name) on a static method
+		# is unreliable; explicit dispatch is the foolproof pattern. Each
+		# new migration adds one match case below — small cost, clear errors.
+		var migrated = _dispatch_migration(method_name, data)
+		if typeof(migrated) != TYPE_DICTIONARY:
+			push_error("SaveSystem._try_migrate: %s returned non-Dictionary (%s)" % [method_name, typeof(migrated)])
+			return null
+		data = migrated
+		var new_version: int = int(data.get("version", -1))
+		if new_version != current + 1:
+			push_error("SaveSystem._try_migrate: %s did not bump version: expected %d, got %d" % [method_name, current + 1, new_version])
+			return null
+		current = new_version
+	return data
+
+## Dispatch a migration by name. Each migration registered in MIGRATIONS
+## must have a corresponding match case here. Failure to register both
+## sides is a parse-error / runtime-error pair: MIGRATIONS lookup returns
+## a name that this dispatcher doesn't recognize → push_error + null.
+static func _dispatch_migration(method_name: String, data: Dictionary) -> Variant:
+	match method_name:
+		"_migrate_v17_to_v18":
+			return _migrate_v17_to_v18(data)
+	push_error("SaveSystem._dispatch_migration: unknown migration '%s'" % method_name)
+	return null
+
+## v17 → v18: add `tile_wasteland_state` field with empty Array default.
+## Schema diff: this field was added in session-soil-exhaustion-4 to
+## persist per-tile wasteland state (scarred flag + grace decay timer).
+## v17 saves predate the wasteland mechanic entirely — no scarred tiles
+## could exist. Default-empty Array is the canonical "healthy world."
+##
+## The Items enum also gained COMPOST_HIGH at v18, but that's stored as
+## an int in player_inventory and recipe state — nothing to migrate
+## (the int 26, or whatever the enum value is, simply wouldn't appear
+## in a v17 save). No COMPOST_HIGH in player_inventory at v17 by
+## construction, so nothing to backfill.
+static func _migrate_v17_to_v18(data: Dictionary) -> Dictionary:
+	data["tile_wasteland_state"] = []
+	data["version"] = 18
+	return data
+
 ## `player_progression` is a free-form Dictionary tracked by main.gd.
 ## Default-empty so existing tests / call sites that don't yet pass
 ## progression don't break the signature; the caller stays in charge of
@@ -240,15 +327,30 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 
 	var data: Dictionary = parsed
 	var version: int = int(data.get("version", 0))
-	if version != SAVE_VERSION:
-		# Normalize path slashes for the user-facing dialog. globalize_path
-		# returns forward slashes on Windows; convert to native backslashes
-		# so the path is copy-pasteable into File Explorer / cmd.
+	# Migration framework (session-save-migration): older saves migrate
+	# forward through the MIGRATIONS chain. Newer saves (running an old
+	# binary) hard-fail — backward migration is out of scope.
+	if version < SAVE_VERSION:
+		var migrated = _try_migrate(data, version, SAVE_VERSION)
+		if migrated == null:
+			# Gap in the chain (e.g., v14 → v18 has no path), or a migration
+			# returned malformed data. Caller's post-3.5 hotfix catches and
+			# regenerates fresh world; player isn't stranded but their save
+			# data is genuinely lost.
+			result.error_message = "Save migration failed: no path from v%d to v%d." % [version, SAVE_VERSION]
+			push_error(result.error_message)
+			OS.alert(result.error_message + "\n\nA fresh world will be generated. Original save will be overwritten on next F5.", "Save incompatible")
+			return result
+		data = migrated
+		version = int(data.get("version", 0))   # now equals SAVE_VERSION
+	elif version > SAVE_VERSION:
+		# Forward-incompat: save is from a newer game binary than what's
+		# running. Migration framework only walks forward; can't downgrade.
 		var native_path: String = ProjectSettings.globalize_path(save_path)
 		if OS.get_name() == "Windows":
 			native_path = native_path.replace("/", "\\")
-		var msg: String = "Save file is v%d; current version is v%d.\n\nOld saves are not compatible. Delete the file to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
-		result.error_message = "Save incompatible (v%d vs v%d) — see dialog." % [version, SAVE_VERSION]
+		var msg: String = "Save is v%d; this game is v%d.\n\nUpdate the game to load this save, or delete to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
+		result.error_message = "Save is from a newer game (v%d vs v%d)." % [version, SAVE_VERSION]
 		push_error(msg)
 		OS.alert(msg, "Save incompatible")
 		return result
