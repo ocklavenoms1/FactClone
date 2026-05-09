@@ -71,6 +71,16 @@ var current_category: int = 0
 const SLOT_DIM_ALPHA: float = 0.35   # opacity multiplier for inventory-empty item_apply slots
 var player_inventory: Inventory = null
 
+# Dev Console reference (post-PAUSE-1 hotfix, session-inserter-foundation).
+# When the console is open, ALL hotbar action checks (Tab/Shift+Tab for
+# category cycle, number keys 1-9 for slot selection) are gated off so
+# typing into the LineEdit doesn't ALSO fire game actions. main.gd has
+# its own gate; this one covers hotbar's separate _process input path.
+# Optional ref — null falls through to non-gated behavior (tests / scripted scenes).
+# Typed as DevConsole (the script's class_name) NOT Control so .is_open()
+# resolves at runtime — typing as Control fails at runtime call.
+var dev_console = null   # untyped — DevConsole instance; duck-typed for is_open()
+
 func _ready() -> void:
 	_build_categories()
 	_apply_layout()
@@ -89,6 +99,18 @@ func _build_categories() -> void:
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.BELT },
 			{ "kind": "building", "value": Buildings.Type.PIPE },
+		],
+		"selected": 0,
+	})
+
+	# Inserter Arc (session-inserter-foundation onward): NEW Inserters
+	# category. Logistics is for passive infrastructure (belts, pipes);
+	# Inserters are active item-routing — different concept. Future arc
+	# sessions append filter / multi-filter / long-reach variants here.
+	categories.append({
+		"name": "Inserters",
+		"slots": [
+			{ "kind": "building", "value": Buildings.Type.INSERTER },
 		],
 		"selected": 0,
 	})
@@ -190,6 +212,11 @@ func _max_row_width() -> int:
 # ---------- input ----------
 
 func _process(_delta: float) -> void:
+	# Dev Console gate (post-PAUSE-1 hotfix): when console is open,
+	# suppress Tab / Shift+Tab / number-key hotbar actions so typing
+	# into the console LineEdit doesn't also fire game actions.
+	if dev_console != null and dev_console.is_open():
+		return
 	if Input.is_action_just_pressed("next_category"):
 		_cycle_category(1)
 	if Input.is_action_just_pressed("prev_category"):

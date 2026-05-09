@@ -25,6 +25,7 @@ extends Control
 const PANEL_BG: Color = Color(0.0, 0.0, 0.0, 0.85)
 const PANEL_BORDER: Color = Color(0.3, 0.4, 0.3, 0.95)
 const TEXT_COLOR: Color = Color(0.85, 0.92, 0.85)
+const TEXT_DIM: Color = Color(0.55, 0.62, 0.55)         # tab-completion hints
 const ECHO_COLOR: Color = Color(0.65, 0.85, 1.0)        # user-typed lines
 const ERROR_COLOR: Color = Color(1.0, 0.55, 0.40)       # error output
 const PROMPT: String = "> "
@@ -84,10 +85,22 @@ func _ready() -> void:
 	_output_label.offset_right = -8
 	_output_label.offset_top = 8
 	_output_label.offset_bottom = -36   # leave room for input line
+	# RichTextLabel must NOT be focusable. If it can take focus (the default),
+	# clicking on the scrollback area pulls focus off the LineEdit and the
+	# user has to click back into the input. FOCUS_NONE eliminates that
+	# whole class of bug.
+	_output_label.focus_mode = Control.FOCUS_NONE
 	_output_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(_output_label)
 
 	# Input LineEdit at the bottom.
+	#
+	# NOTE: We intentionally do NOT connect text_submitted. Enter is
+	# intercepted in _input() below, BEFORE Godot's GUI dispatch routes
+	# the event to LineEdit. That way LineEdit's internal Enter handling
+	# (which can release focus, race with deferred grab_focus, etc.) never
+	# runs. We take the text from _input_field.text directly, clear it,
+	# and process — focus never leaves the LineEdit.
 	_input_field = LineEdit.new()
 	_input_field.placeholder_text = "type 'help' for commands"
 	_input_field.add_theme_font_size_override("font_size", FONT_SIZE)
@@ -100,7 +113,6 @@ func _ready() -> void:
 	_input_field.offset_right = -8
 	_input_field.offset_top = -28
 	_input_field.offset_bottom = -4
-	_input_field.text_submitted.connect(_on_input_field_submitted)
 	add_child(_input_field)
 
 	_register_commands()
@@ -122,8 +134,8 @@ func toggle() -> void:
 
 func _open() -> void:
 	visible = true
-	_input_field.grab_focus()
 	_input_field.clear()
+	_input_field.grab_focus()
 	_history_index = -1
 	queue_redraw()
 
@@ -133,20 +145,98 @@ func _close() -> void:
 
 # ---------- input ----------
 
+## Input handling. Fires BEFORE Godot's GUI dispatch — so any event we
+## consume here never reaches the LineEdit. We use this to:
+##   - Intercept Enter, so LineEdit's text_submitted (which causes focus
+##     release races) never fires.
+##   - Intercept Tab for command-name completion (otherwise LineEdit
+##     would treat Tab as a focus-cycle key).
+##   - Handle Up/Down history navigation and Escape close.
+##
+## Plain character keys fall through and are routed normally to the
+## focused LineEdit by Godot.
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	# Up / Down arrow walk through history.
-	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_UP:
-			_history_navigate(-1)
-			get_viewport().set_input_field_as_handled()
-		elif event.keycode == KEY_DOWN:
-			_history_navigate(+1)
-			get_viewport().set_input_field_as_handled()
-		elif event.keycode == KEY_ESCAPE:
-			_close()
-			get_viewport().set_input_field_as_handled()
+	if event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_ENTER, KEY_KP_ENTER:
+				# Manual Enter: pull text, clear, process. LineEdit never
+				# sees the Enter key, so no text_submitted, no focus race.
+				var line: String = _input_field.text
+				_input_field.clear()
+				_history_index = -1
+				_submit_line(line)
+				get_viewport().set_input_as_handled()
+			KEY_TAB:
+				_handle_tab_complete()
+				get_viewport().set_input_as_handled()
+			KEY_UP:
+				_history_navigate(-1)
+				get_viewport().set_input_as_handled()
+			KEY_DOWN:
+				_history_navigate(+1)
+				get_viewport().set_input_as_handled()
+			KEY_ESCAPE:
+				_close()
+				get_viewport().set_input_as_handled()
+
+## Tab completion for command names.
+##
+## Three outcomes based on what the current input prefix-matches:
+##   - 0 matches: no-op (silently). Bell would feel wrong in a game UI.
+##   - 1 match: replace text with the match + trailing space. The trailing
+##     space is intentional — it signals "ready for args" and means the
+##     next Tab won't accidentally re-complete the command.
+##   - 2+ matches: complete to the longest common prefix (if longer than
+##     what user typed) AND print the candidate list to scrollback in
+##     dim text. Mirrors bash's double-Tab behavior, condensed into one
+##     press for game-pace feel.
+##
+## Scope: command name only (first token). Argument completion (item
+## names, building names, x/y suggestions) is deferred — would need
+## per-command argument schemas; not worth the complexity for v1.
+func _handle_tab_complete() -> void:
+	var text: String = _input_field.text
+	# If user is past the command (already typed a space), don't complete —
+	# we don't have argument schemas yet. Future: dispatch to per-command
+	# completion based on the command name.
+	if text.find(" ") >= 0:
+		return
+	var prefix: String = text.to_lower()
+	var matches: Array = []
+	for cmd_name in _commands.keys():
+		if String(cmd_name).begins_with(prefix):
+			matches.append(String(cmd_name))
+	matches.sort()
+	if matches.is_empty():
+		return
+	if matches.size() == 1:
+		_input_field.text = matches[0] + " "
+		_input_field.caret_column = _input_field.text.length()
+		return
+	# Multiple matches: extend to longest common prefix.
+	var lcp: String = _longest_common_prefix(matches)
+	if lcp.length() > prefix.length():
+		_input_field.text = lcp
+		_input_field.caret_column = _input_field.text.length()
+	# Always also surface the candidates so the user knows what's available.
+	_append_line("Matches: %s" % ", ".join(matches), TEXT_DIM)
+
+## Longest common prefix of a non-empty sorted Array[String]. With sorting,
+## the first and last element bound the common prefix — no need to scan
+## every pair.
+static func _longest_common_prefix(strs: Array) -> String:
+	if strs.is_empty():
+		return ""
+	if strs.size() == 1:
+		return String(strs[0])
+	var first: String = String(strs[0])
+	var last: String = String(strs[strs.size() - 1])
+	var i: int = 0
+	while i < first.length() and i < last.length() and first[i] == last[i]:
+		i += 1
+	return first.substr(0, i)
 
 func _history_navigate(direction: int) -> void:
 	if _history.is_empty():
@@ -162,10 +252,29 @@ func _history_navigate(direction: int) -> void:
 	_input_field.text = _history[_history_index]
 	_input_field.caret_column = _input_field.text.length()
 
-func _on_input_field_submitted(line: String) -> void:
+## Per-frame focus safety net. Whenever the console is visible and the
+## input LineEdit has lost focus, re-grab it. With the new _input-based
+## Enter handling, the LineEdit never loses focus on Enter anymore. This
+## safety net mostly handles edge cases like clicking on a non-focusable
+## sibling Control (which clears focus to null) — focus snaps back next
+## frame so the user can keep typing.
+##
+## Trade-off: if the player clicks elsewhere intentionally to take focus
+## off the console, focus snaps back. For v1 the console is typing-only,
+## so this is the right behavior. If selectable scrollback becomes a
+## feature, replace with a more nuanced focus policy.
+func _process(_delta: float) -> void:
+	if visible and not _input_field.has_focus():
+		_input_field.grab_focus()
+
+## Process a submitted command line. Called from _input on Enter — the
+## LineEdit text has already been pulled and cleared by the caller.
+##
+## No focus management needed: because Enter was intercepted in _input
+## before reaching the LineEdit, the LineEdit never had a chance to
+## release focus. It still has focus and is ready for the next command.
+func _submit_line(line: String) -> void:
 	var trimmed: String = line.strip_edges()
-	_input_field.clear()
-	_history_index = -1
 	if trimmed == "":
 		return
 	# Echo the typed command in scrollback.

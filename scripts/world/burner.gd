@@ -12,6 +12,11 @@ extends RefCounted
 ##   fuel_buffer: int          — fuel UNITS remaining (not item count; items
 ##                                are converted to units via FUEL_VALUES on pull)
 ##   fuel_burn_progress: int   — ticks accumulated toward consuming next unit
+##   last_fuel_item: int       — most recently deposited fuel item type (Items.Type),
+##                                for display only. -1 if never fed. Mixed-tier
+##                                buffers show whichever item was added last; this
+##                                is acceptable since players typically feed one
+##                                tier at a time.
 ##
 ## Fuel item → energy unit values: WOOD = 1, COAL = 4, FUEL_BRIQUETTE = 8.
 ## Tunable per item by editing FUEL_VALUES below; future items (CHARCOAL,
@@ -32,7 +37,7 @@ const FUEL_BUFFER_CAPACITY: int = 16
 ## Try to pull one fuel item from belt or chest cells adjacent to building b.
 ## fuel_edge_dir: which world-space edge to scan (Belt.DIR_E/S/W/N) — if -1,
 ## scans all 4 edges. Buildings with a "fuel input port" pass their port
-## direction; buildings without one (e.g., drill in v1) pass -1.
+## direction; buildings without one (e.g., drill in v1, inserters) pass -1.
 ##
 ## Returns true if a fuel item was pulled (state.fuel_buffer increased).
 static func try_pull_fuel(b: Building, world, fuel_edge_dir: int = -1) -> bool:
@@ -71,6 +76,7 @@ static func _try_pull_from_belt(b: Building, belt: Building, current_units: int)
 			continue
 		slots[i] = -1
 		b.state["fuel_buffer"] = current_units + energy
+		b.state["last_fuel_item"] = item_t
 		return true
 	return false
 
@@ -87,6 +93,7 @@ static func _try_pull_from_chest(b: Building, chest: Building, current_units: in
 		if int(entry[1]) <= 0:
 			bag.erase(entry)
 		b.state["fuel_buffer"] = current_units + energy
+		b.state["last_fuel_item"] = item_t
 		return true
 	return false
 
@@ -128,4 +135,5 @@ static func make_state() -> Dictionary:
 	return {
 		"fuel_buffer": 0,
 		"fuel_burn_progress": 0,
+		"last_fuel_item": -1,
 	}

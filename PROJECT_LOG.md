@@ -9,6 +9,68 @@ Each entry has three sections:
 
 ---
 
+## Inserter Arc Session 1 — Foundation (basic inserter, fixed-cycle)
+
+**Date:** 2026-05-08
+**Tag:** `session-inserter-foundation`
+**Save:** v18 (no schema bump — new state fields are additive with `.get(key, default)` fallbacks)
+
+First session of the planned 6-session Inserter Arc. Ships **the** basic inserter: 1×1 building, fuel-powered via the Burner module, fixed 1.0s pickup-and-deliver cycle, swinging-arm animation. Universal source/destination — picks from belts, chests, or recipe-driven Processor `out_buffer`s; drops onto belts, into chests, or into Processor `in_buffer`s. **Closes the only remaining "you can't connect a chest to a building without a belt going past it" hole** in the factory layer.
+
+### What shipped
+
+**`scripts/world/inserter.gd`** (new, ~440 lines): 5-state phase machine (IDLE / WORKING_OUT / BLOCKED_AT_DEST / WORKING_IN / NO_FUEL), `cycle_progress` (0.0–1.0) drives both transitions and arm-rotation rendering. Source/destination resolved via `Belt.DIR_VECS[dir]` (source = anchor − dir; destination = anchor + dir). Pickup/drop dispatched per source-building type: belts use `Belt.slot_facing_external` for handoff, chests pop FIFO from `bag`, Processors pop FIFO from `out_buffer`. Drop side mirrors: `Belt.try_insert`, chest bag append/top-up, Processor `in_buffer` with capacity + `accepts` checks against `Buildings.slot_layout_for(type)`.
+
+**`scripts/world/burner.gd`** (modified): added `last_fuel_item: int = -1` to `make_state()` and to both `_try_pull_from_belt` / `_try_pull_from_chest`. Display-only field; no behavior coupling. Drill and Smelter inherit the fix automatically.
+
+**`scripts/ui/inserter_panel.gd`** (new, ~140 lines): specialized BuildingPanel showing held-item slot, fuel slot, source/destination tile summary, cycle-progress bar with state-tinted fill (bronze when working, yellow when blocked), facing indicator. Hits the same drag-drop infrastructure as drill/smelter via the slot_layout pattern.
+
+**`scripts/ui/building_panel.gd`** (modified): the shared "fuel"-kind slot renderer now reads `last_fuel_item` and divides `fuel_buffer` by `Burner.FUEL_VALUES[item]` so coal shows "COAL ×3" (3 items) instead of "WOOD ×12" (12 units). The drag-drop path (`_drop_into_fuel`) sets `last_fuel_item` to the cursor item type. **Bonus retroactive fix:** drill/smelter panels now show the correct fuel item icon too — this was a pre-existing display bug that only became user-visible when the inserter session put a fuel slot in front of a player who'd been dropping coal directly.
+
+**`scripts/world/buildings.gd`** (modified): `Type.INSERTER` enum entry, DATA registration (footprint 1×1, supports_direction=true, slot_layout = held_item + fuel), dispatch cases in `make_one`, `tick_one`, `draw_one`, `info_lines_for`.
+
+**`scenes/main.tscn`** (modified): added InserterPanel HUD node (load_steps=34, ext_resource id 31_inspanel).
+
+**`scripts/main.gd`** (modified): `@onready var inserter_panel`, `@onready var dev_console` (untyped — see Lessons), wires `hotbar.dev_console = dev_console`, console-open gate at `_process` line 358 to suppress `Input.is_action_just_pressed` matches while typing, click-dispatch case for INSERTER to open the panel.
+
+**`scripts/ui/hotbar.gd`** (modified): new "Inserters" hotbar category with a single INSERTER slot, console-open gate at `_process` to suppress hotbar number-key + Tab actions while typing.
+
+**`scripts/player.gd`** (modified): `dev_console` field added to the `modal_open` check so WASD doesn't move the player while the console captures keystrokes.
+
+**`scripts/ui/console.gd`** (substantially rewritten): see "Console focus rewrite" below — the focus bug surfaced during PAUSE 1 forced a deep rewrite of how the LineEdit handles Enter. Plus Tab-completion for command names landed as a small QoL addition at user request.
+
+### Decisions
+
+- **Single basic inserter, fixed 1.0s cycle (REVERSAL #7).** Original design had cycle speed determined by fuel tier (wood=2.0s, coal=1.0s, briquette=0.5s). Rolled back during PAUSE 1 because **conflating fuel-energy-density and machine-throughput is two orthogonal axes pretending to be one**: a player who burns coal expects "coal lasts longer" (yes — 4× the energy units per item), not "coal is also faster" (no game-design reason for that). Fast Inserter / Stack Inserter variants in future sessions will be **separate building types** with their own cycle constants, not the same building running at different speeds. Captured in `inserter.gd` header comment so future readers don't re-discover the question.
+- **`last_fuel_item` is display-only state.** Tracked in Burner's `make_state` so it's free for all burner consumers (drill, smelter, inserter, future kilns), set on every fuel-pull/drop path. Never read by tick logic, fuel economy, or save migration — just by the panel renderer. Mixed-tier buffers display whichever fuel was added last, which is fine because players in practice feed one tier at a time.
+- **Inserter does NOT use the Processor pattern.** Considered making it a recipe with no `inputs/outputs` and a `process_ticks: 20` pseudo-recipe — rejected. The Inserter has 4 distinct phases (idle / working-out / blocked / working-in) that are state-machine-shaped, not recipe-shaped. Forcing the Processor mold would have meant either bolting state-machine logic onto Processor (corrupting the abstraction) or leaving the state machine in Inserter with the recipe being an unused adapter (dead complexity). Custom `tick(b, world)` is the right tool here.
+- **Universal source/dest dispatch via heuristics, not registration.** `_is_processor_with_output(b)` checks for `b.state.has("out_buffer")` rather than maintaining a registry of "which building types have outputs." Works for every current case (Mill, Mixer, Composter, Smelter, Thresher) and is forward-compatible with new processors automatically.
+- **Console Enter handling: intercept in `_input`, not `text_submitted`** (see Lessons for why this took 6 attempts to land correctly). Once the right architecture was found, the implementation collapsed to ~10 lines.
+- **Tab completion: command-name only, not arguments.** Argument completion would need per-command schemas (item names for `give`, building names for `place`, valid x/y ranges for `tp`). Defers cleanly until a future session if anyone asks for it.
+
+### Lessons
+
+- **Console focus rewrite — "the right architecture was 5 attempts of code-fighting away."** PAUSE 1 surfaced a focus bug: after pressing Enter to submit a command, the LineEdit lost focus and the user had to left-click to type again. Five increasingly-aggressive fixes failed:
+  - (1) `grab_focus()` after submit — lost the race with LineEdit's internal Enter handling.
+  - (2) `call_deferred("grab_focus")` — still raced.
+  - (3) `focus_exited` signal hook re-grabbing — fired but focus immediately bounced again.
+  - (4) Per-frame `_process` brute-force re-grab — diagnostic showed `input_focus=true` was already true, but the user still couldn't type.
+  - (5) Diagnostic prints — confirmed Godot's focus state was correct but typing didn't reach the LineEdit.
+
+  The breakthrough was switching frame of reference: **stop trying to restore focus after Enter; intercept Enter before LineEdit ever sees it.** `Node._input(event)` runs *before* Godot's GUI dispatch routes the event to the focused control. Catch Enter there, pull `_input_field.text` directly, clear, dispatch — call `set_input_as_handled()` — done. LineEdit never sees the Enter, never runs its internal Enter handling, never has a chance to release focus. **The whole class of bugs vanishes.** Per-frame `_process` safety net stays as a single line for edge cases (clicking outside the input briefly clears focus to null). Sets `RichTextLabel.focus_mode = FOCUS_NONE` so the scrollback can't steal focus on click. ~5 lines of fix code; ~80 lines of removed scaffolding from prior attempts.
+
+  **Anti-pattern recognized: when a Godot signal causes a state issue and you find yourself fighting deferred-call timing, look for a way to bypass the signal entirely.** `text_submitted` was the wrong abstraction for "command-line Enter" — the LineEdit's notion of "submit" includes focus-release semantics that don't fit a console use case. The right fix wasn't to suppress the side effect; it was to never trigger the signal in the first place.
+
+- **Pre-existing display bug only became visible when the new feature put it in front of the player.** The fuel-slot-shows-WOOD bug had been latent in `building_panel.gd` since drill/smelter shipped — those panels already rendered fuel as "WOOD ×N units." But because drills are typically loaded from belts (player rarely opens the panel) and smelters had recipe focus pulling player attention, **nobody noticed**. The inserter session put a fuel slot front-and-center in a workflow where players directly drag-drop coal in to test, and the bug was caught within minutes of PAUSE 1 verification. **Pattern: when adding a new consumer of a shared component, expect to surface latent bugs in that component that previous consumers had been working around or ignoring.**
+
+- **Don't conflate orthogonal axes in a single mechanic** (fuel-tier × cycle-speed reversal). A clean-feeling design that combines two systems can hide a category error: are these two axes really one axis, or are they two? Symptom that you've conflated them: the player asks "wait, why does coal make it FASTER?" and you have no satisfying answer beyond "because we coupled them." When the answer to "why" is mechanic-driven (energy density), the axis is one. When the answer is design-fiat (because we said so), it's probably two pretending to be one. Reversal #7 is now in NOTES.md as a referenced anti-pattern for future arc-session design passes.
+
+- **`var dev_console: Control = null` typed-cast at runtime errors with "Nonexistent function `is_open`."** `is_open()` lives on the `DevConsole` subclass, not the `Control` parent. Even though @onready resolves the actual instance correctly, the static type bound on the variable causes Godot's method-resolution to look on the *declared* type, not the runtime type. Workaround: `var dev_console = null` (untyped) — duck-types `is_open()` correctly. Same gotcha would apply to any HUD child accessed through a parent-typed reference. **Pattern: for autonomous Control subclasses with subclass-only API, leave the @onready var untyped.**
+
+- **MCP servers need an editor to talk to.** Installed godot-mcp during this session for the focus-bug debugging, then discovered it requires the Godot **editor** (not the game binary) running with the addon enabled to expose its websocket bridge. We were launching the game directly via the headless-friendly `Godot.exe --path` path, which doesn't run the editor. The MCP would have been useful if I'd been working from the editor IDE, but for our terminal-driven workflow it added zero value to this debugging session. **Pattern: before installing a new MCP, verify it works with how you actually run the project, not how its README assumes you do.** Keeping it installed for future use — `node get_properties` and `screenshot_game` tools have real value when running tests through the editor.
+
+---
+
 ## Save Migration Framework — **CLOSE-OUT OF MAJOR TOOLING DEBT**
 
 **Date:** 2026-05-08

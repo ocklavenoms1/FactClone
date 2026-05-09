@@ -20,7 +20,7 @@ var grid_world: GridWorld = null
 # Dev Console (session-dev-console). When the console is open, gate
 # movement so the LineEdit can capture WASD as text without the player
 # walking off-screen behind the panel. Optional ref — defensive null-check.
-var dev_console: Control = null
+var dev_console = null   # untyped — DevConsole instance; duck-typed for is_open()
 
 func _physics_process(delta: float) -> void:
 	var modal_open: bool = (inventory_grid != null and inventory_grid.is_open()) \

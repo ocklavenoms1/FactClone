@@ -94,11 +94,19 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # auto-applies compost to depleted tiles in 5×5 coverage. Specialized
 # panel renders the coverage grid + status; extends BuildingPanel.
 @onready var applicator_panel: Control = $HUD/FertilizerApplicatorPanel
+# Inserter Arc Session 1 (session-inserter-foundation): basic inserter
+# specialized panel — held item display + fuel slot + source/dest text +
+# cycle progress bar. Extends BuildingPanel directly.
+@onready var inserter_panel: Control = $HUD/InserterPanel
 @onready var minimap: Control = $HUD/Minimap
 # Dev Console (session-dev-console). Backtick toggles. Debug-build-only —
 # activation gated in _unhandled_input. Replaces "build a chain to test"
 # with one-line console state setup. See PROJECT_LOG entry for design.
-@onready var dev_console: Control = $HUD/DevConsole
+# Untyped so runtime duck-typing finds is_open() on the actual instance
+# (typing as Control accepts the assignment but fails resolution at the
+# .is_open() call site; typing as DevConsole hits class_name registration
+# race in tests and parse cycles).
+@onready var dev_console = $HUD/DevConsole
 
 var player_inventory: Inventory
 var toast_timer: float = 0.0
@@ -162,6 +170,10 @@ func _ready() -> void:
 	# player has 0 of the item (session-soil-exhaustion-3). Optional —
 	# slots fall back to never-dim if ref is null.
 	hotbar.player_inventory = player_inventory
+	# Hotbar also gets a dev_console ref so its action checks
+	# (Tab/Shift+Tab/number keys) are gated when the console is open
+	# (post-PAUSE-1 hotfix, session-inserter-foundation).
+	hotbar.dev_console = dev_console
 	# Building panels share the same cursor + player inventory + toast.
 	# Session 2: chest, mill, oven, proofer, packager, mixer panels join.
 	# Session 3: loom, tailor, briquetter, sugar_press, retter, yeast_culture.
@@ -172,6 +184,7 @@ func _ready() -> void:
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
 		thresher_panel, planter_panel, harvester_panel,
+		inserter_panel,
 	]
 	for panel in all_panels:
 		if panel != null:
@@ -334,6 +347,16 @@ func _process(delta: float) -> void:
 	# inventory grid, or any building panel). Cheap conditional, polled per
 	# frame.
 	minimap.visible = not (map_panel.is_open() or inventory_grid.is_open() or _any_building_panel_open())
+
+	# Dev Console gate (session-inserter-foundation post-PAUSE-1 hotfix):
+	# when console is open, suppress ALL gameplay action input.
+	# Input.is_action_just_pressed reads from InputMap regardless of
+	# keyboard focus — without this gate, typing 'M' or 'I' or 'F5' into
+	# the console LineEdit also triggers the corresponding game action.
+	# Console handles its own input (Esc-to-close, history nav, submit)
+	# via its own LineEdit + _input handler.
+	if dev_console != null and dev_console.is_open():
+		return
 
 	# Inventory toggle (I) — always handled, even while grid is open
 	# (lets I close the grid).
@@ -822,6 +845,7 @@ func _all_building_panels() -> Array:
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
 		thresher_panel, planter_panel, harvester_panel,
+		inserter_panel,
 	]
 
 ## True if any specialized building panel (or the generic fallback) is open.
@@ -901,6 +925,8 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			composter_panel.open(b, grid_world)
 		Buildings.Type.FERTILIZER_APPLICATOR:
 			applicator_panel.open(b, grid_world)
+		Buildings.Type.INSERTER:
+			inserter_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-

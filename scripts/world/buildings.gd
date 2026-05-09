@@ -63,6 +63,12 @@ enum Type {
 	# first to validate the mechanic; this session adds automation on
 	# the same `tile_fertilizer_state` foundation.
 	FERTILIZER_APPLICATOR,
+	# Inserter Arc Session 1 (session-inserter-foundation): basic
+	# 1-tile-reach inserter. Connective tissue between chests, belts,
+	# and building input/output ports. 3rd Burner consumer. Cycle speed
+	# varies by fuel tier (wood = 2s, coal = 1s, briquette = 0.5s).
+	# Future arc sessions add filter / multi-filter / long-reach variants.
+	INSERTER,
 }
 
 const DATA: Dictionary = {
@@ -498,6 +504,30 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.INSERTER: {
+		"name": "Inserter",
+		"swatch_color": Color(0.55, 0.45, 0.30),    # industrial bronze-brown
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,                  # source/dest determined by dir
+		"player_drainable": false,
+		# Inserter UI (session-inserter-foundation):
+		# Two slots — held_item (read-only display, single-item buffer that
+		# the inserter is currently swinging) + fuel (standard Burner pattern,
+		# 16 units capacity, accepts wood/coal/briquette).
+		"slot_layout": [
+			{
+				"id": "held_item", "kind": "output",
+				"accepts": [],                       # informational; any item can be held
+				"max_stack": 1, "state_field": "held_item_buffer",
+			},
+			{
+				"id": "fuel", "kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16, "state_field": "fuel_buffer",
+			},
+		],
+	},
 	Type.FERTILIZER_APPLICATOR: {
 		"name": "Fertilizer Applicator",
 		"swatch_color": Color(0.55, 0.70, 0.55),    # sage / sprinkler-green
@@ -691,6 +721,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Composter.make(pos, dir)
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.make(pos, dir)
+		Type.INSERTER:
+			return Inserter.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -721,6 +753,10 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Custom tick (no recipe — applies fertilizer directly to
 			# tile_fertilizer_state via GridWorld.try_apply_fertilizer).
 			FertilizerApplicator.tick(b, world)
+		Type.INSERTER:
+			# Custom tick (no recipe — phase machine + fixed 1.0s cycle;
+			# uses Burner module via try_pull_fuel for fuel economy only).
+			Inserter.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -774,6 +810,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Composter.draw(b, canvas, world_pos, tile_size)
 		Type.FERTILIZER_APPLICATOR:
 			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
+		Type.INSERTER:
+			Inserter.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -972,6 +1010,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Processor.info_lines(b, world)
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.info_lines(b, world)
+		Type.INSERTER:
+			return Inserter.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)
 		Type.SMELTER:

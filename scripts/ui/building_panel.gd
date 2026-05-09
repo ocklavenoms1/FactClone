@@ -327,6 +327,10 @@ func _drop_into_fuel(slot_def: Dictionary) -> void:
 		return
 	var moved_items: int = min(items_that_fit, cursor.count)
 	building.state["fuel_buffer"] = current_units + moved_items * energy_per
+	# Track for display: fuel_buffer stores generic energy units, but the
+	# slot UI needs an item type to render an icon. Mirror what the auto-
+	# pull path (Burner._try_pull_from_*) records.
+	building.state["last_fuel_item"] = cursor.item_type
 	cursor.count -= moved_items
 	if cursor.count <= 0:
 		cursor.clear()
@@ -494,10 +498,28 @@ func _draw_slots(font: Font) -> void:
 			"fuel":
 				var units: int = int(building.state.get(field, 0))
 				if units > 0:
-					# Render fuel as "WOOD ×N" units — 1 unit = 1 conceptual wood
-					# for display purposes (the slot stores units, not items).
-					item_type = Items.Type.WOOD
-					count = units
+					# fuel_buffer stores energy units, not items. Use last_fuel_item
+					# (set by drag-drop and Burner pull paths) to pick the icon, and
+					# render `count` as item-equivalents (units / energy_per_item) so
+					# coal shows "COAL ×3" not "COAL ×12 (units)".
+					var last: int = int(building.state.get("last_fuel_item", -1))
+					if last >= 0 and Burner.FUEL_VALUES.has(last):
+						item_type = last
+						var energy_per: int = int(Burner.FUEL_VALUES[last])
+						# Floor division — if buffer has a partial unit (e.g., 3 units
+						# left after burning 1 of 4 from a coal), we under-report by 1
+						# rather than overstate. Caller reads the precise unit count
+						# from the panel's Fuel-units text line.
+						count = units / energy_per
+						# Edge case: 1-3 units left from coal-tier burns shouldn't
+						# show ×0; bump to 1 to keep the icon meaningful.
+						if count <= 0:
+							count = 1
+					else:
+						# Defensive fallback (shouldn't happen post-fix, but handles
+						# old saves where last_fuel_item is missing).
+						item_type = Items.Type.WOOD
+						count = units
 		# Hover highlight.
 		var hovered: bool = false
 		if _hover is Dictionary:
