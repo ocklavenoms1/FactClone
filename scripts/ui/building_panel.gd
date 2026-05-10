@@ -284,6 +284,8 @@ func _drop_into_slot(slot_def: Dictionary, sub_idx: int) -> void:
 			_drop_into_input(slot_def)
 		"fuel":
 			_drop_into_fuel(slot_def)
+		"filter":
+			_drop_into_filter(slot_def)
 		_:
 			_toast("Slot does not accept items.")
 
@@ -335,6 +337,23 @@ func _drop_into_fuel(slot_def: Dictionary) -> void:
 	if cursor.count <= 0:
 		cursor.clear()
 
+## Filter slot drop — METADATA, not buffer. Sets the building's filter
+## field to the cursor's item TYPE without consuming any items from the
+## cursor. The cursor stack stays intact.
+##
+## Filter slots use `state_field` to point to a scalar int field on
+## b.state (e.g., "filter_item_type" for fast inserter), NOT an Array
+## buffer. This is the first non-storage slot kind in the project; pattern
+## documented at the slot_layout entry for FAST_INSERTER in buildings.gd.
+##
+## Right-click clearing is handled in the panel's _gui_input override
+## (FastInserterPanel) — not generic to all panels. RMB falls through if
+## the panel doesn't define filter handling.
+func _drop_into_filter(slot_def: Dictionary) -> void:
+	var field: String = str(slot_def.get("state_field", "filter_item_type"))
+	building.state[field] = cursor.item_type
+	# Cursor unchanged — drop-to-set is a copy, not a move.
+
 ## Take from a slot to the cursor.
 func _take_from_slot(slot_def: Dictionary, sub_idx: int) -> void:
 	var kind: String = str(slot_def.get("kind", ""))
@@ -363,7 +382,7 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int) -> void:
 			# Lossy take-back per Q7 pushback: convert fuel_buffer units to
 			# wood equivalent (1 unit = 1 wood). Player who loaded coal accepts
 			# the efficiency loss on retrieval — simpler than tracking loaded
-			# items, no UX trap from auto-conversion accidents.
+			# items, no UX trap from auto-coversion accidents.
 			var units: int = int(building.state.get("fuel_buffer", 0))
 			if units <= 0:
 				return
@@ -371,6 +390,12 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int) -> void:
 			building.state["fuel_buffer"] = 0
 			building.state["fuel_burn_progress"] = 0
 			_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % units)
+		"filter":
+			# Filter slots store TYPE metadata, not stacks. There's nothing
+			# to "take" — player either drops a new filter (replaces current)
+			# or right-clicks to clear. Surface the discoverability hint so
+			# they don't think the slot is broken.
+			_toast("Filter holds an item TYPE, not items. Drop to set, right-click to clear.")
 
 # ---------- buffer helpers (Array of [type, count]) ----------
 
@@ -520,6 +545,16 @@ func _draw_slots(font: Font) -> void:
 						# old saves where last_fuel_item is missing).
 						item_type = Items.Type.WOOD
 						count = units
+			"filter":
+				# Filter slots store a single item TYPE in a scalar int field
+				# (NOT an array buffer). -1 = no filter set = render empty.
+				# Count is meaningless — set to 1 to make the slot non-empty
+				# in draw_slot's "is_empty" check; show_count=false suppresses
+				# the count overlay so the slot reads as "icon = filter type."
+				var ft: int = int(building.state.get(field, -1))
+				if ft >= 0:
+					item_type = ft
+					count = 1     # placeholder; draw_slot uses it for is_empty check
 		# Hover highlight.
 		var hovered: bool = false
 		if _hover is Dictionary:
@@ -527,4 +562,7 @@ func _draw_slots(font: Font) -> void:
 			if h.get("slot_def", {}) == slot_def and int(h.get("sub_idx", -1)) == sub_idx:
 				hovered = true
 		var border_tint: Color = SlotWidget.border_for_kind(kind)
-		SlotWidget.draw_slot(self, font, rect, item_type, count, hovered, border_tint)
+		# Filter slots show icon-only (no count overlay) — see "filter" branch
+		# above for the rationale (state field is a scalar, not a stack).
+		var show_count: bool = (kind != "filter")
+		SlotWidget.draw_slot(self, font, rect, item_type, count, hovered, border_tint, show_count)

@@ -1,22 +1,26 @@
 class_name Inserter
 extends RefCounted
 
-## Inserter — connective tissue of the factory (session-inserter-foundation,
-## Inserter Arc Session 1 of N).
+## Inserter — connective tissue of the factory.
+##
+## Tier-parametric: serves both the basic INSERTER (1.0s cycle, no filter)
+## and the FAST_INSERTER (0.5s cycle, single-slot filter), and is
+## designed to extend to future variants (electric, long-reach, stack)
+## by adding rows to the `*_BY_TYPE` tables below + dispatch cases in
+## buildings.gd. The refactor at session-inserter-fast-filter generalized
+## the originally-single-tier shape from session-inserter-foundation.
 ##
 ## Picks up an item from the source tile (one cell behind the inserter,
 ## opposite of `dir`), swings the arm to the destination tile (one cell
 ## ahead, in `dir`), drops the item, swings back. Universal source/dest:
 ## belts, chests, and recipe-driven processor I/O ports.
 ##
-## Fuel-powered via Burner module (3rd consumer after Smelter + Mining
-## Drill). Cycle speed is FIXED at 1.0 second per pickup-and-deliver
-## cycle — fuel tier (wood / coal / briquette) determines fuel ECONOMY
-## (how often you need to refill), NOT speed. Reversal #7 from PAUSE 1:
-## tying speed to fuel tier conflated two orthogonal axes (energy density
-## and machine throughput) and made the basic inserter feel inconsistent.
-## Future inserter variants (Fast Inserter, Stack Inserter) will get
-## faster cycles via separate building types, not via fuel.
+## Fuel-powered via Burner module. Cycle speed is FIXED per tier — fuel
+## tier (wood / coal / briquette) determines fuel ECONOMY (how often you
+## need to refill), NOT speed. Reversal #7 from session-inserter-
+## foundation PAUSE 1: tying speed to fuel tier conflated two orthogonal
+## axes. Throughput upgrades come via building TYPE (basic → fast →
+## electric), not via fuel choice.
 ##
 ## State machine (5 phases):
 ##   IDLE              — arm at rest (source side); waiting for source/dest/fuel
@@ -28,10 +32,13 @@ extends RefCounted
 ## Architectural notes:
 ##   - cycle_progress (0.0..1.0) drives both phase transitions AND arm
 ##     animation angle. Per-tick stepping; no sub-tick interpolation.
-##
-## Future variants (filter / multi-filter / long-reach / fast / stack)
-## reuse this animation system parametrically (ARM_LENGTH, CYCLE_TICKS,
-## source/dest offset).
+##   - filter_item_type (state field, default -1) gates pickup. Universal
+##     across tiers in DATA — only fast/electric tier UI exposes setting
+##     it, but tick logic checks it on every inserter (no-op when -1).
+##   - Port layout (canonical, dir = DIR_E): W = source, E = destination,
+##     S = fuel input. Restricting fuel to a perpendicular edge protects
+##     the source-tile items from being eaten as fuel — see FUEL_PORT_DIR
+##     constant docstring.
 
 # State machine values.
 const STATE_IDLE: int            = 0
@@ -40,18 +47,46 @@ const STATE_BLOCKED_AT_DEST: int = 2
 const STATE_WORKING_IN: int      = 3
 const STATE_NO_FUEL: int         = 4
 
-# Fixed cycle duration. 20 ticks @ 20 TPS = 1.0 second per full cycle
-# (pickup + swing-out + drop + swing-back). Chosen to feel snappier than
-# Factorio's basic inserter (0.83s effective) but still clearly slower
-# than future Fast Inserter variants. Independent of fuel tier.
-const CYCLE_TICKS: int = 20
+# Per-tier cycle duration (ticks @ 20 TPS). Add a row when a new inserter
+# tier ships; tick logic reads via `cycle_ticks(b)` lookup. Default
+# fallback (lookup miss) = 20, matching the basic tier.
+#   INSERTER:      20 ticks = 1.0s — basic (Session 1)
+#   FAST_INSERTER: row added at session-inserter-fast-filter (Session 2)
+const CYCLE_TICKS_BY_TYPE: Dictionary = {
+	Buildings.Type.INSERTER:      20,    # 1.0s — basic
+	Buildings.Type.FAST_INSERTER: 10,    # 0.5s — twice as fast
+}
+const CYCLE_TICKS_DEFAULT: int = 20
 
-# Animation parameters. ARM_LENGTH is per-variant — future LONG_INSERTER
-# would override to ~1.2 (extends beyond adjacent tile).
+# Per-tier body color. New tiers add an entry; default fallback is bronze
+# (basic). Future LONG_INSERTER would add `ARM_LENGTH_BY_TYPE` similarly.
+#   INSERTER:      bronze (basic — Session 1)
+#   FAST_INSERTER: row added at session-inserter-fast-filter (Session 2)
+const BODY_COLOR_BY_TYPE: Dictionary = {
+	Buildings.Type.INSERTER:      Color(0.55, 0.45, 0.30),    # bronze
+	Buildings.Type.FAST_INSERTER: Color(0.45, 0.55, 0.70),    # cool blue-grey
+}
+const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
+
+# Animation parameter shared across tiers (LONG_INSERTER would override).
 const ARM_LENGTH: float = 0.55       # fraction of tile_size
 
-# Visuals.
-const BODY_COLOR: Color = Color(0.55, 0.45, 0.30)
+# Fuel input port direction (canonical orientation; rotates with b.dir
+# via Buildings.world_dir). Mirrors the Smelter pattern from session-
+# smelter — restricting fuel intake to ONE specific perpendicular edge
+# prevents the source-tile-as-fuel bug where wood items in the source
+# chest get auto-pulled and burned as fuel instead of transported.
+#
+# Canonical port layout (b.dir = DIR_E):
+#   W edge: source (opposite of dir)
+#   E edge: destination (dir)
+#   S edge: fuel input (this constant)
+#   N edge: unused (reserved for future filter signal / 2nd fuel port)
+#
+# All ports rotate together via Buildings.world_dir(b, canonical).
+const FUEL_PORT_DIR: int = Belt.DIR_S
+
+# Visuals shared across all tiers.
 const BODY_DARK: Color = Color(0.18, 0.13, 0.08)
 const ARM_COLOR: Color = Color(0.20, 0.16, 0.10)
 const PIVOT_COLOR: Color = Color(0.30, 0.25, 0.18)
@@ -59,38 +94,58 @@ const TINT_IDLE: Color = Color(0.60, 0.60, 0.60)        # dim when idle / no_fue
 const TINT_NO_FUEL: Color = Color(0.55, 0.55, 0.85)     # cool blue tint
 const TINT_BLOCKED: Color = Color(1.0, 0.95, 0.40)      # yellow when blocked
 
+## Cycle ticks for this inserter's tier. Public API — also called by
+## InserterPanel / FastInserterPanel for "Cycle: Xs" displays.
+static func cycle_ticks(b: Building) -> int:
+	return int(CYCLE_TICKS_BY_TYPE.get(b.type, CYCLE_TICKS_DEFAULT))
+
+## Body color for this inserter's tier. Public API — used by draw().
+static func body_color(b: Building) -> Color:
+	return BODY_COLOR_BY_TYPE.get(b.type, BODY_COLOR_DEFAULT)
+
 ## Build initial state. dir defaults to canonical east (DIR_E = 0).
-## Cycle speed is fixed (CYCLE_TICKS) regardless of fuel tier — see
-## file-level docstring for the reversal rationale.
-static func make(pos: Vector2i, dir: int = 0) -> Building:
+## b_type defaults to INSERTER; pass FAST_INSERTER (or future tiers) for
+## tier-specific buildings. State shape is uniform across tiers — the
+## filter_item_type field exists on every inserter (default -1 = no
+## filter), but only fast/electric tier UI exposes setting it.
+##
+## Cycle speed is fixed per tier (see CYCLE_TICKS_BY_TYPE) regardless of
+## fuel tier — see file-level docstring for the reversal rationale.
+static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.INSERTER) -> Building:
 	var state: Dictionary = {
 		"dir": dir,
 		"held_item_buffer": [],          # [[item_type, count]]; count ∈ {0, 1}
 		"cycle_progress": 0.0,
 		"state": STATE_IDLE,
+		"filter_item_type": -1,          # -1 = no filter; else Items.Type
 	}
 	for k in Burner.make_state().keys():
 		state[k] = Burner.make_state()[k]
-	return Building.new(Buildings.Type.INSERTER, pos, state)
+	return Building.new(b_type, pos, state)
 
-## Tick logic. Dispatched from Buildings.tick_one.
+## Tick logic. Dispatched from Buildings.tick_one. Both INSERTER and
+## FAST_INSERTER (and future tiers) route here; differences resolved via
+## cycle_ticks(b) lookup.
 ##
 ## Order of operations:
 ##   1. Try to refuel if buffer empty.
 ##   2. If no fuel after refuel attempt → STATE_NO_FUEL, return.
 ##   3. Run state machine based on current state.
 static func tick(b: Building, world) -> void:
-	# (1 + 2) Fuel check + pull.
+	# (1 + 2) Fuel check + pull. Restricted to FUEL_PORT_DIR (rotated by
+	# building dir) — see constant docstring for the source-tile-as-fuel
+	# bug rationale (caught at session-inserter-fast-filter PAUSE 1).
 	var fuel_units: int = int(b.state.get("fuel_buffer", 0))
 	if fuel_units <= 0:
-		if not Burner.try_pull_fuel(b, world, -1):
+		if not Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR)):
 			b.state["state"] = STATE_NO_FUEL
 			return
 	# (3) State machine.
 	var s: int = int(b.state.get("state", STATE_IDLE))
-	# Per-tick cycle increment. One full cycle (0→1) spans CYCLE_TICKS
-	# ticks; each half-cycle (swing-out OR swing-in) is CYCLE_TICKS/2 ticks.
-	var inc: float = 1.0 / float(CYCLE_TICKS)
+	var ticks: int = cycle_ticks(b)
+	# Per-tick cycle increment. One full cycle (0→1) spans `ticks` ticks;
+	# each half-cycle (swing-out OR swing-in) is ticks/2 ticks.
+	var inc: float = 1.0 / float(ticks)
 
 	match s:
 		STATE_IDLE, STATE_NO_FUEL:
@@ -101,7 +156,7 @@ static func tick(b: Building, world) -> void:
 				b.state["cycle_progress"] = 0.0
 				b.state["state"] = STATE_WORKING_OUT
 				# Consume one fuel-burn tick this cycle.
-				Burner.consume_tick(b, CYCLE_TICKS)
+				Burner.consume_tick(b, ticks)
 		STATE_WORKING_OUT:
 			# Advance toward destination. cycle_progress 0 → 0.5.
 			var p: float = float(b.state.get("cycle_progress", 0.0)) + inc
@@ -116,7 +171,7 @@ static func tick(b: Building, world) -> void:
 				else:
 					b.state["state"] = STATE_BLOCKED_AT_DEST
 			b.state["cycle_progress"] = p
-			Burner.consume_tick(b, CYCLE_TICKS)
+			Burner.consume_tick(b, ticks)
 		STATE_BLOCKED_AT_DEST:
 			# Held item, arm pinned at destination. Try to drop every tick.
 			# NO fuel consumption while blocked (arm isn't moving).
@@ -132,7 +187,7 @@ static func tick(b: Building, world) -> void:
 				p2 = 0.0
 				b.state["state"] = STATE_IDLE
 			b.state["cycle_progress"] = p2
-			Burner.consume_tick(b, CYCLE_TICKS)
+			Burner.consume_tick(b, ticks)
 
 # ---------- helpers ----------
 
@@ -166,12 +221,23 @@ static func _clear_held(b: Building) -> void:
 ## Try to pick one item from source tile. Returns the picked item type
 ## or -1 if nothing pickable.
 ##
+## Filter semantics:
+##   - filter_item_type == -1 (default for basic, unset on fast): pick
+##     any item (basic-equivalent FIFO behavior — preserves backwards
+##     compat exactly).
+##   - filter_item_type == X (set on fast tier via FastInserterPanel
+##     drop-to-set): pick ONLY items of type X. Non-matching items are
+##     left in place (belt slot stays occupied, chest entries stay).
+##     Mid-cycle filter changes don't affect already-held items —
+##     in-flight cycles complete; filter gates next pickup.
+##
 ## Source priority by building type:
-##   BELT  → take item from the slot facing the inserter (the slot
-##           closest to the inserter, the one that would otherwise be
-##           handed off NEXT toward the inserter direction).
-##   CHEST → take any item (FIFO — first non-empty bag entry).
-##   Recipe-driven Processor → take from out_buffer (FIFO).
+##   BELT  → take item from the slot facing the inserter, IF it matches
+##           filter (or no filter). No "scan further down the belt" —
+##           that would be the long-reach variant or different design.
+##   CHEST → scan bag for first matching item (filter set) or first non-
+##           empty entry (filter unset).
+##   Recipe-driven Processor → scan out_buffer same as chest.
 ##   Otherwise: no-op.
 static func _try_pickup(b: Building, world) -> int:
 	var src: Vector2i = source_tile(b)
@@ -180,18 +246,19 @@ static func _try_pickup(b: Building, world) -> int:
 	var src_b: Building = world.building_at(src)
 	if src_b == null:
 		return -1
+	var filter: int = int(b.state.get("filter_item_type", -1))
 	# Belt: pull from the slot facing the inserter.
 	if src_b.type == Buildings.Type.BELT:
-		return _pickup_from_belt(b, src_b)
-	# Chest: FIFO from bag.
+		return _pickup_from_belt(b, src_b, filter)
+	# Chest: FIFO from bag (or first matching entry if filter set).
 	if src_b.type == Buildings.Type.CHEST:
-		return _pickup_from_chest(src_b)
-	# Recipe-driven Processor: pull from out_buffer (FIFO).
+		return _pickup_from_chest(src_b, filter)
+	# Recipe-driven Processor: pull from out_buffer (FIFO or filter match).
 	if _is_processor_with_output(src_b):
-		return _pickup_from_processor(src_b)
+		return _pickup_from_processor(src_b, filter)
 	return -1
 
-static func _pickup_from_belt(b: Building, belt: Building) -> int:
+static func _pickup_from_belt(b: Building, belt: Building, filter: int) -> int:
 	# The slot index facing the inserter = the slot at the END of the
 	# belt closest to the inserter. Belt slots are direction-flow ordered;
 	# `Belt.slot_facing_external` already implements this for cross-belt
@@ -205,15 +272,21 @@ static func _pickup_from_belt(b: Building, belt: Building) -> int:
 	var item_t: int = int(slots[slot_idx])
 	if item_t < 0:
 		return -1
+	# Filter check BEFORE consumption — leave non-matching items on belt.
+	if filter >= 0 and item_t != filter:
+		return -1
 	slots[slot_idx] = -1
 	return item_t
 
-static func _pickup_from_chest(chest: Building) -> int:
+static func _pickup_from_chest(chest: Building, filter: int) -> int:
 	var bag: Array = chest.state.get("bag", [])
 	for entry in bag:
 		var item_t: int = int(entry[0])
 		var count: int = int(entry[1])
 		if count <= 0:
+			continue
+		# Filter check BEFORE consumption — skip non-matching entries.
+		if filter >= 0 and item_t != filter:
 			continue
 		entry[1] = count - 1
 		if int(entry[1]) <= 0:
@@ -221,14 +294,17 @@ static func _pickup_from_chest(chest: Building) -> int:
 		return item_t
 	return -1
 
-static func _pickup_from_processor(src: Building) -> int:
-	# Pull from out_buffer (FIFO). Mirrors the buffer-remove pattern from
-	# Processor / FertilizerApplicator.
+static func _pickup_from_processor(src: Building, filter: int) -> int:
+	# Pull from out_buffer (FIFO, or first matching entry if filter set).
+	# Mirrors the buffer-remove pattern from Processor / FertilizerApplicator.
 	var out_buf: Array = src.state.get("out_buffer", [])
 	for entry in out_buf:
 		var item_t: int = int(entry[0])
 		var count: int = int(entry[1])
 		if count <= 0:
+			continue
+		# Filter check BEFORE consumption.
+		if filter >= 0 and item_t != filter:
 			continue
 		entry[1] = count - 1
 		if int(entry[1]) <= 0:
@@ -349,7 +425,14 @@ static func info_lines(b: Building, world) -> Array:
 		lines.append("Holding: %s" % Items.name_of(held))
 	# Cycle.
 	var cycle_progress: float = float(b.state.get("cycle_progress", 0.0))
-	lines.append("Cycle: %.0f%% (%.1fs per cycle)" % [cycle_progress * 100.0, float(CYCLE_TICKS) / 20.0])
+	lines.append("Cycle: %.0f%% (%.1fs per cycle)" % [cycle_progress * 100.0, float(cycle_ticks(b)) / 20.0])
+	# Filter (fast/electric tier only — basic doesn't surface this line).
+	if b.type == Buildings.Type.FAST_INSERTER:
+		var filter: int = int(b.state.get("filter_item_type", -1))
+		if filter >= 0:
+			lines.append("Filter: %s" % Items.name_of(filter))
+		else:
+			lines.append("Filter: (none — picks any item)")
 	# Burner fuel display.
 	for line in Burner.info_lines(b):
 		lines.append(line)
@@ -387,9 +470,10 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 			tint = TINT_NO_FUEL
 		STATE_BLOCKED_AT_DEST:
 			tint = TINT_BLOCKED
-	var body_color: Color = Color(BODY_COLOR.r * tint.r, BODY_COLOR.g * tint.g, BODY_COLOR.b * tint.b, 1.0)
+	var base: Color = body_color(b)
+	var body: Color = Color(base.r * tint.r, base.g * tint.g, base.b * tint.b, 1.0)
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
-	canvas.draw_rect(rect, body_color, true)
+	canvas.draw_rect(rect, body, true)
 	canvas.draw_rect(rect, BODY_DARK, false, 2.0)
 
 	# Pivot — central circle (the "shoulder" of the arm).

@@ -1,3 +1,4 @@
+class_name InserterPanel
 extends BuildingPanel
 
 ## Inserter-specialized building panel
@@ -42,9 +43,18 @@ func _top_area_height() -> int:
 	# (~50) + fuel slot row (~70) + facing line (~24) + padding.
 	return 280
 
+## Y-offset of each slot id within the panel's top area. Virtual hook
+## for subclasses (FastInserterPanel adds a "filter" entry; future tiers
+## extend the same way). Default = basic inserter (held_item + fuel).
+func _slot_y_offsets() -> Dictionary:
+	return {
+		"held_item": 30,
+		"fuel":      160,
+	}
+
 func _building_slot_rects() -> Array:
-	# Two slots: held_item (top-left) + fuel (lower-left). Both small,
-	# positioned so the right side of the panel can render text.
+	# Slots positioned by id via _slot_y_offsets() — subclasses inject
+	# additional rows by overriding the virtual.
 	if building == null:
 		return []
 	var area: Rect2 = _top_area_rect()
@@ -52,12 +62,7 @@ func _building_slot_rects() -> Array:
 	var rects: Array = []
 	var x: float = area.position.x + 24
 	var layout: Array = Buildings.slot_layout_for(building.type)
-	# held_item slot at y_offset 30
-	# fuel slot at y_offset 160
-	var y_offsets: Dictionary = {
-		"held_item": 30,
-		"fuel": 160,
-	}
+	var y_offsets: Dictionary = _slot_y_offsets()
 	for slot_def in layout:
 		var sid: String = str(slot_def.get("id", ""))
 		var y_off = y_offsets.get(sid, 30)
@@ -136,17 +141,21 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 	draw_string(font, Vector2(label_x, fuel_y),
 		"Fuel: %d / %d units" % [fuel, Burner.FUEL_BUFFER_CAPACITY],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
-	# Cycle speed is fixed (independent of fuel tier — see inserter.gd
-	# header for the reversal rationale). Fuel tier affects fuel ECONOMY
-	# (energy density: wood=1, coal=4, briquette=8 units per item).
-	var cycle_seconds: float = float(Inserter.CYCLE_TICKS) / 20.0
+	# Cycle speed is fixed per tier (independent of fuel tier — see
+	# inserter.gd header for the reversal rationale). Fuel tier affects
+	# fuel ECONOMY (energy density: wood=1, coal=4, briquette=8 units
+	# per item). cycle_ticks(b) is the parametric lookup post-Session 2.
+	var cycle_seconds: float = float(Inserter.cycle_ticks(building)) / 20.0
 	draw_string(font, Vector2(label_x, fuel_y + 22),
 		"Cycle speed: %.1fs (fixed)" % cycle_seconds,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
 
 	# --- Facing ---
+	# Anchored 40px from the bottom of the top area so subclasses with
+	# additional rows (FastInserterPanel adds a filter slot row) get the
+	# facing line in the right place automatically.
 	var dir: int = int(building.state.get("dir", 0))
-	draw_string(font, Vector2(area.position.x + 24, area.position.y + 240),
+	draw_string(font, Vector2(area.position.x + 24, area.position.y + area.size.y - 40),
 		"Facing: %s   (R to rotate before placing; in NEUTRAL hover R rotates the placed inserter)" % Belt.DIR_NAMES[dir],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, TEXT_DIM)
 

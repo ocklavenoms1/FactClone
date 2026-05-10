@@ -9,6 +9,60 @@ Each entry has three sections:
 
 ---
 
+## Inserter Arc Session 2 — Fast Inserter + Filter
+
+**Date:** 2026-05-09
+**Tag:** `session-inserter-fast-filter`
+**Save:** v18 (no schema bump — new building type appended to enum, new state field with `.get(key, -1)` defensive default)
+
+Second session of the 6-session Inserter Arc. Ships the **Fast Inserter** as a parallel tier to basic: same code path, twice the cycle speed (0.5s vs 1.0s), bundled with a single-slot **filter** capability (drop an item type to gate pickup; right-click clears). Plus a **parametric refactor** of `inserter.gd` so future tiers (electric / long-reach / stack) extend by adding rows to `*_BY_TYPE` tables instead of duplicating modules. Plus a **pre-existing fuel-port bug** caught at PAUSE 1 and fixed.
+
+### What shipped
+
+**`scripts/world/inserter.gd`** (refactored to tier-parametric): replaced single-tier constants `CYCLE_TICKS`, `BODY_COLOR` with per-type Dictionary tables `CYCLE_TICKS_BY_TYPE` and `BODY_COLOR_BY_TYPE`. Public API `Inserter.cycle_ticks(b)` and `Inserter.body_color(b)` look up by `b.type` with fallback to basic-tier defaults. `make()` signature gained a `b_type` parameter (defaults to `INSERTER`). Tick/draw/info_lines use the parametric path uniformly — both `INSERTER` and `FAST_INSERTER` route to the same `Inserter.tick(b, world)` function. Added `filter_item_type` field to state (default `-1` = no filter), checked in `_try_pickup` per-source helpers. **Future variant cost: ~1 row per table + 1 dispatch case in buildings.gd.**
+
+**`scripts/world/inserter.gd` — Fuel-port bug fix:** added `const FUEL_PORT_DIR: int = Belt.DIR_S`, replaced `Burner.try_pull_fuel(b, world, -1)` (scan-all-edges) with `Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR))`. Mirrors the Smelter pattern from session-smelter. See "Lessons" for the bug story.
+
+**`scripts/world/burner.gd`** (docstring): the FUEL PORT DIRECTION pattern is now front-and-center in the file header — "Do NOT pass -1 (scan-all-edges) in production code unless the building has no other item ports." Future Burner consumers won't repeat the bug from copy-paste oversight.
+
+**`scripts/world/buildings.gd`**: appended `Type.FAST_INSERTER` to enum (APPEND-ONLY contract). Added DATA entry: 1×1 footprint, blue-grey swatch_color, 3-slot layout (held_item + fuel + filter). Dispatch cases in `make_one`, `tick_one`, `draw_one`, `info_lines_for` use comma-pattern `Type.INSERTER, Type.FAST_INSERTER:` so both tiers reach the shared Inserter.* code with no duplication.
+
+**`scripts/ui/slot_widget.gd`**: new `BORDER_FILTER` color (cyan), `border_for_kind` "filter" case, `draw_slot` gained a `show_count` parameter (default true). Filter slots pass `show_count=false` so the icon renders without a count overlay (filter holds an item TYPE, not a stack — count would mislead).
+
+**`scripts/ui/building_panel.gd`**: new `_drop_into_filter(slot_def)` helper — sets `b.state[state_field]` to `cursor.item_type` WITHOUT consuming the cursor. Match-statement cases added for `"filter"` in `_drop_into_slot`, `_take_from_slot` (no-op + discoverability toast), and `_draw_slots`. Filter is the **first non-storage slot kind** in the project; pattern documented at the FAST_INSERTER DATA entry.
+
+**`scripts/ui/inserter_panel.gd`** (refactored for inheritance): now `class_name InserterPanel`. Extracted `_slot_y_offsets()` virtual hook so subclasses can inject additional rows. Facing-line draw anchored to `area.size.y - 40` so taller subclass panels position the line correctly without overrides.
+
+**`scripts/ui/fast_inserter_panel.gd`** (new, ~85 lines): extends `InserterPanel`. Three small overrides: `_top_area_height()` (360 vs 280), `_slot_y_offsets()` (adds `"filter": 240`), `_draw_building_specific()` (calls super, then `_draw_filter_section`). Plus `_gui_input()` override for right-click-to-clear: hits filter slot rect → clears `filter_item_type` to -1 → `accept_event()` to consume the RMB so it doesn't fall through. Layout: `FILTER` cyan label at y=234, slot at y=240, filter name at y=258, hint at y=278, facing line at y=320 (42px breathing room).
+
+**`scripts/main.gd`** + **`scenes/main.tscn`** + **`scripts/ui/hotbar.gd`**: standard wire-up — `@onready var fast_inserter_panel`, panel arrays in two places (`_ready` + `_all_building_panels`), click-to-open dispatch case for FAST_INSERTER, scene HUD node with ext_resource id `32_fastinspanel` (load_steps 34 → 35), Inserters hotbar category gains FAST_INSERTER as 2nd slot.
+
+**`scripts/tests/test_inserter.gd`** (new, ~340 lines): 10 sub-suites covering basic-cycle regression (parametric refactor doesn't break Session 1), fast-cycle (10 ticks/cycle vs basic 20), filter unset = any item, filter set on chest source = matching only, filter set on belt source = matching picked / wrong-type stays on belt, panel drop-to-set (cursor TYPE copied, items not consumed), panel RMB clears filter, save round-trip preserves `filter_item_type`, AND **a regression test for the fuel-port fix** (wood in source chest is not eaten as fuel; fuel must come from S edge). **Tests: 31 → 32 passing**, internal sub-suite count 31 → 41.
+
+### Decisions
+
+- **Filter as tier-bundled capability, not orthogonal axis.** Fast inserter is "speed AND filter as a unit" — there's no slow-with-filter or fast-without-filter. Sanity-checked against Reversal #7's anti-pattern (don't conflate orthogonal axes): the test "would slow-with-filter make sense?" returns "no — filter IS what fast-tier means." Bundling is correct here. Future electric tier will bundle multi-filter; long-reach will bundle reach-2 with a base tier's filter capability.
+- **`filter_item_type` is a UNIVERSAL state field across all inserter tiers.** Basic gets it too (default -1), even though basic has no UI to set it. Reasons: (1) Tick logic stays uniform — no `if b.type == FAST_INSERTER: read filter; else: skip` branching. (2) Future tiers inherit the field for free. (3) Save shape is consistent across tiers. The "filter unset → behave like basic" path is built into the pickup helpers as `if filter >= 0 and item_t != filter: continue` — a one-line no-op when filter is -1.
+- **Parametric refactor uses Dictionary lookup tables, not subclass polymorphism.** `Inserter` is a static `RefCounted` class; subclasses would mean per-tier files with `extends Inserter` boilerplate. Tables are cleaner: one row per tier in `CYCLE_TICKS_BY_TYPE`, one in `BODY_COLOR_BY_TYPE`, future `ARM_LENGTH_BY_TYPE` for long-reach. Future variant cost stays sub-30-line.
+- **`InserterPanel` uses virtual `_slot_y_offsets()` for subclass injection.** Pattern cribbed from `ProcessorPanel` (11 consumers via virtual hooks). FastInserterPanel overrides one method to add a row; future tiers add the same way. Compared to scene-tree-with-named-children, this keeps panel logic data-driven and inheritable.
+- **'filter' slot kind is the FIRST non-storage slot in the project.** Three dispatch points in `BuildingPanel` (drop / take / draw) needed explicit `"filter"` cases — silent fallthrough would manifest as filter slots that pretend to have item counts or accept consumed drops. Documented at the FAST_INSERTER DATA entry so future metadata-style slot kinds (recipe picker, configuration toggle, etc.) follow the same explicit-case pattern.
+- **Right-click handling is panel-local, not pushed into SlotWidget** (per re-orient guidance #2 — don't pre-emptively refactor click code). FastInserterPanel owns its RMB branch in `_gui_input`; existing click extraction trigger captured but DEFERRED to QoL session.
+- **No save schema bump.** New building TYPE (append-only enum is save-safe) + new optional state field (defensive `.get(key, -1)`) are exactly what the migration framework treats as non-events. Bumping for this would dilute the framework's signal value.
+
+### Lessons
+
+- **Pre-existing fuel-port bug from Session 1 caught at PAUSE 1.** `Inserter.tick` called `Burner.try_pull_fuel(b, world, -1)` (scan-all-edges). Latent in Session 1 because the smoke test never put fuel-eligible items at source/destination. Session 2 manual smoke (placing **wood** in a source chest for testing) immediately surfaced it: inserter pulled wood from the source chest as **fuel** instead of transporting wood to the destination. **Fix: mirror the existing Smelter pattern from session-smelter** — `const FUEL_PORT_DIR: int = Belt.DIR_S`, restrict fuel intake to one specific perpendicular edge via `Buildings.world_dir(b, FUEL_PORT_DIR)`. Smelter shipped this protection in session-smelter; Inserter inherited the buggy `-1` from a copy-paste oversight from MiningDrill (which has no source-input port — drill output comes from the deposit tile under the building, not from an adjacent input). **Pattern captured in `burner.gd` header:** "Do NOT pass -1 (scan-all-edges) in production code unless the building has no other item ports." Regression test 10 in `test_inserter.gd` locks in the fix. **The bug was pre-existing for ~1 day; surfaced within 2 minutes of Session 2 smoke. Cost to fix: 5 minutes + 1 test. Cost if it had landed in production: every inserter player builds eats their items.**
+
+- **Scope-creep mid-session was managed via "Option B: defer to follow-up" pattern, not by cramming in.** During implementation, user surfaced four out-of-scope asks: (1) shift/ctrl stack-split, (2) item hover tooltips with descriptions, (3) filter dropdown picker (a UX REVERSAL of the locked drop-to-set design), (4) building-blocks-movement (player walks around buildings, Factorio convention). Each was acknowledged with concrete scope (lines of code, architectural touchpoints) and explicitly **deferred to a "QoL Polish Session"** queued in NOTES.md. The inserter session shipped its locked design clean. **Pattern: when user surfaces UX preferences mid-implementation, the right move is "captured + deferred to a polish session," not "let me also land that real quick."** The polish session aggregates UX feedback from multiple sessions and lands them in one cohesive arc.
+
+- **Layout-overlap caught at PAUSE 2 — anchored Y constants prevent regression.** First version of FastInserterPanel positioned filter at y=270 with hint text at y=308 and facing line at y=320 (12px overlap). Fix moved filter to y=240 (hint at y=278, facing at y=320 = 42px breathing room). **More importantly:** also factored out a `FILTER_Y` constant inside `_draw_filter_section` so all hint Y positions chain off one source — future tweaks are one-edit. **Pattern: when adjusting magic-number Y offsets, factor out a single anchor first; the second adjustment costs zero.**
+
+- **Filter UX clarity check at PAUSE 2 — "(any item)" placeholder works without escalation.** Architectural concern #6 from design pass anticipated potential UX confusion ("player tries to take items from filter slot, expecting buffer semantics"). Player tested by setting WOOD as filter against a chest with wheat+flax: inserter correctly stopped (no matching items). Player initially read this as a bug ("but the chest has stuff!") then confirmed it's correct behavior on explanation. **Concrete future polish:** add `Status: IDLE (no items match filter)` diagnostic line in panel/Q-inspect — currently silent on the WHY of idleness. Captured for the QoL session.
+
+- **MCP wasn't useful for this session.** godot-mcp was available throughout but offered no concrete value: it can only screenshot the running game and read editor scene-tree defaults (per session-inserter-foundation lessons). The bug-find at PAUSE 1 came from user manual smoke — exactly the workflow MCP can't help with. **Pattern: the screenshot-only path of MCP is useful when the user can't easily share what they're seeing. When the user is hands-on at PAUSE time, MCP adds no value.**
+
+---
+
 ## Inserter Arc Session 1 — Foundation (basic inserter, fixed-cycle)
 
 **Date:** 2026-05-08

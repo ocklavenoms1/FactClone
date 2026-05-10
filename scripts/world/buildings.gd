@@ -65,10 +65,20 @@ enum Type {
 	FERTILIZER_APPLICATOR,
 	# Inserter Arc Session 1 (session-inserter-foundation): basic
 	# 1-tile-reach inserter. Connective tissue between chests, belts,
-	# and building input/output ports. 3rd Burner consumer. Cycle speed
-	# varies by fuel tier (wood = 2s, coal = 1s, briquette = 0.5s).
-	# Future arc sessions add filter / multi-filter / long-reach variants.
+	# and building input/output ports. Burner consumer. Cycle fixed at
+	# 1.0s per pickup (fuel tier affects fuel ECONOMY, not throughput
+	# — Reversal #7 captured in inserter.gd header).
 	INSERTER,
+	# Inserter Arc Session 2 (session-inserter-fast-filter): FAST tier.
+	# Same code path as basic (Inserter.tick is parametric on b.type via
+	# CYCLE_TICKS_BY_TYPE / BODY_COLOR_BY_TYPE), but cycle is 0.5s and
+	# the slot_layout adds a 'filter' slot — single-item-type pickup gate
+	# that lets players route mixed-content belts/chests selectively.
+	# Filter is a TIER-BUNDLED capability (not orthogonal to speed): you
+	# upgrade to fast tier and gain BOTH speed AND filter as a unit.
+	# Future tiers (electric → multi-filter, long-reach → reach 2 tiles)
+	# extend the same data tables.
+	FAST_INSERTER,
 }
 
 const DATA: Dictionary = {
@@ -528,6 +538,43 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.FAST_INSERTER: {
+		"name": "Fast Inserter",
+		"swatch_color": Color(0.45, 0.55, 0.70),    # cool blue-grey: "precision" tier
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,                  # source/dest/fuel rotate together
+		"player_drainable": false,
+		# Inserter UI (session-inserter-fast-filter):
+		# Three slots — held_item (read-only display) + fuel (Burner pattern,
+		# 16 units capacity) + filter (NEW 'filter' kind: single-item-type
+		# metadata, NOT a buffer). Drop an item onto the filter slot to gate
+		# inserter pickup to that item type only; right-click to clear.
+		# Filter slot stores Items.Type as int in state.filter_item_type
+		# (default -1 = no filter = picks any item, like basic inserter).
+		"slot_layout": [
+			{
+				"id": "held_item", "kind": "output",
+				"accepts": [],                       # informational; any item can be held
+				"max_stack": 1, "state_field": "held_item_buffer",
+			},
+			{
+				"id": "fuel", "kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16, "state_field": "fuel_buffer",
+			},
+			{
+				# NEW kind 'filter' — METADATA, not buffer. Drop-to-set,
+				# right-click-to-clear, no take semantics. state_field
+				# points to a scalar int (Items.Type or -1), NOT an Array.
+				# 'accepts': [] means "any item type may be set as filter"
+				# (filter dispatch ignores the list — drop always succeeds).
+				"id": "filter", "kind": "filter",
+				"accepts": [],
+				"max_stack": 1, "state_field": "filter_item_type",
+			},
+		],
+	},
 	Type.FERTILIZER_APPLICATOR: {
 		"name": "Fertilizer Applicator",
 		"swatch_color": Color(0.55, 0.70, 0.55),    # sage / sprinkler-green
@@ -722,7 +769,9 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.make(pos, dir)
 		Type.INSERTER:
-			return Inserter.make(pos, dir)
+			return Inserter.make(pos, dir, Type.INSERTER)
+		Type.FAST_INSERTER:
+			return Inserter.make(pos, dir, Type.FAST_INSERTER)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -753,9 +802,13 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Custom tick (no recipe — applies fertilizer directly to
 			# tile_fertilizer_state via GridWorld.try_apply_fertilizer).
 			FertilizerApplicator.tick(b, world)
-		Type.INSERTER:
-			# Custom tick (no recipe — phase machine + fixed 1.0s cycle;
-			# uses Burner module via try_pull_fuel for fuel economy only).
+		Type.INSERTER, Type.FAST_INSERTER:
+			# Custom tick — phase machine + parametric cycle speed via
+			# Inserter.cycle_ticks(b) lookup. Same code path for both
+			# basic (1.0s cycle) and fast (0.5s cycle, with filter slot)
+			# tiers. Uses Burner module via try_pull_fuel restricted to
+			# FUEL_PORT_DIR (S edge in canonical orientation) so source
+			# items aren't consumed as fuel.
 			Inserter.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
@@ -810,7 +863,7 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Composter.draw(b, canvas, world_pos, tile_size)
 		Type.FERTILIZER_APPLICATOR:
 			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
-		Type.INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER:
 			Inserter.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
@@ -1010,7 +1063,7 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Processor.info_lines(b, world)
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.info_lines(b, world)
-		Type.INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER:
 			return Inserter.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)

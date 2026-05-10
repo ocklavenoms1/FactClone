@@ -24,6 +24,7 @@ const BORDER_HOVER: Color = Color(1.00, 0.92, 0.40, 1.00)
 const BORDER_INPUT: Color = Color(0.50, 0.55, 0.65, 0.95)    # cool gray-blue
 const BORDER_OUTPUT: Color = Color(0.55, 0.65, 0.50, 0.95)   # cool gray-green
 const BORDER_FUEL: Color = Color(0.65, 0.55, 0.40, 0.95)     # warm fuel-orange
+const BORDER_FILTER: Color = Color(0.45, 0.85, 1.00, 0.95)   # bright cyan — "metadata, not storage"
 const COUNT_COLOR: Color = Color(1.0, 1.0, 1.0)
 const COUNT_SHADOW: Color = Color(0, 0, 0, 0.85)
 
@@ -34,7 +35,11 @@ const COUNT_SHADOW: Color = Color(0, 0, 0, 0.85)
 ## border. Pass null/empty Color to use the default gray.
 ##
 ## `hovered` overrides the kind-tint with the hover yellow.
-static func draw_slot(canvas: CanvasItem, font: Font, rect: Rect2, item_type: int, count: int, hovered: bool = false, kind_border_tint: Color = BORDER) -> void:
+##
+## `show_count` defaults true. Pass false for filter slots, where the slot
+## holds metadata (an item TYPE) not a stack — count would be misleading
+## ("FILTER ×1" reads like "1 item stored").
+static func draw_slot(canvas: CanvasItem, font: Font, rect: Rect2, item_type: int, count: int, hovered: bool = false, kind_border_tint: Color = BORDER, show_count: bool = true) -> void:
 	var is_empty: bool = item_type < 0 or count <= 0
 	canvas.draw_rect(rect, BG_EMPTY if is_empty else BG, true)
 	var border: Color = BORDER_HOVER if hovered else kind_border_tint
@@ -48,6 +53,8 @@ static func draw_slot(canvas: CanvasItem, font: Font, rect: Rect2, item_type: in
 	var swatch_rect: Rect2 = Rect2(rect.position + swatch_inset, Vector2(swatch_size, swatch_size))
 	canvas.draw_rect(swatch_rect, Items.color_of(item_type), true)
 	canvas.draw_rect(swatch_rect, Color.BLACK, false, 1.0)
+	if not show_count:
+		return
 	# Count — bottom-right with shadow.
 	var count_str: String = str(count)
 	var count_pos: Vector2 = rect.position + Vector2(4, rect.size.y - 4)
@@ -92,6 +99,8 @@ static func border_for_kind(kind: String) -> Color:
 			return BORDER_OUTPUT
 		"fuel":
 			return BORDER_FUEL
+		"filter":
+			return BORDER_FILTER
 	return BORDER
 
 ## Draw the floating cursor stack at `mouse_pos` (used by every modal that

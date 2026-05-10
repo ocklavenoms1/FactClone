@@ -98,6 +98,10 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # specialized panel — held item display + fuel slot + source/dest text +
 # cycle progress bar. Extends BuildingPanel directly.
 @onready var inserter_panel: Control = $HUD/InserterPanel
+# Inserter Arc Session 2 (session-inserter-fast-filter): fast inserter
+# panel — extends InserterPanel; adds filter slot row (drop-to-set,
+# right-click-to-clear). Same scene-tree neighbor pattern as Session 1.
+@onready var fast_inserter_panel: Control = $HUD/FastInserterPanel
 @onready var minimap: Control = $HUD/Minimap
 # Dev Console (session-dev-console). Backtick toggles. Debug-build-only —
 # activation gated in _unhandled_input. Replaces "build a chain to test"
@@ -184,7 +188,7 @@ func _ready() -> void:
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
 		thresher_panel, planter_panel, harvester_panel,
-		inserter_panel,
+		inserter_panel, fast_inserter_panel,
 	]
 	for panel in all_panels:
 		if panel != null:
@@ -845,7 +849,7 @@ func _all_building_panels() -> Array:
 		loom_panel, tailor_panel, briquetter_panel, sugar_press_panel,
 		retter_panel, yeast_culture_panel,
 		thresher_panel, planter_panel, harvester_panel,
-		inserter_panel,
+		inserter_panel, fast_inserter_panel,
 	]
 
 ## True if any specialized building panel (or the generic fallback) is open.
@@ -927,6 +931,8 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			applicator_panel.open(b, grid_world)
 		Buildings.Type.INSERTER:
 			inserter_panel.open(b, grid_world)
+		Buildings.Type.FAST_INSERTER:
+			fast_inserter_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-

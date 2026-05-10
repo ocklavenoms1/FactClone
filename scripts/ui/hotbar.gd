@@ -111,6 +111,10 @@ func _build_categories() -> void:
 		"name": "Inserters",
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.INSERTER },
+			# Inserter Arc Session 2 (session-inserter-fast-filter): fast tier.
+			# Same building category; cycle is 0.5s and the panel adds a filter
+			# slot for selective pickup (drop item to set, RMB to clear).
+			{ "kind": "building", "value": Buildings.Type.FAST_INSERTER },
 		],
 		"selected": 0,
 	})

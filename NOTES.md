@@ -6,6 +6,69 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Inserter Arc — 2 of 6 sessions shipped
+
+**Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
+
+**Shipped:**
+- **Session 1 (`session-inserter-foundation`)** — basic 1-tile inserter, fuel-powered via Burner module, 1.0s cycle. Universal source/dest (belt/chest/Processor). Closes the "can't connect chest to building without a belt" hole.
+- **Session 2 (`session-inserter-fast-filter`)** — Fast Inserter: 0.5s cycle (twice as fast), single-slot filter (drop-to-set, RMB-clear). Inserter.gd refactored to tier-parametric (`CYCLE_TICKS_BY_TYPE` / `BODY_COLOR_BY_TYPE` Dictionary lookup tables); both basic and fast share `Inserter.tick`. New `'filter'` slot kind in BuildingPanel. Pre-existing Session 1 fuel-port bug caught at PAUSE 1 and fixed (now uses `FUEL_PORT_DIR = Belt.DIR_S`, mirroring Smelter pattern).
+
+**Queued (re-plan each at session start):**
+- **Session 3 — Long-Reach Inserter.** Same code path as basic/fast; `ARM_LENGTH_BY_TYPE` table with longer reach (1.2 fraction of tile_size), `source_tile`/`dest_tile` use 2-tile offsets. Visual: longer arm. Cycle speed: 1.5s (slower for distance trade-off). No filter.
+- **Session 4 — Electric Inserter + multi-filter.** Switches from fuel-powered to electric power (requires Electricity Arc to ship first — separate prereq). Multi-slot filter: 3 filter slots, picks any of the 3 types. Electric tier is base for the next steps.
+- **Session 5 — Long-Reach Fast Inserter / Long-Reach Electric.** Combines reach + speed/power dimensions. Tier-parametric tables make this ~30 lines per variant.
+- **Session 6 — Stack Inserter (electric).** Picks UP TO 3 items per cycle (or per stack-size config), drops them as a single batch. Throughput scaling for late-game. Fundamentally different from prior tiers' "1 item per cycle" model — needs careful design pass.
+
+**Architectural extension cost per future tier:** add 1 row to each `*_BY_TYPE` table in `inserter.gd`, add 1 enum entry + DATA entry + dispatch case in `buildings.gd`, ~85 lines for a specialized panel if needed (most tiers reuse FastInserterPanel). Stack inserter is the exception — needs a different state shape for batch-pickup.
+
+**Cross-cutting:**
+- Filter tracking is universal (`filter_item_type` on every inserter type, default -1). Multi-filter (Session 4) extends to an Array of types.
+- Burner module is shared across drill / smelter / inserter / fast inserter / future kilns. The FUEL PORT DIRECTION pattern (perpendicular edge, never `-1`) is now documented in the Burner header.
+- Click-handling-extraction trigger from this section's "Click-handling duplication" entry is now MET (filter slot's RMB-clear is a panel-specific click semantic). Captured in QoL Polish Session below.
+
+---
+
+## QoL Polish Session — queued (multi-session arc, ~4-5h estimated)
+
+**Status:** queued after `session-inserter-fast-filter` based on accumulated UX feedback during that session. Six items, all UI/QoL polish, none gameplay-blocking. Estimated 4-5 hours; could be one long session OR split into 2-3 smaller sessions per item-cluster.
+
+**Items (ordered by architectural dependency, NOT priority):**
+
+1. **Click-handling extraction** — refactor pick/drop/swap logic shared by `BuildingPanel._handle_player_slot_click` and `inventory_grid._handle_left_click_player` into a shared helper. Most likely shape: `SlotWidget.handle_click(slot_provider, cursor, modifiers) -> void` OR `CursorStack.click_swap(slot, cursor, modifiers) -> void`. Decide concrete shape during implementation. **This is the architectural prerequisite for items 2+3** — both modify the click-handling code paths in identical ways, refactoring first means one site to edit instead of two. Trigger criteria from prior NOTES.md entry NOW MET (per session-inserter-fast-filter — filter slot RMB-clear is the first context-specific click semantic).
+
+2. **Shift+click stack-split (half).** Empty cursor + shift-click on slot → take half (rounded up) into cursor. Cursor-holding-stack + shift-click → drop half. Applies to: inventory grid, chest panels, building input slots, fuel slots (half-by-item-count, then convert to units on drop). NOT filter slots (metadata, no shift behavior).
+
+3. **Ctrl+click quantity picker modal.** Click → opens a small popup near the slot with a number input + confirm/cancel. New small UI element, ~100 lines. Same slot-applicability as #2.
+
+4. **Item hover tooltips with descriptions.** Hover any slot (inventory or panel) for ~500ms → tooltip with item name + description. Requires `Items.gd` description field per item type (~30 items × ~50-char descriptions). Tooltip widget is shared component. Estimated ~150 lines for the tooltip rendering + ~30 lines for description field plumbing. Per-item description text is content authoring (~1 hour).
+
+5. **Filter dropdown picker (complementing drop-to-set).** Clicking the filter slot opens a scrollable item picker overlay; click an item to set the filter. Drop-to-set still works as alternative path (Factorio-style — click OR drop both work). Estimated ~120 lines: picker widget + close-on-click-outside + item-list scrolling.
+
+6. **Building-blocks-movement with per-building `walkable` flag.** User intent locked: Factorio convention — buildings block player movement except belts. Implementation:
+   - Add `"walkable": bool` to `Buildings.DATA` entries (default false / omitted = blocked).
+   - Belts get `"walkable": true` explicit. All other buildings (chest/planter/mill/oven/smelter/drill/harvester/applicator/composter/pipe/pump/inserter/fast inserter) blocked.
+   - `is_passable_at(pos)` extended: if `has_building_at(pos)` AND building is not walkable → return false.
+   - Multi-tile buildings block all their tiles automatically (`occupied` already maps each cell).
+   - Edge case: player standing on tile when building gets placed → placement should reject if player is on target tile (verify current `place_building` rejects this; add check if missing).
+   - Currently a UX wart (per Tile passability section above): "player walks through them visually, which is a small UX wart." Now fixing it.
+
+**One smaller follow-up captured during Session 2 PAUSE 2:**
+
+7. **Filter status diagnostic.** When fast inserter has filter set but no matching items in source, panel shows `Status: IDLE` with no hint why. Add a `Status: IDLE (no items match filter)` line. ~5 lines. Tag it onto whichever QoL sub-session ships #5 (filter dropdown).
+
+**Architectural notes:**
+- Items 1+2+3 form a cluster (click-handling). Land together.
+- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together.
+- Item 6 is standalone (player movement / placement).
+- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7, then 6.
+
+**Save schema impact:** none expected. Stack-split / picker / tooltips / movement are all UI-layer + read-only checks. Walkable flag is data registry, not save state.
+
+**Tests:** est ~6-8 new sub-suites across the cluster.
+
+---
+
 ## Dev Console — SHIPPED (session-dev-console)
 
 **Status:** SHIPPED. 12 commands, debug-build-only, in-memory history, 29/29 tests passing. Manual smoke deferred to first real-use session per session-end decision.

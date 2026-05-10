@@ -3,10 +3,26 @@ extends RefCounted
 
 ## Generic burner-fuel mechanic shared by buildings that consume fuel.
 ##
-## Today's only consumer: MINING_DRILL. Future consumers: smelter, charcoal
-## kiln, brick kiln, etc. Each calls into Burner.try_pull_fuel +
-## Burner.consume_tick from its own tick handler; per-building tick rate
-## (ORE_PER_FUEL etc.) lives in the building module, not here.
+## Consumers today: MINING_DRILL, SMELTER, INSERTER (and FAST_INSERTER
+## via shared Inserter.tick). Future: charcoal kiln, brick kiln, etc.
+## Each calls into Burner.try_pull_fuel + Burner.consume_tick from its
+## own tick handler; per-building tick rate (ORE_PER_FUEL etc.) lives in
+## the building module, not here.
+##
+## ⚠ FUEL PORT DIRECTION — REQUIRED PATTERN:
+## When a building has BOTH a fuel input AND non-fuel item ports (source
+## inputs / outputs), restrict fuel pull to a SPECIFIC perpendicular
+## edge via `Buildings.world_dir(b, FUEL_PORT_DIR)`. Do NOT pass -1
+## (scan-all-edges) in production code unless the building has no other
+## item ports (e.g., a standalone furnace fed only fuel). Reason: fuel-
+## eligible items (WOOD especially) sitting in the building's source
+## chest/belt will be auto-pulled and burned as fuel instead of being
+## transported. Bug surfaced at session-inserter-fast-filter PAUSE 1
+## when an inserter ate wood from its source chest. Smelter shipped this
+## protection in session-smelter (FUEL_PORT_DIR = Belt.DIR_S); Inserter
+## inherited the buggy -1 from a copy-paste oversight from MiningDrill
+## (which has no source-input port — drill output is from the deposit
+## tile under the building, not from an adjacent input).
 ##
 ## State convention on the building's `state` dict:
 ##   fuel_buffer: int          — fuel UNITS remaining (not item count; items
