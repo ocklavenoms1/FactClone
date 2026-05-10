@@ -135,6 +135,11 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": true,
 		"player_drainable": false,
+		# Cluster C (post-session-inserter-fast-filter): belts are the only
+		# walkable building (Factorio convention — player walks on belts;
+		# everything else blocks movement). All other buildings default
+		# walkable=false via Buildings.is_walkable's `.get(key, false)`.
+		"walkable": true,
 	},
 	Type.MILL: {
 		"name": "Mill",
@@ -521,6 +526,10 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": true,                  # source/dest determined by dir
 		"player_drainable": false,
+		# Cluster C update (post-PAUSE): inserters are thin devices — the
+		# arm swings OVER adjacent tiles but the base is small. Player walks
+		# through them just like belts. Matches Factorio convention.
+		"walkable": true,
 		# Inserter UI (session-inserter-foundation):
 		# Two slots — held_item (read-only display, single-item buffer that
 		# the inserter is currently swinging) + fuel (standard Burner pattern,
@@ -545,6 +554,8 @@ const DATA: Dictionary = {
 		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
 		"supports_direction": true,                  # source/dest/fuel rotate together
 		"player_drainable": false,
+		# Walkable like the basic inserter (thin device, arm swings overhead).
+		"walkable": true,
 		# Inserter UI (session-inserter-fast-filter):
 		# Three slots — held_item (read-only display) + fuel (Burner pattern,
 		# 16 units capacity) + filter (NEW 'filter' kind: single-item-type
@@ -719,6 +730,15 @@ static func world_dir(b: Building, recipe_dir: int) -> int:
 ## Bool form for reuse — mirrors the DATA flag, but readable at call sites.
 static func is_rotatable(t: int) -> bool:
 	return DATA[t].get("supports_direction", false)
+
+## True if the player can walk over this building's tiles. Default false
+## (most buildings block movement — Factorio convention). Belts are the
+## exception (player walks on belts). Used by GridWorld.is_passable_at to
+## extend the existing water-blocks-movement check with building-blocks-
+## movement. Multi-tile buildings: the same flag applies to every cell of
+## the footprint via the `occupied` map (no per-cell branching).
+static func is_walkable(t: int) -> bool:
+	return DATA[t].get("walkable", false)
 
 ## `extra` is a per-type free-form payload. For PLANTER it's the crop_type
 ## (Items.Type) the new planter should grow. Other types ignore it.

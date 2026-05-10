@@ -29,9 +29,9 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
-## QoL Polish Session — queued (multi-session arc, ~4-5h estimated)
+## QoL Polish Session — Cluster C SHIPPED, A+B queued
 
-**Status:** queued after `session-inserter-fast-filter` based on accumulated UX feedback during that session. Six items, all UI/QoL polish, none gameplay-blocking. Estimated 4-5 hours; could be one long session OR split into 2-3 smaller sessions per item-cluster.
+**Status:** Cluster C (building-blocks-movement) shipped as a small post-session fix immediately after `session-inserter-fast-filter`. Clusters A (click extraction + stack-split + quantity picker) and B (tooltips + filter dropdown + filter status diagnostic) remain queued for a dedicated future session. Six original items minus Cluster C → 5 remaining. Estimated 3-4 hours for the remaining clusters.
 
 **Items (ordered by architectural dependency, NOT priority):**
 
@@ -45,13 +45,7 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 5. **Filter dropdown picker (complementing drop-to-set).** Clicking the filter slot opens a scrollable item picker overlay; click an item to set the filter. Drop-to-set still works as alternative path (Factorio-style — click OR drop both work). Estimated ~120 lines: picker widget + close-on-click-outside + item-list scrolling.
 
-6. **Building-blocks-movement with per-building `walkable` flag.** User intent locked: Factorio convention — buildings block player movement except belts. Implementation:
-   - Add `"walkable": bool` to `Buildings.DATA` entries (default false / omitted = blocked).
-   - Belts get `"walkable": true` explicit. All other buildings (chest/planter/mill/oven/smelter/drill/harvester/applicator/composter/pipe/pump/inserter/fast inserter) blocked.
-   - `is_passable_at(pos)` extended: if `has_building_at(pos)` AND building is not walkable → return false.
-   - Multi-tile buildings block all their tiles automatically (`occupied` already maps each cell).
-   - Edge case: player standing on tile when building gets placed → placement should reject if player is on target tile (verify current `place_building` rejects this; add check if missing).
-   - Currently a UX wart (per Tile passability section above): "player walks through them visually, which is a small UX wart." Now fixing it.
+6. **Building-blocks-movement with per-building `walkable` flag.** **SHIPPED** (Cluster C, immediately post-session-inserter-fast-filter). PROJECT_LOG entry "Cluster C — Building-blocks-movement (small post-session fix)" has the details. Walkable: BELT + INSERTER + FAST_INSERTER (thin devices). Blocked: everything else including PIPE (per locked Q4). Player-on-tile placement rejected with toast. 33/33 tests passing.
 
 **One smaller follow-up captured during Session 2 PAUSE 2:**
 

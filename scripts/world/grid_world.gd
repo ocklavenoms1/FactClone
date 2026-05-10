@@ -244,13 +244,29 @@ func overlay_at(pos: Vector2i) -> int:
 func is_water_at(pos: Vector2i) -> bool:
 	return base_at(pos) == Terrain.Base.WATER
 
-## Player passability check at a tile coord. Default-grass tiles (no entry
-## in `tiles`) are passable; water tiles are not. Generic — extensible for
-## future obstacle types via Tile.is_passable().
+## Player passability check at a tile coord. Three layers:
+##   1. Tile base — water blocks (Tile.is_passable returns false on WATER).
+##   2. Building — non-walkable buildings block (per-DATA `walkable` flag,
+##      default false). Multi-tile buildings block all their footprint
+##      cells automatically because `occupied` maps each cell to the same
+##      Building instance.
+##   3. Default-grass tiles (no entry in `tiles`) are passable.
+##
+## Extended at Cluster C (post-session-inserter-fast-filter): the building
+## layer was added to fix the "player walks visually through buildings"
+## UX wart. Belts are the only currently-walkable building (Factorio
+## convention).
 func is_passable_at(pos: Vector2i) -> bool:
-	if not tiles.has(pos):
-		return true   # implicit grass — passable
-	return tiles[pos].is_passable()
+	# Layer 1: tile base (water).
+	if tiles.has(pos) and not tiles[pos].is_passable():
+		return false
+	# Layer 2: building.
+	if occupied.has(pos):
+		var b: Building = building_at(pos)
+		if b != null and not Buildings.is_walkable(b.type):
+			return false
+	# Layer 3: default-grass tiles fall through as passable.
+	return true
 
 # ---------- placement / removal ----------
 

@@ -9,6 +9,30 @@ Each entry has three sections:
 
 ---
 
+## Cluster C — Building-blocks-movement (small post-session fix)
+
+**Date:** 2026-05-09
+**Tag:** none (small post-session fix, not a session in its own right)
+**Save:** v18 (no schema bump — `walkable` is a DATA-registry flag, not save state)
+
+Adopts Factorio convention: **buildings now block player movement.** Closes the existing UX wart (NOTES.md: *"player walks through them visually, which is a small UX wart"*). User-asked QoL Cluster C from the post-`session-inserter-fast-filter` polish queue.
+
+### What shipped
+
+- **`buildings.gd`**: new `static func is_walkable(t) -> bool` reading a `"walkable"` flag from each DATA entry, default `false` (blocked is the norm). BELT, INSERTER, FAST_INSERTER opted in to `walkable: true` — "thin devices" (belt is flat-on-ground; inserters have small bases with arms swinging overhead) where walking through reads correctly.
+- **`grid_world.gd`**: `is_passable_at(pos)` extended with a building layer — after the existing water-base check, also reject if `occupied.has(pos)` AND `Buildings.is_walkable(b.type) == false`. Multi-tile buildings auto-block all footprint cells because `occupied` already maps every cell to the building's anchor.
+- **`main.gd`**: `_try_place` rejects placements whose footprint contains the player's tile (`"Can't place X on yourself — step off first."`). Belts skip the check (walkable, no self-trap risk). Console placement bypasses; the player's existing `on_impassable` escape valve in `_move_with_passability` covers the dev case.
+- **`test_walkability.gd`** (new, 4 sub-suites): is_walkable per-type sanity (belt + inserter + fast inserter walkable; smelter + chest + pipe blocked), belt placement → passable, smelter placement → blocked, 2×2 mining drill blocks all 4 footprint cells, water still blocks regardless of building presence (regression). **Tests: 32 → 33.**
+
+### Decisions
+
+- **Walkable is per-DATA-entry, default false.** The "blocked is the norm" intuition is correct — most buildings have visual mass. Belts and inserters are the exceptions (thin devices). Pipes stay blocked per Q4 of the design pass even though they're thin too — user call ("keep pipes blocked").
+- **Multi-tile blocking is automatic.** `occupied` already has per-cell coverage from `place_building` bookkeeping; `building_at(pos)` returns the same Building instance for any footprint cell, so the walkable check works on all cells with no special-cased loop.
+- **Player-on-tile check stays in `main.gd._try_place`, not `can_place_building`.** Keeps `can_place_building` pure (no player coupling). Console placement bypasses, which is acceptable — devs accept the consequences, and the existing `on_impassable` escape valve in player movement prevents permanent traps.
+- **Inserters walkable surfaced at PAUSE smoke**, not in design pass. First commit blocked them by default; user immediately tested and asked to walk through. One-line fix per inserter type. **Pattern: smoke catches what design pass misses — physical "thin device" intuition is hard to anticipate without playing.**
+
+---
+
 ## Inserter Arc Session 2 — Fast Inserter + Filter
 
 **Date:** 2026-05-09

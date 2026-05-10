@@ -659,15 +659,30 @@ func _try_place(pos: Vector2i) -> void:
 			var t: int = hotbar.current_value()
 			if grid_world.has_building_at(pos):
 				return
+			# Cluster C (post-session-inserter-fast-filter): if any cell of the
+			# proposed footprint contains the player's tile, reject — placing a
+			# non-walkable building on yourself would trap you (only the player's
+			# `on_impassable` escape valve in `_move_with_passability` would let
+			# you off, requiring movement input to leave). Console-placed buildings
+			# bypass this check (devs accept the consequences). Belts skip the
+			# check via the walkable flag — players can pave a belt under
+			# themselves and walk off freely.
+			var fp_check: Vector2i = Buildings.footprint_of(t)
+			if not Buildings.is_walkable(t):
+				var player_tile: Vector2i = grid_world.world_to_tile(player.global_position)
+				for dx in fp_check.x:
+					for dy in fp_check.y:
+						if Vector2i(pos.x + dx, pos.y + dy) == player_tile:
+							_rate_limited_fail_toast("Can't place %s on yourself — step off first." % Buildings.name_of(t))
+							return
 			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
 			var extra = hotbar.current_extra()
 			if not grid_world.place_building(t, pos, dir, extra):
 				_rate_limited_fail_toast(grid_world.last_building_place_error)
 			else:
 				# Mark all footprint regions dirty (multi-tile buildings can span 2 regions).
-				var fp: Vector2i = Buildings.footprint_of(t)
-				for dx in fp.x:
-					for dy in fp.y:
+				for dx in fp_check.x:
+					for dy in fp_check.y:
 						map_panel.mark_tile_dirty(Vector2i(pos.x + dx, pos.y + dy))
 		"item_apply":
 			# Hand-apply consumable item (session-soil-exhaustion-3): consumes
