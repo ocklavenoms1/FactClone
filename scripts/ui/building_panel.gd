@@ -210,9 +210,9 @@ func _hit_test(pos: Vector2) -> Variant:
 	return -1
 
 # ---------- click: player inventory slot ----------
-# Same semantics as inventory_grid._handle_left_click_player but inlined here
-# (avoids cross-modal coupling; both modals share CursorStack and slot_widget
-# rendering, but click handlers stay local for clarity).
+# Delegates to SlotClickHandler.handle_player_slot — symmetric with
+# inventory_grid._handle_left_click_player. Both call sites route to the
+# shared handler post-Cluster-A refactor (Task 4).
 
 func _handle_player_slot_click(slot_idx: int) -> void:
 	if slot_idx >= inventory.slots.size():
