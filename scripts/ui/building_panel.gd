@@ -218,31 +218,7 @@ func _handle_player_slot_click(slot_idx: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
-	if not cursor.has_item():
-		if slot.is_empty():
-			return
-		cursor.pick(slot.item_type, slot.count)
-		slot.clear()
-		queue_redraw()
-		return
-	if slot.is_empty():
-		slot.item_type = cursor.item_type
-		slot.count = cursor.count
-		cursor.clear()
-	elif slot.item_type == cursor.item_type:
-		var max_stack: int = Items.max_stack_of(slot.item_type)
-		var space: int = max_stack - slot.count
-		var moved: int = min(space, cursor.count)
-		slot.count += moved
-		cursor.count -= moved
-		if cursor.count <= 0:
-			cursor.clear()
-	else:
-		var tmp_t: int = slot.item_type
-		var tmp_c: int = slot.count
-		slot.item_type = cursor.item_type
-		slot.count = cursor.count
-		cursor.pick(tmp_t, tmp_c)
+	SlotClickHandler.handle_player_slot(slot, cursor, SlotClickHandler.MOD_NONE)
 	queue_redraw()
 
 # ---------- click: building slot ----------
