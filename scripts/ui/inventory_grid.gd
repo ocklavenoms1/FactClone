@@ -111,14 +111,14 @@ func _gui_input(event: InputEvent) -> void:
 			# Click outside any slot — close (cursor persists).
 			_close()
 			return
-		_handle_left_click_player(slot_idx)
+		_handle_left_click_player(slot_idx, _extract_mods(event))
 
 ## Player-grid left click: full pick / place / combine / swap semantics.
-func _handle_left_click_player(slot_idx: int) -> void:
+func _handle_left_click_player(slot_idx: int, mods: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
-	SlotClickHandler.handle_player_slot(slot, cursor, SlotClickHandler.MOD_NONE)
+	SlotClickHandler.handle_player_slot(slot, cursor, mods)
 	queue_redraw()
 
 # ---------- geometry ----------
@@ -220,3 +220,12 @@ func _draw_tooltip(font: Font, item_type: int, count: int) -> void:
 	draw_rect(tooltip_rect, TOOLTIP_BORDER, false, 1.0)
 	draw_string(font, tooltip_pos + Vector2(8, 17), label,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TOOLTIP_TEXT)
+
+## Extract a SlotClickHandler.MOD_* bitfield from a MouseButton event.
+static func _extract_mods(event: InputEventMouseButton) -> int:
+	var mods: int = SlotClickHandler.MOD_NONE
+	if event.shift_pressed:
+		mods |= SlotClickHandler.MOD_SHIFT
+	if event.ctrl_pressed:
+		mods |= SlotClickHandler.MOD_CTRL
+	return mods

@@ -192,7 +192,7 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		if hit is int:
 			# Player inventory slot.
-			_handle_player_slot_click(int(hit))
+			_handle_player_slot_click(int(hit), _extract_mods(event))
 		elif hit is Dictionary:
 			# Building slot.
 			_handle_building_slot_click(hit)
@@ -214,11 +214,11 @@ func _hit_test(pos: Vector2) -> Variant:
 # inventory_grid._handle_left_click_player. Both call sites route to the
 # shared handler post-Cluster-A refactor (Task 4).
 
-func _handle_player_slot_click(slot_idx: int) -> void:
+func _handle_player_slot_click(slot_idx: int, mods: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
-	SlotClickHandler.handle_player_slot(slot, cursor, SlotClickHandler.MOD_NONE)
+	SlotClickHandler.handle_player_slot(slot, cursor, mods)
 	queue_redraw()
 
 # ---------- click: building slot ----------
@@ -542,3 +542,12 @@ func _draw_slots(font: Font) -> void:
 		# above for the rationale (state field is a scalar, not a stack).
 		var show_count: bool = (kind != "filter")
 		SlotWidget.draw_slot(self, font, rect, item_type, count, hovered, border_tint, show_count)
+
+## Extract a SlotClickHandler.MOD_* bitfield from a MouseButton event.
+static func _extract_mods(event: InputEventMouseButton) -> int:
+	var mods: int = SlotClickHandler.MOD_NONE
+	if event.shift_pressed:
+		mods |= SlotClickHandler.MOD_SHIFT
+	if event.ctrl_pressed:
+		mods |= SlotClickHandler.MOD_CTRL
+	return mods

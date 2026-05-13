@@ -102,7 +102,7 @@ func _gui_input(event: InputEvent) -> void:
 			close()
 			return
 		if hit is int:
-			_handle_player_slot_click(int(hit))
+			_handle_player_slot_click(int(hit), _extract_mods(event))
 		elif hit is Dictionary and hit.has("chest_idx"):
 			_handle_chest_slot_click(int(hit["chest_idx"]))
 		queue_redraw()
