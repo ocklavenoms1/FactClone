@@ -6,6 +6,16 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## Working protocol: worktree absolute paths
+
+When a session runs in a git worktree (CWD = `.claude/worktrees/<branch>/`), Write/Edit tools follow file paths **literally**. Passing a main-repo absolute path (e.g., `C:\Users\elham\facvtorio\docs\...`) writes to the **main repo**, not the worktree — and the cross-repo write is hard to detect because `git status` of the worktree shows clean (the file landed somewhere the worktree's index can't see).
+
+**Rule:** in a worktree session, always use the worktree's absolute path (e.g., `C:\Users\elham\facvtorio\.claude\worktrees\<branch>\docs\...`) or relative paths from CWD. Verify with `pwd` before any Write/Edit if uncertain.
+
+**Triggered by:** `session-qol-cluster-a` planning phase. The design spec landed in the main repo at `C:\Users\elham\facvtorio\docs\superpowers\specs\...` while the worktree was at `C:\Users\elham\facvtorio\.claude\worktrees\silly-bardeen-3279e9\`. Recovered by `mv` + re-commit; cost was ~3 minutes, but the next instance might land deeper into a session before being noticed.
+
+---
+
 ## Inserter Arc — 2 of 6 sessions shipped
 
 **Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
