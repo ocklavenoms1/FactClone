@@ -125,6 +125,23 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, s4b.count == 50 and c4b.count == 35,
 		"(4) shift+drop CAPACITY CLAMP: slot=45+5(clamped from 20)=50, cursor=40-5=35")
 
+	# ---------- (5) shift_player_diff_type_noop: shift never swaps ----------
+	# Cursor with 5 wheat + slot with 4 flour (different types) + shift+LMB.
+	# Spec §5.1: different-type cell is no-op. Plain LMB swaps; shift does NOT.
+	# Capture before/after state explicitly to detect any unintended mutation.
+	var s5 := ItemStack.new(Items.Type.FLOUR, 4)
+	var c5 := CursorStack.new()
+	c5.pick(Items.Type.WHEAT, 5)
+	var before_slot_type: int = s5.item_type
+	var before_slot_count: int = s5.count
+	var before_cursor_type: int = c5.item_type
+	var before_cursor_count: int = c5.count
+	SlotClickHandler.handle_player_slot(s5, c5, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s5.item_type == before_slot_type and s5.count == before_slot_count,
+		"(5) shift different-type: slot unchanged (no swap, no mutation)")
+	_check(failures, c5.item_type == before_cursor_type and c5.count == before_cursor_count,
+		"(5) shift different-type: cursor unchanged (no swap, no mutation)")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
