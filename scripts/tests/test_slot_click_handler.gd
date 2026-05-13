@@ -105,6 +105,26 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, s3b.item_type == Items.Type.WHEAT and s3b.count == 4 and c3b.count == 3,
 		"(3) shift+drop M=7 → slot=4 (ceil), cursor=3 (floor)")
 
+	# ---------- (4) shift_drop_player_half_matching: M cursor + K slot same type ----------
+	# Normal case (plenty of space): cursor 6 wheat, slot 2 wheat, max_stack=100.
+	# split_half(6)=3 fits comfortably in space=98 → drop all 3.
+	var s4a := ItemStack.new(Items.Type.WHEAT, 2)
+	var c4a := CursorStack.new()
+	c4a.pick(Items.Type.WHEAT, 6)
+	SlotClickHandler.handle_player_slot(s4a, c4a, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s4a.count == 5 and c4a.count == 3,
+		"(4) shift+drop same-type plenty: slot 2→5, cursor 6→3")
+	# CAPACITY CLAMP case from spec §5.1 + Q3 review.
+	# Yeast has max_stack=50. cursor 40 yeast, slot 45 yeast:
+	# want to drop split_half(40)=20, only 5 space available → drop 5
+	# (silent clamp, NOT 20, NOT no-op).
+	var s4b := ItemStack.new(Items.Type.YEAST, 45)
+	var c4b := CursorStack.new()
+	c4b.pick(Items.Type.YEAST, 40)
+	SlotClickHandler.handle_player_slot(s4b, c4b, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s4b.count == 50 and c4b.count == 35,
+		"(4) shift+drop CAPACITY CLAMP: slot=45+5(clamped from 20)=50, cursor=40-5=35")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
