@@ -14,6 +14,8 @@ When a session runs in a git worktree (CWD = `.claude/worktrees/<branch>/`), Wri
 
 **Triggered by:** `session-qol-cluster-a` planning phase. The design spec landed in the main repo at `C:\Users\elham\facvtorio\docs\superpowers\specs\...` while the worktree was at `C:\Users\elham\facvtorio\.claude\worktrees\silly-bardeen-3279e9\`. Recovered by `mv` + re-commit; cost was ~3 minutes, but the next instance might land deeper into a session before being noticed.
 
+**Related — Windows shell redirect caveat:** when subagents run Bash on Windows, **avoid `2>nul`** for stderr redirection — Windows Bash interop creates a literal file named `nul` in the CWD instead of redirecting to the null device. Use `2>/dev/null` (Git Bash translates this correctly) or skip stderr redirection entirely and inspect exit codes. Triggered during `session-qol-cluster-a` Task 4 fix-up cycle: a `nul` file (110 bytes containing a `git` error) appeared in the worktree, caught at pre-GATE-1 hygiene check.
+
 ---
 
 ## Inserter Arc — 2 of 6 sessions shipped
@@ -61,11 +63,19 @@ When a session runs in a git worktree (CWD = `.claude/worktrees/<branch>/`), Wri
 
 7. **Filter status diagnostic.** When fast inserter has filter set but no matching items in source, panel shows `Status: IDLE` with no hint why. Add a `Status: IDLE (no items match filter)` line. ~5 lines. Tag it onto whichever QoL sub-session ships #5 (filter dropdown).
 
+**One follow-up captured during session-qol-cluster-a GATE 1 smoke:**
+
+8. **Close-on-padding-click UX.** Currently panels close when an LMB lands on any non-slot pixel within or outside the panel rectangle (intentional pre-existing behavior, explicitly documented in inline comments at `building_panel.gd:188-192` "Click outside any slot — close panel (cursor persists)", `chest_panel.gd:97-100`, and `inventory_grid.gd:110-112`). Factorio convention treats empty panel space as a no-op; only an explicit close button, Esc, OR a click in the dimmed-out background area outside the panel rectangle closes. Worth revisiting as UX polish. Decision points for future design pass:
+   - Should panel padding/header/footer be no-op (and only Esc + close button + dim-background click close)?
+   - Or keep current behavior but make the "hit-test" area more obvious (e.g., explicit close button glyph)?
+   - Migration concern: muscle memory of long-time players may rely on the current behavior; surveying decision worth a brief design-pass.
+   Possibly bundled with Cluster B's tooltip work (items 4+5+7) since both address panel discoverability/feedback. ~10-30 lines depending on resolution.
+
 **Architectural notes:**
 - Items 1+2+3 form a cluster (click-handling). Land together.
-- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together.
+- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — item 8 may bundle in.
 - Item 6 is standalone (player movement / placement).
-- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7, then 6.
+- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7+8, then 6.
 
 **Save schema impact:** none expected. Stack-split / picker / tooltips / movement are all UI-layer + read-only checks. Walkable flag is data registry, not save state.
 
