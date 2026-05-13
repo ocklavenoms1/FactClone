@@ -32,8 +32,8 @@ static func run(parent: Node) -> Dictionary:
 	var s1a := ItemStack.new()
 	var c1a := CursorStack.new()
 	SlotClickHandler.handle_player_slot(s1a, c1a, SlotClickHandler.MOD_NONE)
-	_check(failures, s1a.is_empty() and not c1a.has_item(),
-		"(1a) empty+empty → no-op")
+	_check(failures, s1a.is_empty() and c1a.item_type < 0 and c1a.count == 0,
+		"(1a) empty+empty → no-op (cursor explicitly clean: item_type<0, count=0)")
 
 	# (1b) Empty cursor + slot with 7 wheat → cursor picks all 7, slot clears.
 	var s1b := ItemStack.new(Items.Type.WHEAT, 7)
@@ -69,8 +69,28 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, c1e.item_type == Items.Type.FLOUR and c1e.count == 4,
 		"(1e) different type → cursor has slot's stack (swapped)")
 
+	# ---------- (2) shift_take_player_half: empty cursor + slot N → take ceil(N/2) ----------
+	# N=1 (degenerate take all)
+	var s2a := ItemStack.new(Items.Type.WHEAT, 1)
+	var c2a := CursorStack.new()
+	SlotClickHandler.handle_player_slot(s2a, c2a, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s2a.is_empty() and c2a.count == 1,
+		"(2) shift+take N=1 → cursor=1, slot empty (ceil(0.5)=1)")
+	# N=2 (clean half)
+	var s2b := ItemStack.new(Items.Type.WHEAT, 2)
+	var c2b := CursorStack.new()
+	SlotClickHandler.handle_player_slot(s2b, c2b, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s2b.count == 1 and c2b.count == 1,
+		"(2) shift+take N=2 → cursor=1, slot=1")
+	# N=7 (rounded half)
+	var s2c := ItemStack.new(Items.Type.WHEAT, 7)
+	var c2c := CursorStack.new()
+	SlotClickHandler.handle_player_slot(s2c, c2c, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s2c.count == 3 and c2c.count == 4,
+		"(2) shift+take N=7 → cursor=4 (ceil), slot=3 (floor)")
+
 	if failures.is_empty():
-		return { "ok": true, "message": "2 sub-suites pass: regression + split_half util sanity" }
+		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
 
 # ---------- helpers ----------
