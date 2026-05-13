@@ -118,33 +118,7 @@ func _handle_left_click_player(slot_idx: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
-	# Cursor empty → pick up slot's stack.
-	if cursor.item_type < 0:
-		if slot.is_empty():
-			return
-		cursor.pick(slot.item_type, slot.count)
-		slot.clear()
-		queue_redraw()
-		return
-	# Cursor full → place / combine / swap.
-	if slot.is_empty():
-		slot.item_type = cursor.item_type
-		slot.count = cursor.count
-		cursor.clear()
-	elif slot.item_type == cursor.item_type:
-		var max_stack: int = Items.max_stack_of(slot.item_type)
-		var space: int = max_stack - slot.count
-		var moved: int = min(space, cursor.count)
-		slot.count += moved
-		cursor.count -= moved
-		if cursor.count <= 0:
-			cursor.clear()
-	else:
-		var tmp_type: int = slot.item_type
-		var tmp_count: int = slot.count
-		slot.item_type = cursor.item_type
-		slot.count = cursor.count
-		cursor.pick(tmp_type, tmp_count)
+	SlotClickHandler.handle_player_slot(slot, cursor, SlotClickHandler.MOD_NONE)
 	queue_redraw()
 
 # ---------- geometry ----------
