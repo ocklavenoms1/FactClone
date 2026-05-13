@@ -89,6 +89,22 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, s2c.count == 3 and c2c.count == 4,
 		"(2) shift+take N=7 → cursor=4 (ceil), slot=3 (floor)")
 
+	# ---------- (3) shift_drop_player_half_empty: M cursor + empty slot → drop ceil(M/2) ----------
+	# M=1 (degenerate: drop 1, cursor goes to 0)
+	var s3a := ItemStack.new()
+	var c3a := CursorStack.new()
+	c3a.pick(Items.Type.WHEAT, 1)
+	SlotClickHandler.handle_player_slot(s3a, c3a, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s3a.item_type == Items.Type.WHEAT and s3a.count == 1 and not c3a.has_item(),
+		"(3) shift+drop M=1 → slot=1 wheat, cursor clear")
+	# M=7 (rounded half: drop 4, cursor keeps 3)
+	var s3b := ItemStack.new()
+	var c3b := CursorStack.new()
+	c3b.pick(Items.Type.WHEAT, 7)
+	SlotClickHandler.handle_player_slot(s3b, c3b, SlotClickHandler.MOD_SHIFT)
+	_check(failures, s3b.item_type == Items.Type.WHEAT and s3b.count == 4 and c3b.count == 3,
+		"(3) shift+drop M=7 → slot=4 (ceil), cursor=3 (floor)")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
