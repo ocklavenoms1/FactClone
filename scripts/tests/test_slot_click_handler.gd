@@ -6,6 +6,8 @@ extends RefCounted
 ## picker semantics. See docs/superpowers/specs/2026-05-10-qol-cluster-a-design.md
 ## §7 for the full plan.
 
+const GridWorldScript = preload("res://scripts/world/grid_world.gd")
+
 static func test_name() -> String:
 	return "slot click handler (refactor regression + shift matrix + ctrl picker)"
 
@@ -252,6 +254,56 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, moved9 == 2 and c9.count == 4 and buffer9_after == 16,
 		"(9) fuel shift+drop atomic clamp: moved=2 (split_half(6)=3 clamped to items_fit=2), cursor=4, buffer 8→16")
 
+	# ---------- (10) shift_filter_noop ----------
+	# Spec §5.2: filter slot is metadata (scalar int), NOT buffer.
+	# Shift+LMB and Ctrl+LMB are no-ops, NO toast. Plain LMB drop-to-set
+	# still works (verified separately in test_inserter.gd).
+	# Panel-level integration: exercises _drop_into_slot's mods-guard branch.
+	var world10 = GridWorldScript.new()
+	parent.add_child(world10)
+	world10.set_overlay(Vector2i(0, 0), Terrain.Overlay.STONE)
+	if not world10.place_building(Buildings.Type.FAST_INSERTER, Vector2i(0, 0), Belt.DIR_E):
+		_disconnect(world10); world10.queue_free()
+		return { "ok": false, "message": "(10) FastInserter placement failed: %s" % world10.last_building_place_error }
+	var fast10: Building = world10.building_at(Vector2i(0, 0))
+	var panel10 = preload("res://scripts/ui/building_panel.gd").new()
+	parent.add_child(panel10)
+	var inv10 := Inventory.new()
+	var cursor10 := CursorStack.new()
+	panel10.cursor = cursor10
+	panel10.inventory = inv10
+	var toasted10: Array = []
+	panel10.toast_callback = func(msg): toasted10.append(msg)
+	panel10.open(fast10, world10)
+	var filter_slot10: Dictionary = Buildings.slot_layout_for(Buildings.Type.FAST_INSERTER)[2]
+
+	# (10a) Shift+LMB on filter — no-op, no toast, cursor unchanged.
+	cursor10.pick(Items.Type.WHEAT, 5)
+	panel10._drop_into_slot(filter_slot10, -1, SlotClickHandler.MOD_SHIFT)
+	_check(failures, int(fast10.state.get("filter_item_type", -999)) == -1,
+		"(10a) filter shift+LMB: filter_item_type unchanged (still -1)")
+	_check(failures, cursor10.has_item() and cursor10.item_type == Items.Type.WHEAT and cursor10.count == 5,
+		"(10a) filter shift+LMB: cursor unchanged (still 5 wheat)")
+	_check(failures, toasted10.is_empty(),
+		"(10a) filter shift+LMB: NO toast (silent no-op contract)")
+
+	# (10b) Ctrl+LMB on filter — same no-op semantic.
+	panel10._drop_into_slot(filter_slot10, -1, SlotClickHandler.MOD_CTRL)
+	_check(failures, int(fast10.state.get("filter_item_type", -999)) == -1,
+		"(10b) filter ctrl+LMB: filter_item_type unchanged")
+	_check(failures, toasted10.is_empty(),
+		"(10b) filter ctrl+LMB: NO toast")
+
+	# (10c) Plain LMB regression — drop-to-set still works.
+	panel10._drop_into_slot(filter_slot10, -1, SlotClickHandler.MOD_NONE)
+	_check(failures, int(fast10.state.get("filter_item_type", -999)) == Items.Type.WHEAT,
+		"(10c) filter plain LMB regression: drop-to-set sets filter to WHEAT")
+	_check(failures, cursor10.has_item() and cursor10.count == 5,
+		"(10c) filter plain LMB: cursor unchanged (drop-to-set is copy not move)")
+
+	panel10.queue_free()
+	_disconnect(world10); world10.queue_free()
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
@@ -261,3 +313,9 @@ static func run(parent: Node) -> Dictionary:
 static func _check(failures: Array, condition: bool, label: String) -> void:
 	if not condition:
 		failures.append(label)
+
+static func _disconnect(world) -> void:
+	if world == null:
+		return
+	if TickSystem.tick.is_connected(world._on_tick):
+		TickSystem.tick.disconnect(world._on_tick)
