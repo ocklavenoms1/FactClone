@@ -104,14 +104,14 @@ static func run(parent: Node) -> Dictionary:
 	# Drop FLAX into the input slot.
 	cursor.pick(Items.Type.FLAX, 4)
 	var flax_slot: Dictionary = retter[0]   # first slot is input_flax
-	panel._drop_into_slot(flax_slot, -1)
+	panel._drop_into_slot(flax_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, BuildingPanel._buffer_count(retter_b.state["in_buffer"], Items.Type.FLAX) == 4,
 		"retter flax drop: in_buffer should have 4 FLAX")
 
 	# Drop wrong-type (CLOTH) into FLAX-only slot — rejected.
 	cursor.pick(Items.Type.CLOTH, 1)
 	toasted.clear()
-	panel._drop_into_slot(flax_slot, -1)
+	panel._drop_into_slot(flax_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item() and cursor.item_type == Items.Type.CLOTH,
 		"wrong-type drop: cursor should still hold CLOTH")
 	_check(failures, toasted.size() == 1 and "accepts" in str(toasted[0]).to_lower(),

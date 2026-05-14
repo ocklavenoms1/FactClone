@@ -118,14 +118,14 @@ static func run(parent: Node) -> Dictionary:
 
 	# Take from output slot — should pick up 1 wheat to cursor and reset growth.
 	var output_slot: Dictionary = planter[0]
-	ppanel._take_from_slot(output_slot, -1)
+	ppanel._take_from_slot(output_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.item_type == Items.Type.WHEAT and cursor.count == 1,
 		"PlanterPanel take: cursor should hold WHEAT ×1, got %s ×%d" % [Items.name_of(cursor.item_type), cursor.count])
 	_check(failures, int(p.state.get("output", -1)) == 0, "planter output should be 0 after take")
 	_check(failures, int(p.state.get("growth", -1)) == 0, "planter growth should reset to 0 after take")
 	# Take with empty planter → no-op.
 	cursor.clear()
-	ppanel._take_from_slot(output_slot, -1)
+	ppanel._take_from_slot(output_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, not cursor.has_item(), "take from empty planter: cursor should remain empty")
 
 	ppanel.queue_free()

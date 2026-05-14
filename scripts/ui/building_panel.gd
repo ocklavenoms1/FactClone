@@ -194,8 +194,7 @@ func _gui_input(event: InputEvent) -> void:
 			# Player inventory slot.
 			_handle_player_slot_click(int(hit), _extract_mods(event))
 		elif hit is Dictionary:
-			# Building slot.
-			_handle_building_slot_click(hit)
+			_handle_building_slot_click(hit, _extract_mods(event))
 
 func _hit_test(pos: Vector2) -> Variant:
 	# Player inventory slots first.
@@ -223,30 +222,26 @@ func _handle_player_slot_click(slot_idx: int, mods: int) -> void:
 
 # ---------- click: building slot ----------
 
-func _handle_building_slot_click(hit: Dictionary) -> void:
+func _handle_building_slot_click(hit: Dictionary, mods: int) -> void:
 	var slot_def: Dictionary = hit["slot_def"]
 	var sub_idx: int = int(hit.get("sub_idx", -1))
-	var kind: String = str(slot_def.get("kind", ""))
-	# Cursor empty → take from this slot (if applicable).
 	if not cursor.has_item():
-		_take_from_slot(slot_def, sub_idx)
+		_take_from_slot(slot_def, sub_idx, mods)
 		queue_redraw()
 		return
-	# Cursor has item → drop into this slot (if it accepts).
-	_drop_into_slot(slot_def, sub_idx)
+	_drop_into_slot(slot_def, sub_idx, mods)
 	queue_redraw()
 
 # ---------- drop validation + commit ----------
 
 ## Try to drop the cursor stack into the given slot. Validates kind + accepts;
 ## toasts on rejection.
-func _drop_into_slot(slot_def: Dictionary, sub_idx: int) -> void:
+func _drop_into_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHandler.MOD_NONE) -> void:
+	# sub_idx unused for drops; kept for call-site symmetry with _take_from_slot.
 	var kind: String = str(slot_def.get("kind", ""))
-	# Output slots are read-only.
 	if kind == "output" or kind == "output_multi":
 		_toast("Output slot is read-only — items appear here as the building produces them.")
 		return
-	# Check accepts list.
 	var accepts: Array = slot_def.get("accepts", [])
 	if not accepts.is_empty() and not (cursor.item_type in accepts):
 		var names: Array = []
@@ -254,20 +249,23 @@ func _drop_into_slot(slot_def: Dictionary, sub_idx: int) -> void:
 			names.append(Items.name_of(int(t)))
 		_toast("This slot accepts: %s" % ", ".join(names))
 		return
-	# Kind-specific commit.
 	match kind:
 		"input":
-			_drop_into_input(slot_def)
+			_drop_into_input(slot_def, mods)
 		"fuel":
-			_drop_into_fuel(slot_def)
+			_drop_into_fuel(slot_def)  # Task 14 changes this to (slot_def, mods).
 		"filter":
+			# Shift/ctrl on filter slot: no-op per spec §5.2 / §6.3. Drop-to-set
+			# still works for plain LMB.
+			if mods != SlotClickHandler.MOD_NONE:
+				return
 			_drop_into_filter(slot_def)
 		_:
 			_toast("Slot does not accept items.")
 
 ## Append cursor's stack into b.state[state_field] (a buffer of [type, count]).
 ## Respects max_stack. Cursor decrements by the amount actually accepted.
-func _drop_into_input(slot_def: Dictionary) -> void:
+func _drop_into_input(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	var field: String = str(slot_def.get("state_field", "in_buffer"))
 	var max_stack: int = int(slot_def.get("max_stack", 8))
 	var buf: Array = building.state.get(field, [])
@@ -276,7 +274,9 @@ func _drop_into_input(slot_def: Dictionary) -> void:
 	if space <= 0:
 		_toast("%s slot is full." % Items.name_of(cursor.item_type))
 		return
-	var moved: int = min(space, cursor.count)
+	var shift: bool = (mods & SlotClickHandler.MOD_SHIFT) != 0
+	var want: int = SlotClickHandler.split_half(cursor.count) if shift else cursor.count
+	var moved: int = min(space, want)
 	_buffer_add(buf, cursor.item_type, moved)
 	building.state[field] = buf
 	cursor.count -= moved
@@ -331,46 +331,46 @@ func _drop_into_filter(slot_def: Dictionary) -> void:
 	# Cursor unchanged — drop-to-set is a copy, not a move.
 
 ## Take from a slot to the cursor.
-func _take_from_slot(slot_def: Dictionary, sub_idx: int) -> void:
+func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	var kind: String = str(slot_def.get("kind", ""))
 	var field: String = str(slot_def.get("state_field", ""))
+	var shift: bool = (mods & SlotClickHandler.MOD_SHIFT) != 0
 	match kind:
 		"input", "output":
-			# Pull whichever item type is in the buffer (one entry — any type).
 			var buf: Array = building.state.get(field, [])
 			if buf.is_empty():
 				return
 			var entry = buf[0]
-			cursor.pick(int(entry[0]), int(entry[1]))
-			buf.clear()
+			var take: int = SlotClickHandler.split_half(int(entry[1])) if shift else int(entry[1])
+			cursor.pick(int(entry[0]), take)
+			entry[1] = int(entry[1]) - take
+			if int(entry[1]) <= 0:
+				buf.clear()
 			building.state[field] = buf
 		"output_multi":
-			# Pull the sub_idx'th entry from the multi-bag. Entries shift up
-			# when an entry is removed (Array.remove_at handles this).
 			var buf2: Array = building.state.get(field, [])
 			if sub_idx < 0 or sub_idx >= buf2.size():
 				return
 			var entry2 = buf2[sub_idx]
-			cursor.pick(int(entry2[0]), int(entry2[1]))
-			buf2.remove_at(sub_idx)
+			var take2: int = SlotClickHandler.split_half(int(entry2[1])) if shift else int(entry2[1])
+			cursor.pick(int(entry2[0]), take2)
+			entry2[1] = int(entry2[1]) - take2
+			if int(entry2[1]) <= 0:
+				buf2.remove_at(sub_idx)
 			building.state[field] = buf2
 		"fuel":
-			# Lossy take-back per Q7 pushback: convert fuel_buffer units to
-			# wood equivalent (1 unit = 1 wood). Player who loaded coal accepts
-			# the efficiency loss on retrieval — simpler than tracking loaded
-			# items, no UX trap from auto-coversion accidents.
+			# Shift+take: split_half(units), still lossy WOOD per spec §5.2.
+			# Task 13 adds the test sub-suite; this implementation lands here.
 			var units: int = int(building.state.get("fuel_buffer", 0))
 			if units <= 0:
 				return
-			cursor.pick(Items.Type.WOOD, units)
-			building.state["fuel_buffer"] = 0
-			building.state["fuel_burn_progress"] = 0
-			_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % units)
+			var n: int = SlotClickHandler.split_half(units) if shift else units
+			cursor.pick(Items.Type.WOOD, n)
+			building.state["fuel_buffer"] = units - n
+			if not shift:
+				building.state["fuel_burn_progress"] = 0
+			_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % n)
 		"filter":
-			# Filter slots store TYPE metadata, not stacks. There's nothing
-			# to "take" — player either drops a new filter (replaces current)
-			# or right-clicks to clear. Surface the discoverability hint so
-			# they don't think the slot is broken.
 			_toast("Filter holds an item TYPE, not items. Drop to set, right-click to clear.")
 
 # ---------- buffer helpers (Array of [type, count]) ----------

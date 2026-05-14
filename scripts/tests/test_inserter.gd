@@ -226,7 +226,7 @@ static func run(parent: Node) -> Dictionary:
 	var filter_slot_def: Dictionary = Buildings.slot_layout_for(Buildings.Type.FAST_INSERTER)[2]    # filter is 3rd slot
 	_check(failures, str(filter_slot_def.get("kind", "")) == "filter",
 		"(7) sanity: 3rd slot of FAST_INSERTER should be 'filter' kind, got '%s'" % str(filter_slot_def.get("kind", "")))
-	panel._drop_into_slot(filter_slot_def, -1)
+	panel._drop_into_slot(filter_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, int(fast.state.get("filter_item_type", -1)) == Items.Type.WHEAT,
 		"(7) drop-to-set: filter_item_type should be WHEAT, got %d" % int(fast.state.get("filter_item_type", -1)))
 	_check(failures, cursor.has_item() and cursor.item_type == Items.Type.WHEAT and cursor.count == 5,

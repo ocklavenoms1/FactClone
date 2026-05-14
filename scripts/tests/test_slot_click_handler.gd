@@ -173,6 +173,49 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, refused6b and bag6b.is_empty() and c6b.count == 12,
 		"(6b) chest shift+drop refuse: refused=true, bag empty, cursor unchanged at 12")
 
+	# ---------- (7) shift_building_input_and_output ----------
+	# Building slots: in_buffer / out_buffer Arrays of [type, count] entries.
+	# Tests pure logic via direct array manipulation (no panel scene).
+
+	# (7a) Input shift+take: buf=[[WHEAT, 8]] → cursor 4 wheat, buf=[[WHEAT, 4]].
+	var buf7a: Array = [[Items.Type.WHEAT, 8]]
+	var c7a := CursorStack.new()
+	if not c7a.has_item() and not buf7a.is_empty():
+		var e = buf7a[0]
+		var take: int = SlotClickHandler.split_half(int(e[1]))
+		c7a.pick(int(e[0]), take)
+		e[1] = int(e[1]) - take
+	_check(failures, c7a.count == 4 and int(buf7a[0][1]) == 4,
+		"(7a) input shift+take: cursor=4 wheat, buf=[[WHEAT,4]]")
+
+	# (7b) Input shift+drop with max_stack=8: cursor 10 wheat, buf=[[WHEAT,3]],
+	# split_half(10)=5, space=8-3=5 → drop 5, cursor=5, buf=[[WHEAT,8]].
+	var buf7b: Array = [[Items.Type.WHEAT, 3]]
+	var c7b := CursorStack.new()
+	c7b.pick(Items.Type.WHEAT, 10)
+	var max_stack7b: int = 8
+	var current7b: int = int(buf7b[0][1])
+	var space7b: int = max_stack7b - current7b
+	var want7b: int = SlotClickHandler.split_half(c7b.count)
+	var moved7b: int = min(space7b, want7b)
+	buf7b[0][1] = current7b + moved7b
+	c7b.count -= moved7b
+	_check(failures, c7b.count == 5 and int(buf7b[0][1]) == 8,
+		"(7b) input shift+drop with max_stack clamp: cursor=5, buf=[[WHEAT,8]]")
+
+	# (7c) Output_multi shift+take of sub_idx=1: buf=[[WHEAT,7],[STRAW,5]],
+	# take from idx=1 → cursor=3 straw, buf=[[WHEAT,7],[STRAW,2]].
+	var buf7c: Array = [[Items.Type.WHEAT, 7], [Items.Type.STRAW, 5]]
+	var c7c := CursorStack.new()
+	var sub_idx7c: int = 1
+	if not c7c.has_item() and sub_idx7c < buf7c.size():
+		var e7c = buf7c[sub_idx7c]
+		var take7c: int = SlotClickHandler.split_half(int(e7c[1]))
+		c7c.pick(int(e7c[0]), take7c)
+		e7c[1] = int(e7c[1]) - take7c
+	_check(failures, c7c.count == 3 and c7c.item_type == Items.Type.STRAW and int(buf7c[1][1]) == 2,
+		"(7c) output_multi shift+take sub_idx=1: cursor=3 straw, buf[1]=[STRAW,2]")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }

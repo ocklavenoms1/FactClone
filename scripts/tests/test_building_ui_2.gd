@@ -164,14 +164,14 @@ static func run(parent: Node) -> Dictionary:
 
 	# Drop RISEN_DOUGH into the dough slot.
 	cursor.pick(Items.Type.RISEN_DOUGH, 3)
-	bpanel._drop_into_slot(dough_slot, -1)
+	bpanel._drop_into_slot(dough_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, BuildingPanel._buffer_count(oven.state["in_buffer"], Items.Type.RISEN_DOUGH) == 3,
 		"dough slot drop: in_buffer should have 3 RISEN_DOUGH")
 
 	# Drop FUEL_BRIQUETTE into the fuel-briquette input slot. Both write to
 	# same in_buffer (multi-type bag); they coexist.
 	cursor.pick(Items.Type.FUEL_BRIQUETTE, 2)
-	bpanel._drop_into_slot(fuel_slot, -1)
+	bpanel._drop_into_slot(fuel_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, BuildingPanel._buffer_count(oven.state["in_buffer"], Items.Type.FUEL_BRIQUETTE) == 2,
 		"briquette slot drop: in_buffer should have 2 FUEL_BRIQUETTE")
 	_check(failures, BuildingPanel._buffer_count(oven.state["in_buffer"], Items.Type.RISEN_DOUGH) == 3,
@@ -182,7 +182,7 @@ static func run(parent: Node) -> Dictionary:
 	cursor.pick(Items.Type.WHEAT, 5)
 	var oven_toasts: Array = []
 	bpanel.toast_callback = func(msg): oven_toasts.append(msg)
-	bpanel._drop_into_slot(fuel_slot, -1)
+	bpanel._drop_into_slot(fuel_slot, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item() and cursor.count == 5,
 		"wrong-type drop: cursor should still have WHEAT ×5")
 	_check(failures, oven_toasts.size() == 1 and "accepts" in str(oven_toasts[0]).to_lower(),

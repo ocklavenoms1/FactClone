@@ -166,7 +166,7 @@ static func run(parent: Node) -> Dictionary:
 	# 6a. Drop into smelter input — IRON_ORE accepted.
 	cursor.pick(Items.Type.IRON_ORE, 3)
 	var input_slot_def: Dictionary = smelter_layout[0]
-	panel._drop_into_slot(input_slot_def, -1)
+	panel._drop_into_slot(input_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, BuildingPanel._buffer_count(smelter.state["in_buffer"], Items.Type.IRON_ORE) == 3,
 		"after drop: smelter in_buffer should have 3 iron ore")
 	_check(failures, not cursor.has_item(), "after drop: cursor should be empty")
@@ -174,7 +174,7 @@ static func run(parent: Node) -> Dictionary:
 	# 6b. Drop wrong-type rejected — WHEAT into smelter input (accepts list excludes it).
 	cursor.pick(Items.Type.WHEAT, 5)
 	toasted.clear()
-	panel._drop_into_slot(input_slot_def, -1)
+	panel._drop_into_slot(input_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item() and cursor.item_type == Items.Type.WHEAT and cursor.count == 5,
 		"wrong-type drop should leave cursor unchanged")
 	_check(failures, toasted.size() == 1 and "accepts" in str(toasted[0]).to_lower(),
@@ -185,7 +185,7 @@ static func run(parent: Node) -> Dictionary:
 	cursor.pick(Items.Type.IRON_INGOT, 2)
 	toasted.clear()
 	var output_slot_def: Dictionary = smelter_layout[1]
-	panel._drop_into_slot(output_slot_def, -1)
+	panel._drop_into_slot(output_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item(), "drop into output: cursor should still have items")
 	_check(failures, toasted.size() == 1 and "read-only" in str(toasted[0]).to_lower(),
 		"drop into output should toast 'read-only'")
@@ -195,13 +195,13 @@ static func run(parent: Node) -> Dictionary:
 	smelter.state["fuel_buffer"] = 0
 	cursor.pick(Items.Type.COAL, 2)
 	var fuel_slot_def: Dictionary = smelter_layout[2]
-	panel._drop_into_slot(fuel_slot_def, -1)
+	panel._drop_into_slot(fuel_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, int(smelter.state["fuel_buffer"]) == 8,
 		"drop 2 coal: fuel_buffer should be 8 units, got %d" % int(smelter.state["fuel_buffer"]))
 	_check(failures, not cursor.has_item(), "after fuel drop: cursor should be empty")
 
 	# 6e. Take from fuel — lossy: 8 units → 8 wood.
-	panel._take_from_slot(fuel_slot_def, -1)
+	panel._take_from_slot(fuel_slot_def, -1, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.item_type == Items.Type.WOOD and cursor.count == 8,
 		"lossy take from fuel: cursor should hold WOOD ×8 (1 unit = 1 wood), got %s ×%d" % [Items.name_of(cursor.item_type), cursor.count])
 	_check(failures, int(smelter.state["fuel_buffer"]) == 0,
@@ -224,7 +224,7 @@ static func run(parent: Node) -> Dictionary:
 	panel.open(drill, world)
 	var drill_output_def: Dictionary = drill_layout[0]
 	# Take sub_idx 0 → cursor gets IRON_ORE ×5; copper shifts to idx 0.
-	panel._take_from_slot(drill_output_def, 0)
+	panel._take_from_slot(drill_output_def, 0, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.item_type == Items.Type.IRON_ORE and cursor.count == 5,
 		"output_multi take sub_idx 0: cursor should hold IRON_ORE ×5")
 	_check(failures, drill.state["output_buffer"].size() == 1 and int(drill.state["output_buffer"][0][0]) == Items.Type.COPPER_ORE,

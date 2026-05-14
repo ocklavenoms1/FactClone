@@ -282,7 +282,7 @@ func _draw_slots(font: Font) -> void:
 
 # ---------- override take to handle int-typed output ----------
 
-func _take_from_slot(slot_def: Dictionary, _sub_idx: int) -> void:
+func _take_from_slot(slot_def: Dictionary, _sub_idx: int, _mods: int = SlotClickHandler.MOD_NONE) -> void:
 	var kind: String = str(slot_def.get("kind", ""))
 	if kind != "output":
 		return    # planter has only an output slot; no other take paths
