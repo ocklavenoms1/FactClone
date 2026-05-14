@@ -113,7 +113,7 @@ static func run(parent: Node) -> Dictionary:
 	panel.open(chest, world)
 
 	# Click chest slot 0 with empty cursor → cursor picks up first view (wheat ×50).
-	panel._handle_chest_slot_click(0)
+	panel._handle_chest_slot_click(0, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item() and cursor.item_type == Items.Type.WHEAT and cursor.count == 50,
 		"chest pick: cursor should hold wheat ×50, got %s ×%d" % [Items.name_of(cursor.item_type), cursor.count])
 	# Bag now has only flour.
@@ -122,7 +122,7 @@ static func run(parent: Node) -> Dictionary:
 
 	# Click chest empty slot with cursor full → drop wheat back into bag.
 	# (slot index 1 — past the last view (flour) is empty.)
-	panel._handle_chest_slot_click(2)
+	panel._handle_chest_slot_click(2, SlotClickHandler.MOD_NONE)
 	_check(failures, not cursor.has_item(), "after drop: cursor should be empty")
 	_check(failures, Chest._bag_count(chest.state["bag"], Items.Type.WHEAT) == 50, "wheat back in bag (50)")
 
@@ -132,7 +132,7 @@ static func run(parent: Node) -> Dictionary:
 	cursor.pick(Items.Type.IRON_ORE, 3000)
 	var toasted: Array = []
 	panel.toast_callback = func(msg): toasted.append(msg)
-	panel._handle_chest_slot_click(2)
+	panel._handle_chest_slot_click(2, SlotClickHandler.MOD_NONE)
 	_check(failures, cursor.has_item() and cursor.count == 3000,
 		"over-capacity drop: cursor should still hold all 3000")
 	_check(failures, toasted.size() == 1 and "full" in str(toasted[0]).to_lower(),

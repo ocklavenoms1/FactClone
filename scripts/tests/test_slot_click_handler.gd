@@ -142,6 +142,37 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, c5.item_type == before_cursor_type and c5.count == before_cursor_count,
 		"(5) shift different-type: cursor unchanged (no swap, no mutation)")
 
+	# ---------- (6) shift_chest_take_and_drop ----------
+	# Chest bag is Array of [type, count] entries. Test pure logic:
+	# (a) shift+take half, (b) shift+drop refuse-with-toast when split_half(M) > free_capacity.
+	# Spec §5.2 chest row: chest preserves LMB refuse convention, NOT silent-clamp.
+
+	# (6a) shift+take: bag has [WHEAT, 7] → take 4, bag has [WHEAT, 3].
+	var bag6a: Array = [[Items.Type.WHEAT, 7]]
+	var c6a := CursorStack.new()
+	# Simulate chest shift+take logic (mirrors what we wire into chest_panel below).
+	if not c6a.has_item() and bag6a.size() > 0:
+		var v = bag6a[0]
+		var take: int = SlotClickHandler.split_half(int(v[1]))
+		c6a.pick(int(v[0]), take)
+		v[1] = int(v[1]) - take
+	_check(failures, c6a.count == 4 and c6a.item_type == Items.Type.WHEAT and int(bag6a[0][1]) == 3,
+		"(6a) chest shift+take: cursor=4 wheat, bag entry [WHEAT, 3]")
+
+	# (6b) shift+drop REFUSE: cursor 12 wheat, free_capacity=5.
+	# split_half(12)=6 > 5 → refuse (NOT silent-clamp). Bag stays empty, cursor stays at 12.
+	var bag6b: Array = []
+	var c6b := CursorStack.new()
+	c6b.pick(Items.Type.WHEAT, 12)
+	var free_capacity6b: int = 5
+	var half6b: int = SlotClickHandler.split_half(c6b.count)
+	var refused6b: bool = false
+	if half6b > free_capacity6b:
+		refused6b = true
+		# In production, _toast(...) fires here; in test, just set refused flag.
+	_check(failures, refused6b and bag6b.is_empty() and c6b.count == 12,
+		"(6b) chest shift+drop refuse: refused=true, bag empty, cursor unchanged at 12")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }

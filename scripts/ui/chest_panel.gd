@@ -104,7 +104,7 @@ func _gui_input(event: InputEvent) -> void:
 		if hit is int:
 			_handle_player_slot_click(int(hit), _extract_mods(event))
 		elif hit is Dictionary and hit.has("chest_idx"):
-			_handle_chest_slot_click(int(hit["chest_idx"]))
+			_handle_chest_slot_click(int(hit["chest_idx"]), _extract_mods(event))
 		queue_redraw()
 
 ## Hit-test that combines player inventory slots + chest grid slots.
@@ -133,11 +133,37 @@ func _hit_test_chest(pos: Vector2) -> Variant:
 
 ## Click on a chest slot. Cursor empty + content → pick. Cursor full →
 ## drop into bag (atomic; capacity-checked).
-func _handle_chest_slot_click(slot_idx: int) -> void:
+func _handle_chest_slot_click(slot_idx: int, mods: int) -> void:
 	var bag: Array = building.state.get("bag", [])
 	var views: Array = SlotWidget.chest_bag_to_slot_views(bag)
 	var view_present: bool = slot_idx < views.size()
-	# Cursor empty → pick.
+
+	# Shift+LMB: half-stack take/drop. Chest preserves LMB convention —
+	# refuse-with-toast on no-fit (NOT silent-clamp like player slot).
+	if mods & SlotClickHandler.MOD_SHIFT != 0:
+		if not cursor.has_item():
+			# Shift+take half.
+			if not view_present:
+				return
+			var v = views[slot_idx]
+			var take: int = SlotClickHandler.split_half(int(v["count"]))
+			Chest._bag_remove(bag, int(v["item_type"]), take)
+			cursor.pick(int(v["item_type"]), take)
+			return
+		# Cursor has item — shift+drop half, check capacity for refuse.
+		var half: int = SlotClickHandler.split_half(cursor.count)
+		if Chest.free_capacity(building) < half:
+			_toast("Chest full — cannot deposit half (%d, need %d capacity)" % [half, half])
+			return
+		Chest._bag_add(bag, cursor.item_type, half)
+		cursor.count -= half
+		if cursor.count <= 0:
+			cursor.clear()
+		return
+
+	# (ctrl branch lands in Task 20.)
+
+	# Plain LMB — unchanged from pre-Task-11 implementation.
 	if not cursor.has_item():
 		if not view_present:
 			return
