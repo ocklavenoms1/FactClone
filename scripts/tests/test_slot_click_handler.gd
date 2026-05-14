@@ -216,6 +216,22 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, c7c.count == 3 and c7c.item_type == Items.Type.STRAW and int(buf7c[1][1]) == 2,
 		"(7c) output_multi shift+take sub_idx=1: cursor=3 straw, buf[1]=[STRAW,2]")
 
+	# ---------- (8) shift_fuel_take_units: lossy-WOOD on half of units ----------
+	# Fuel buffer is in UNITS (1 wood = 1, 1 coal = 4, 1 briquette = 8 per
+	# Burner.FUEL_VALUES). Take is always lossy WOOD regardless of deposit type.
+	# Pure-logic test: simulate the math, mirrors building_panel.gd _take_from_slot
+	# fuel arm post-Task-12 (split_half(units) if shift else units).
+	#
+	# Scenario: buffer = 16 units (e.g., was 4 coal). Shift+take → cursor=8 wood,
+	# buffer remaining = 8 units.
+	var units8: int = 16
+	var c8 := CursorStack.new()
+	var n8: int = SlotClickHandler.split_half(units8)
+	c8.pick(Items.Type.WOOD, n8)
+	units8 -= n8
+	_check(failures, c8.count == 8 and c8.item_type == Items.Type.WOOD and units8 == 8,
+		"(8) fuel shift+take: cursor=8 wood, buffer remaining=8 units (split_half(16)=8)")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
