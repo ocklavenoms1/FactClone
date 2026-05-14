@@ -18,6 +18,18 @@ When a session runs in a git worktree (CWD = `.claude/worktrees/<branch>/`), Wri
 
 ---
 
+## Code Quality Reviewer Protocol (validated session-qol-cluster-a)
+
+When flagging missing code or omitted lines, quote the exact line(s) by line number from the file. Do not flag omissions based on pattern-matching; verify by reading the file content.
+
+**Empirical impact:** false-positive rate dropped from 50% pre-protocol (3 false positives in 6 reviews) to 0% post-protocol (0 false positives in 9 reviews) across `session-qol-cluster-a`. Apply to all subagent-driven sessions going forward.
+
+**Bake into reviewer subagent briefs:**
+
+> When flagging missing code, omitted lines, or absent assertions, **quote the exact line(s) by line number from the file**. Do NOT flag omissions based on pattern-matching or what you "expect" to see; verify by reading the file content first. If you can't quote the relevant line range showing the omission, do not make the claim.
+
+---
+
 ## Inserter Arc — 2 of 6 sessions shipped
 
 **Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
