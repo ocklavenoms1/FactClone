@@ -236,6 +236,7 @@ func _handle_building_slot_click(hit: Dictionary, mods: int) -> void:
 
 ## Try to drop the cursor stack into the given slot. Validates kind + accepts;
 ## toasts on rejection.
+# Default allows test call-sites that don't exercise modifiers to omit the arg.
 func _drop_into_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	# sub_idx unused for drops; kept for call-site symmetry with _take_from_slot.
 	var kind: String = str(slot_def.get("kind", ""))
@@ -253,7 +254,7 @@ func _drop_into_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 		"input":
 			_drop_into_input(slot_def, mods)
 		"fuel":
-			_drop_into_fuel(slot_def)  # Task 14 changes this to (slot_def, mods).
+			_drop_into_fuel(slot_def, mods)
 		"filter":
 			# Shift/ctrl on filter slot: no-op per spec §5.2 / §6.3. Drop-to-set
 			# still works for plain LMB.
@@ -265,6 +266,7 @@ func _drop_into_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 
 ## Append cursor's stack into b.state[state_field] (a buffer of [type, count]).
 ## Respects max_stack. Cursor decrements by the amount actually accepted.
+# Default allows test call-sites that don't exercise modifiers to omit the arg.
 func _drop_into_input(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	var field: String = str(slot_def.get("state_field", "in_buffer"))
 	var max_stack: int = int(slot_def.get("max_stack", 8))
@@ -287,7 +289,8 @@ func _drop_into_input(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NON
 ## Respects FUEL_BUFFER_CAPACITY. 1 wood = 1 unit, 1 coal = 4, 1 briquette = 8.
 ## Refuses partial-conversion items (player drops 5 coals, only 3 fit in
 ## terms of units (12 of 16) — accepts 3 coals, rejects 2 with toast).
-func _drop_into_fuel(slot_def: Dictionary) -> void:
+# Default allows test call-sites that don't exercise modifiers to omit the arg.
+func _drop_into_fuel(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	if not Burner.FUEL_VALUES.has(cursor.item_type):
 		_toast("That item isn't fuel.")
 		return
@@ -301,9 +304,15 @@ func _drop_into_fuel(slot_def: Dictionary) -> void:
 	# How many items can fit (atomic — can't split a coal into half-coals).
 	var items_that_fit: int = free_units / energy_per
 	if items_that_fit <= 0:
+		# Zero-fit edge case: shift inherits the plain-LMB toast-and-refuse path.
 		_toast("Fuel slot too full to accept %s (1 = %d units)." % [Items.name_of(cursor.item_type), energy_per])
 		return
-	var moved_items: int = min(items_that_fit, cursor.count)
+	# Determine how many items to drop. Plain LMB: all of cursor.count.
+	# Shift+LMB per spec §5.2: split_half(cursor.count), silent atomic-clamp
+	# when fewer fit (matches player-slot Q3, NOT chest-style refuse-all).
+	var shift: bool = (mods & SlotClickHandler.MOD_SHIFT) != 0
+	var want: int = SlotClickHandler.split_half(cursor.count) if shift else cursor.count
+	var moved_items: int = min(items_that_fit, want)
 	building.state["fuel_buffer"] = current_units + moved_items * energy_per
 	# Track for display: fuel_buffer stores generic energy units, but the
 	# slot UI needs an item type to render an icon. Mirror what the auto-
@@ -331,6 +340,7 @@ func _drop_into_filter(slot_def: Dictionary) -> void:
 	# Cursor unchanged — drop-to-set is a copy, not a move.
 
 ## Take from a slot to the cursor.
+# Default allows test call-sites that don't exercise modifiers to omit the arg.
 func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHandler.MOD_NONE) -> void:
 	var kind: String = str(slot_def.get("kind", ""))
 	var field: String = str(slot_def.get("state_field", ""))

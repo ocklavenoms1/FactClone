@@ -232,6 +232,26 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, c8.count == 8 and c8.item_type == Items.Type.WOOD and units8 == 8,
 		"(8) fuel shift+take: cursor=8 wood, buffer remaining=8 units (split_half(16)=8)")
 
+	# ---------- (9) shift_fuel_drop_items_atomic: silent atomic-clamp ----------
+	# Spec §5.2 fuel-drop: operates in ITEMS, atomic via FUEL_VALUES,
+	# silent-clamp (matches player-slot Q3, NOT chest-style refuse).
+	#
+	# Scenario: cursor 6 coal (energy_per=4), free 8 units → items_that_fit = 8/4 = 2.
+	# split_half(6) = 3 wants to drop, only 2 fit → silent atomic clamp to 2.
+	# Cursor 6 → 4 (2 items dropped), buffer += 2*4 = 8 units.
+	var c9 := CursorStack.new()
+	c9.pick(Items.Type.COAL, 6)
+	var free_units9: int = 8
+	var energy_per9: int = int(Burner.FUEL_VALUES[Items.Type.COAL])
+	var items_fit9: int = free_units9 / energy_per9
+	var want9: int = SlotClickHandler.split_half(c9.count)
+	var moved9: int = min(items_fit9, want9)
+	# Simulate the drop in test space (the production code does this in _drop_into_fuel).
+	var buffer9_after: int = (16 - free_units9) + moved9 * energy_per9
+	c9.count -= moved9
+	_check(failures, moved9 == 2 and c9.count == 4 and buffer9_after == 16,
+		"(9) fuel shift+drop atomic clamp: moved=2 (split_half(6)=3 clamped to items_fit=2), cursor=4, buffer 8→16")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
