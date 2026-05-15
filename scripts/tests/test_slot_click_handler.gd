@@ -479,6 +479,34 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, max_n12c_full == 0 and not called12c_full[0],
 		"(12c.full) gate: same-type at max_stack → max=0, cb NOT invoked")
 
+	# ---------- (13) ctrl_picker_outside_click_no_propagation ----------
+	# First scene-tree sub-suite in this file. Verifies the picker's
+	# outside-click / cancel teardown path does NOT invoke confirm_cb.
+	# Scene-tree pattern mirrors test_walkability.gd's GridWorld lifecycle.
+	#
+	# Per spec §4.2 + §4.3: popup_exclusive_on_parent handles click-outside
+	# natively (Godot dispatches hide() on the popup). Direct hide() call here
+	# is a proxy — same teardown path, no fragile headless input injection.
+
+	var picker_scene13: PackedScene = load("res://scenes/quantity_picker_modal.tscn")
+	var picker13: QuantityPickerModal = picker_scene13.instantiate() as QuantityPickerModal
+	parent.add_child(picker13)
+	var was_called13: Array = [false]
+	var sentinel13: Callable = func(_n: int):
+		was_called13[0] = true
+	# Open picker with arbitrary state — we're not testing the math here.
+	picker13.open(Vector2(100, 100), "Take", "Wheat", 10, 10, sentinel13)
+	_check(failures, picker13.visible,
+		"(13a) picker visible after open()")
+	# Simulate outside-click teardown via hide() — same code path as real
+	# click-outside (popup_exclusive_on_parent calls hide() internally).
+	picker13.hide()
+	_check(failures, not picker13.visible,
+		"(13b) picker hidden after cancel/outside-click")
+	_check(failures, not was_called13[0],
+		"(13c) confirm_cb NOT invoked on non-OK teardown (regression lock)")
+	picker13.queue_free()
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
