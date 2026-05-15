@@ -1,4 +1,4 @@
-[gd_scene load_steps=35 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=36 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -32,6 +32,7 @@
 [ext_resource type="Script" path="res://scripts/ui/console.gd" id="30_console"]
 [ext_resource type="Script" path="res://scripts/ui/inserter_panel.gd" id="31_inspanel"]
 [ext_resource type="Script" path="res://scripts/ui/fast_inserter_panel.gd" id="32_fastinspanel"]
+[ext_resource type="PackedScene" path="res://scenes/quantity_picker_modal.tscn" id="33_qpicker"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -298,4 +299,7 @@ anchor_bottom = 1.0
 
 [node name="DevConsole" type="Control" parent="HUD"]
 script = ExtResource("30_console")
+visible = false
+
+[node name="QuantityPickerModal" parent="HUD" instance=ExtResource("33_qpicker")]
 visible = false

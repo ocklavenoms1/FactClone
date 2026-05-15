@@ -111,6 +111,12 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # .is_open() call site; typing as DevConsole hits class_name registration
 # race in tests and parse cycles).
 @onready var dev_console = $HUD/DevConsole
+# Quantity picker (QoL Cluster A — spec §4.2 / §6). Hard-modal popup
+# instantiated as a HUD child via ext_resource in main.tscn. Wired into
+# inventory_grid (Task 19); future Tasks 20-21 add chest_panel and
+# BuildingPanel wire-up. Gated alongside dev_console in _process /
+# _unhandled_input to suppress polled inputs while open.
+@onready var quantity_picker: QuantityPickerModal = $HUD/QuantityPickerModal
 
 var player_inventory: Inventory
 var toast_timer: float = 0.0
@@ -170,6 +176,10 @@ func _ready() -> void:
 	inventory_grid.toast_callback = _show_toast
 	# Shared cursor — same instance used by every building panel.
 	inventory_grid.cursor = cursor
+	# Quantity picker ref for ctrl+LMB dispatch (Task 19). Inventory grid
+	# computes max via SlotClickHandler.ctrl_click_max and opens the picker
+	# with a confirm Callable that runs ctrl_click_transfer.
+	inventory_grid.quantity_picker = quantity_picker
 	# Hotbar gets a player_inventory ref so item_apply slots dim when the
 	# player has 0 of the item (session-soil-exhaustion-3). Optional —
 	# slots fall back to never-dim if ref is null.
@@ -360,6 +370,12 @@ func _process(delta: float) -> void:
 	# Console handles its own input (Esc-to-close, history nav, submit)
 	# via its own LineEdit + _input handler.
 	if dev_console != null and dev_console.is_open():
+		return
+	# Quantity picker gate (Task 19). popup_exclusive_on_parent blocks
+	# UI-level events automatically, but Input.is_action_just_pressed
+	# (polled here) bypasses modal routing. Suppresses hotbar keys,
+	# building placement, Q-inspect, etc., while the picker is open.
+	if quantity_picker != null and quantity_picker.visible:
 		return
 
 	# Inventory toggle (I) — always handled, even while grid is open
@@ -577,6 +593,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# rotate, etc.). Console handles its own Escape via the LineEdit's
 	# focus + KEY_ESCAPE branch in console.gd's _input.
 	if dev_console != null and dev_console.is_open():
+		return
+	# Quantity picker gate (Task 19) — sibling of dev_console gate.
+	if quantity_picker != null and quantity_picker.visible:
 		return
 	if inventory_grid != null and inventory_grid.is_open():
 		return
