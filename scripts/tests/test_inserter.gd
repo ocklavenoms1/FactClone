@@ -21,7 +21,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_inserter.json"
 
 static func test_name() -> String:
-	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression + long-reach tier)"
+	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression + long-reach tier + cross-tile)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -455,10 +455,64 @@ static func run(parent: Node) -> Dictionary:
 		_check(failures, Inserter.dest_tile(lr) == expected_dst,
 			"(13) long-reach dest_tile dir=%d should be %s, got %s" % [dir_13, str(expected_dst), str(Inserter.dest_tile(lr))])
 
+	# ===========================================================================
+	# (14) LONG-REACH CROSS-TILE TRANSPORT — full pipeline integration.
+	# Layout: chest@(0,0) → long_reach@(2,0) (dir=E) → belt@(4,0), with empty
+	# tiles at (1,0) and (3,0). Validates that the entire transport pipeline
+	# works across a 2-tile gap (placement + fuel + pickup + swing + drop +
+	# return). One full cycle = 30 ticks; expect 1 wheat in belt slot after
+	# 30 ticks. Manually confirmed at Task 4 smoke gate; this test locks it
+	# down headlessly.
+	# ===========================================================================
+	_disconnect(world); world.queue_free()
+	world = _make_world(parent)
+	# _make_world only paints stone in x=7..13 / y=8..12. Our (0,0)..(4,0) row
+	# is outside that. Chest + Belt both require STONE/PATH overlays; long-reach
+	# accepts NONE so it doesn't strictly need overlay, but paint the whole
+	# row for uniformity with sub-case 12.
+	for x_14 in range(0, 5):
+		world.set_overlay(Vector2i(x_14, 0), Terrain.Overlay.STONE)
+	if not world.place_building(Buildings.Type.LONG_REACH_INSERTER, Vector2i(2, 0), Belt.DIR_E):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "(14) long-reach inserter placement at (2,0) failed" }
+	if not world.place_building(Buildings.Type.CHEST, Vector2i(0, 0), Belt.DIR_E):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "(14) source chest placement at (0,0) failed" }
+	if not world.place_building(Buildings.Type.BELT, Vector2i(4, 0), Belt.DIR_E):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "(14) dest belt placement at (4,0) failed" }
+	var lr2: Building = world.building_at(Vector2i(2, 0))
+	var src2: Building = world.building_at(Vector2i(0, 0))
+	var belt: Building = world.building_at(Vector2i(4, 0))
+	# Confirm source_tile / dest_tile compute correctly with the 2-tile reach.
+	_check(failures, Inserter.source_tile(lr2) == Vector2i(0, 0),
+		"(14) source_tile should be (0,0), got %s" % str(Inserter.source_tile(lr2)))
+	_check(failures, Inserter.dest_tile(lr2) == Vector2i(4, 0),
+		"(14) dest_tile should be (4,0), got %s" % str(Inserter.dest_tile(lr2)))
+	# Pre-fuel + load source.
+	lr2.state["fuel_buffer"] = 100
+	src2.state["bag"] = [[Items.Type.WHEAT, 5]]
+	# Run 30 ticks — one full cycle for long-reach.
+	for _i in 30:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	# Belt should now contain exactly one wheat in one of its slots.
+	var belt_slots: Array = belt.state.get("slots", [])
+	var wheat_on_belt: int = 0
+	for s in belt_slots:
+		if int(s) == Items.Type.WHEAT:
+			wheat_on_belt += 1
+	_check(failures, wheat_on_belt == 1,
+		"(14) belt should contain 1 wheat after 1 cycle, got %d" % wheat_on_belt)
+	# Source chest should have 4 wheat remaining.
+	var src2_count: int = _bag_count(src2.state.get("bag", []), Items.Type.WHEAT)
+	_check(failures, src2_count == 4,
+		"(14) source chest should have 4 wheat after 1 cycle, got %d" % src2_count)
+
 	_disconnect(world); world.queue_free()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "13 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach" }
+		return { "ok": true, "message": "14 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach + long-reach cross-tile transport" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
