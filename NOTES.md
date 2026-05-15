@@ -30,6 +30,14 @@ When flagging missing code or omitted lines, quote the exact line(s) by line num
 
 ---
 
+## Opus reviewer behavior — prompt-injection awareness
+
+Across Tasks 13, 15, 18 of `session-qol-cluster-a` (3 data points), Opus reviewer subagents explicitly identified and ignored ambient context that leaked into tool output (system-reminders about MCP instructions, link-safety prompts, etc.). Sonnet did not surface this behavior in 6 reviews. Real model-level provenance reasoning, context-dependent (fires when noise is present, not routine per review). For review work specifically, Opus shows higher resistance to context contamination.
+
+**Practical implication:** when reviewer subagents need to read tool output that may include unrelated system-reminders or MCP instructions (e.g., during multi-step file inspection), Opus is more likely to correctly partition signal from noise. Worth the cost difference for high-stakes reviews of foundational code or signature-changing refactors.
+
+---
+
 ## Inserter Arc — 2 of 6 sessions shipped
 
 **Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
