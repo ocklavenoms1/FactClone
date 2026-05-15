@@ -74,19 +74,68 @@ Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't 
 
 ---
 
-## Inserter Arc — 2 of 6 sessions shipped
+## Working protocol: Design Brief Verification (validated session-inserter-long-reach)
 
-**Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
+Senior dev briefs describe code changes at conceptual level; implementation agents should ALWAYS verify against actual current code shape via code search + line citations before accepting brief assumptions. Three data points across the Inserter Arc / QoL Cluster A:
+
+- **Cluster A Task 14:** refuse-clamp semantic conflation caught by spec re-read before code.
+- **Inserter Session 3 Q4:** brief said "modify tick to use REACH lookup"; verification against `inserter.gd:134-190` revealed tick is already accessor-driven. REACH belongs in `source_tile()` / `dest_tile()` accessors, NOT in tick. Tick stays tier-agnostic.
+- **Inserter Session 3 Task 6:** brief template contained 5 stale API references (SaveSystem `save_game(world, save_path)` signature — actually `(world, player, inventory)`; state field `current_fuel_item` — actually `last_fuel_item`; LoadResult shape; placement coordinate `(5,5)` outside stone overlay; standalone save path — should reuse `TEST_SAVE_PATH` + `_cleanup` helper). Implementer caught all five by comparing against sub-case (9) precedent + checking actual `save_system.gd` / `burner.gd` signatures.
+
+**Pattern:** brief assumptions about code structure are approximate; verification against current code is cheap and catches imprecision before it propagates. Bake into all implementer-subagent briefs: "before accepting a brief's description of an existing API or code shape, verify by grep + line citation. If the brief and code disagree, the code wins; flag the discrepancy in your DONE report."
+
+---
+
+## Working protocol: Variable name pre-check before multi-edit on shared test files
+
+When appending new sub-cases to a test file's existing `run()` function (where all locals share one scope), grep for variable names you plan to declare BEFORE writing the code. GDScript 4.x rejects same-scope re-declaration as a parse error — and the error doesn't surface clearly when the test process is run via `| tail -N`; the pipe buffers and the runtime appears to hang.
+
+**Triggered by:** `session-inserter-long-reach` Task 2 — implementer subagent stalled at test-verification step (35 tool uses, no final report) because `var fast_b: Building` collided with a prior `var fast_b` declaration in sub-case (2) of the same `run()`. Controller diff-inspected, found the parse error in raw Godot output (no pipe), renamed sub-case 11 locals to `_r` suffix, tests passed.
+
+**Pre-check protocol (now standard in implementer briefs for multi-edit test tasks):**
+
+```bash
+grep -n "^\s*var \(<NAME1>\|<NAME2>\|...\)\b" scripts/tests/<target_test>.gd
+```
+
+If any match, suffix with the sub-case number (`_11`, `_12`, etc.) for clarity. Tasks 3, 4, 5, 6 of `session-inserter-long-reach` all succeeded without stalling after this pre-check was added to briefs.
+
+**Also bake into reviewer briefs:** when reading test sub-case diffs, verify variable names don't collide with declarations earlier in the same `run()` function — line-quote the prior declaration if found.
+
+---
+
+## Working protocol: Edit-tool CRLF caveat on Windows
+
+Triggered during `session-inserter-long-reach` Task 4. The `Edit` tool refused string-not-found on `scripts/main.gd` despite verified-correct tab indentation in the input. Root cause: CRLF-vs-LF mismatch between the file on disk and the Edit input string (Windows-only). Implementer worked around via PowerShell:
+
+```powershell
+[System.IO.File]::WriteAllText(<path>, <content_with_preserved_CRLF>)
+```
+
+(Read raw bytes first, confirm CRLF, do string-replace in-memory, write back.) Final on-disk bytes verified by re-reading the edited region.
+
+**Pattern:** if `Edit` fails string-not-found and the search string is byte-identical to what `Read` returned, suspect line-ending mismatch. The harness on Windows can mojibake between LF (what Edit ships) and CRLF (what `git diff` and Godot write). PowerShell direct-write or a normalize-line-endings preprocess step bypasses the issue.
+
+Related to the existing `2>nul` caveat above — both are Windows-specific tooling friction modes worth documenting.
+
+---
+
+## Inserter Arc — 3 of 6 sessions shipped
+
+**Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) + 3 (long-reach, parametric extension to orthogonal reach axis) shipped. 3 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
 
 **Shipped:**
 - **Session 1 (`session-inserter-foundation`)** — basic 1-tile inserter, fuel-powered via Burner module, 1.0s cycle. Universal source/dest (belt/chest/Processor). Closes the "can't connect chest to building without a belt" hole.
 - **Session 2 (`session-inserter-fast-filter`)** — Fast Inserter: 0.5s cycle (twice as fast), single-slot filter (drop-to-set, RMB-clear). Inserter.gd refactored to tier-parametric (`CYCLE_TICKS_BY_TYPE` / `BODY_COLOR_BY_TYPE` Dictionary lookup tables); both basic and fast share `Inserter.tick`. New `'filter'` slot kind in BuildingPanel. Pre-existing Session 1 fuel-port bug caught at PAUSE 1 and fixed (now uses `FUEL_PORT_DIR = Belt.DIR_S`, mirroring Smelter pattern).
+- **Session 3 (`session-inserter-long-reach`)** — Long-Reach Inserter: 2-tile reach (orthogonal upgrade axis from speed+filter), 1.5s cycle (slower to balance reach), rust-red color, no filter. NEW `REACH_BY_TYPE` parametric table + `reach(b)` accessor; REFACTORED `ARM_LENGTH` const → `ARM_LENGTH_BY_TYPE` table + `arm_length(b)` accessor. `source_tile()` / `dest_tile()` multiply offset by `reach(b)` — zero tick changes (already accessor-driven). Long-reach arm bumped from initial 1.10 → 2.00 × tile_size at PAUSE 2 smoke gate to physically reach the 2-tile-away tiles. Reuses basic `InserterPanel` (no filter row).
 
 **Queued (re-plan each at session start):**
-- **Session 3 — Long-Reach Inserter.** Same code path as basic/fast; `ARM_LENGTH_BY_TYPE` table with longer reach (1.2 fraction of tile_size), `source_tile`/`dest_tile` use 2-tile offsets. Visual: longer arm. Cycle speed: 1.5s (slower for distance trade-off). No filter.
 - **Session 4 — Electric Inserter + multi-filter.** Switches from fuel-powered to electric power (requires Electricity Arc to ship first — separate prereq). Multi-slot filter: 3 filter slots, picks any of the 3 types. Electric tier is base for the next steps.
-- **Session 5 — Long-Reach Fast Inserter / Long-Reach Electric.** Combines reach + speed/power dimensions. Tier-parametric tables make this ~30 lines per variant.
+- **Session 5 — Long-Reach Fast Inserter / Long-Reach Electric.** Combines reach + speed/power dimensions. Tier-parametric tables make this ~30 lines per variant (validated by Session 3's clean orthogonal-axis addition).
 - **Session 6 — Stack Inserter (electric).** Picks UP TO 3 items per cycle (or per stack-size config), drops them as a single batch. Throughput scaling for late-game. Fundamentally different from prior tiers' "1 item per cycle" model — needs careful design pass.
+
+**Cluster B candidates surfaced during Session 3:**
+- E-key adjacency-scan picks first found building (inserter beats chest when both adjacent). User wants mouse-hover-aware dispatch — "whichever I hover over should open when I click E". Pre-existing pre-Session-3 behavior, deferred to QoL Cluster B / future session.
 
 **Architectural extension cost per future tier:** add 1 row to each `*_BY_TYPE` table in `inserter.gd`, add 1 enum entry + DATA entry + dispatch case in `buildings.gd`, ~85 lines for a specialized panel if needed (most tiers reuse FastInserterPanel). Stack inserter is the exception — needs a different state shape for batch-pickup.
 

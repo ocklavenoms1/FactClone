@@ -9,6 +9,59 @@ Each entry has three sections:
 
 ---
 
+## Inserter Arc Session 3 — Long-Reach Inserter
+
+**Date:** 2026-05-15
+**Tag:** `session-inserter-long-reach`
+**Save:** v18 (no schema bump — append-only enum + `.get()`-defaulted state fields)
+
+Third tier on the parametric inserter foundation: 1×1, 2-tile reach, 1.5s cycle, no filter, rust-red color. Validates the parametric-tables pattern from Session 2 by adding an orthogonal upgrade axis (reach, separate from speed+filter). Eight tasks executed via Superpowers subagent-driven-development with two-stage line-quoted review. test_inserter.gd grew from 10 → 15 internal sub-cases; runner-level count stayed at 34/34 PASS throughout.
+
+Commit chain: `0612547` (spec) → `8f7dece` (plan) → `26132a1` (Task 2 parametric refactor + controller stall recovery) → `2441027` (Task 3 tier addition) → `fc16969` (Task 3 nit fix-up) → `9cb1c87` (Task 4 hotbar+panel) → `08d6fdc` (Task 4 smoke-gate ARM_LENGTH revision) → `694d33d` (Task 5 cross-tile integration test) → `65fd4e4` (Task 5 nit fix-up) → `d956f8b` (Task 6 save round-trip) → `0f1ca5c` (Task 6 nit fix-up) → ship.
+
+### What shipped
+
+**Production code:**
+- `Buildings.Type.LONG_REACH_INSERTER` enum entry + DATA registration (rust-red `Color(0.65, 0.30, 0.22)`, 1×1, `supports_direction`, 2-slot layout matching basic — `held_item` + `fuel`, NO filter slot).
+- `scripts/world/buildings.gd` dispatch case labels for `make` / `tick_one` / `draw_one` / `info_lines` extended to include `LONG_REACH_INSERTER`.
+- `scripts/world/inserter.gd` parametric tables:
+  - `CYCLE_TICKS_BY_TYPE`: row 30 (1.5s)
+  - `BODY_COLOR_BY_TYPE`: row `Color(0.65, 0.30, 0.22)`
+  - **NEW** `REACH_BY_TYPE` table + `reach(b)` accessor — rows 1/1/2 for INSERTER/FAST_INSERTER/LONG_REACH_INSERTER, default 1
+  - **REFACTORED** `const ARM_LENGTH = 0.55` → `ARM_LENGTH_BY_TYPE` dict + `arm_length(b)` accessor — rows 0.55/0.55/2.00 (long-reach bumped from initial 1.10 → 2.00 at smoke gate; see Decisions)
+- `source_tile()` / `dest_tile()` multiply offset vector by `reach(b)`. **Zero changes to `tick()` body** — already accessor-driven from Session 2 refactor.
+- `draw()` uses `arm_length(b)` accessor.
+- `scripts/ui/hotbar.gd`: Inserters category 3rd slot append (basic → fast → long-reach).
+- `scripts/main.gd`: panel dispatch case routes long-reach → `inserter_panel` (basic, NOT `fast_inserter_panel` — no filter row).
+
+**Tests:**
+- `test_inserter.gd` sub-cases (11)–(15): parametric refactor regression, long-reach cycle/reach/color/arm_length lookups, 2-tile source/dest across 4 rotations, cross-tile transport integration, save round-trip with full 7-field state preservation. Each sub-case uses `_r`/`_12`/`_13`/`_14`/`_15` suffix style for variable scope-collision defense.
+
+### Decisions
+
+- **Q1 — Body color: rust-red `Color(0.65, 0.30, 0.22)`.** Maximally distinct from bronze (basic) and blue-grey (fast). Avoids olive-green which would clash with FERTILIZER_APPLICATOR's sage.
+- **Q2 — Parametric extension shape.** `REACH_BY_TYPE` table is new; `ARM_LENGTH` const refactored to `ARM_LENGTH_BY_TYPE`. Baseline 0.55 preserved for basic/fast — pure additive change, no behavioral or visual delta on existing tiers.
+- **Q3 — State shape uniform across tiers.** `filter_item_type: -1` exists on long-reach but is unused (cost of universal persistence shape; reaffirmed from Session 2 Q3).
+- **Q4 — Assumption correction.** Brief said "modify tick to use REACH lookup"; verification against `inserter.gd:134-190` revealed tick is already accessor-driven (calls `_try_pickup` / `_try_drop` which call `source_tile()` / `dest_tile()`). REACH applies at accessor level, NOT in tick. Tick stays tier-agnostic. **Cheap verification step caught imprecision before propagation.**
+- **Q5 — Arm-angle math is length-independent.** `canonical_angle` is purely a function of state + `cycle_progress`; arm length only scales the radius. Swap `ARM_LENGTH` const → `arm_length(b)` accessor, math unchanged.
+- **Q5 — REVISED at Task 4 smoke gate.** Initial decision was 1.10 × tile_size (stylized, arm extends 1 tile past inserter center). User smoke feedback: "should reach the 2nd tile square otherwise its the same as inserter or fast inserter". Bumped to 2.00 × tile_size so the arm physically reaches the 2-tile-away source/destination. Spec section 4.Q5 amended with the revision rationale.
+- **Q6 — Long-reach reuses InserterPanel (basic), not FastInserterPanel.** No filter capability per Q3 stance.
+- **Q7 — Hotbar 3rd slot in Inserters category.** Left to right: basic → fast → long-reach.
+- **Q8 — 5 sub-cases inside `test_inserter.gd`.** Internal sub-case count 10 → 15; runner-level TESTS file count stays at 34. Spec text "34 → 39 sub-suites" refers to internal sub-cases, NOT separate test files.
+- **Save schema bump avoided.** Append-only enum (LONG_REACH_INSERTER gets next int), no new state fields, `.get(key, default)` handles old saves. Save schema stays at v18.
+
+### Lessons
+
+- **Design Brief Verification (working protocol earned over the arc).** Senior briefs describe code changes at conceptual level; the implementation agent should ALWAYS verify against actual current code via grep + line citations before accepting brief assumptions. Two instances across the arc: Cluster A Task 14 (refuse-clamp semantic conflation, caught by spec re-read); Inserter Session 3 Q4 ("modify tick" should have been "modify source_tile/dest_tile accessors", caught by code search). **Verification is cheap and catches imprecision before propagation.** Reaffirmed at Task 6: implementer caught 5 inaccurate API references in brief template (SaveSystem signatures, state field `last_fuel_item` vs `current_fuel_item`, LoadResult shape, placement coordinates) by checking against sub-case (9) precedent and actual production code.
+- **Subagent stall recovery pattern (recurrent).** Task 2 implementer stalled at test-verification step (35 tool uses, no final report) due to GDScript scope-collision parse error from `var fast_b` already declared earlier in the function. Controller recovered by diff-inspecting, fixing inline with `_r` suffix rename, and committing. **Pre-flight collision check added to subsequent task briefs** (grep for variable names before declaring them in the same function) — Tasks 3, 4, 5, 6 all succeeded without stalling. Same precedent as Cluster A Tasks 12/14/21. Pattern is now standard part of multi-edit-test-file briefs.
+- **Parametric pattern scales cleanly to orthogonal axes.** Adding "reach" as an orthogonal upgrade axis (separate from speed+filter) was a 5-line change — one new `REACH_BY_TYPE` table + accessor + 2 multiply-by-`r` operations in `source_tile` / `dest_tile`. Tick logic stayed identically tier-agnostic. Validates Session 2's design choice: the parametric pattern doesn't just support new tiers, it supports new upgrade DIMENSIONS.
+- **Append-only enum + `.get()`-defaults continue to keep save schema flat.** Third tier in the Inserter family ships with zero migration code. Same precedent as Sessions 1, 2.
+- **Spec revisions are OK at smoke gates.** The Q5 arm-length revision (1.10 → 2.00) happened DURING Task 4 smoke gate when the user found the stylized choice confusing. Caught early, fixed in a `08d6fdc` fix-up commit, spec amended in the same commit. Smoke gates serve their purpose precisely because they surface decisions that look good in writing but fail in play.
+- **Smoke-gate findings not always Session-scope.** Task 4 smoke also surfaced E-key adjacency-scan UX issue (E next to inserter+chest opens inserter, user wants mouse-hover-aware dispatch). Pre-existing behavior, not a Task 4 regression. Deferred to Cluster B / future QoL session rather than expanding session scope. Discipline: smoke gates surface ALL findings; the controller filters in-scope from out-of-scope.
+- **Edit-tool CRLF tooling caveat on Windows.** Task 4 implementer's `Edit` call on `scripts/main.gd` failed string-not-found despite verified-correct tabs. Workaround: PowerShell `[System.IO.File]::WriteAllText` with CRLF-preserving string replace. Documenting alongside the existing Windows `2>nul` caveat in NOTES.
+
+---
+
 ## QoL Cluster A — Click extraction + shift/ctrl stack ops
 
 **Date:** 2026-05-15
