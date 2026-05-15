@@ -38,6 +38,18 @@ Across Tasks 13, 15, 18 of `session-qol-cluster-a` (3 data points), Opus reviewe
 
 ---
 
+## Test Layering Strategy (validated session-qol-cluster-a)
+
+- **Helper/utility math:** pure-logic tests in `test_*.gd` files (no panel calls). Examples: `SlotClickHandler.split_half`, `ctrl_click_max`, `ctrl_click_transfer` — all tested via direct calls in `test_slot_click_handler.gd` sub-suites #1, #2-#5, #8, #9, #11a.
+- **Dispatcher integration:** integration-tested at manual smoke gates (GATE 1, GATE 2, PAUSE 2). Player exercises the wired path in-game; controller validates against the spec acceptance matrix.
+- **Per-kind dispatcher max formulas** (1-2 line expressions, data-shape coupled): covered by integration smoke, **NOT unit-tested**. Examples: chest's `min(cursor.count, Chest.free_capacity(building))`, fuel's `free_units / energy_per`, building input's `min(cursor.count, max_stack - current)`.
+
+**Rationale:** dispatcher formulas wrap pure-logic helpers; helper bugs propagate (caught by helper unit tests); dispatcher bugs are caught at integration smoke when ctrl picker mis-opens or transfers wrong amounts. Adding unit tests for each dispatcher formula would inflate test count without catching bugs the helper tests + smoke don't catch.
+
+**When to deviate:** if a dispatcher formula has non-obvious branching (e.g., the silent-atomic-clamp case for fuel drop in `_drop_into_fuel`), DO write a pure-logic test for the formula itself (see sub-suite #9 for the precedent). The principle is "test the math when the math is hard," not "test every dispatcher line."
+
+---
+
 ## Inserter Arc — 2 of 6 sessions shipped
 
 **Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
