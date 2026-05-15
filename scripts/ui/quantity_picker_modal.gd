@@ -76,12 +76,17 @@ func open(anchor: Vector2, direction: String, label_item: String,
 		pos.x = 4
 	if pos.y < 0:
 		pos.y = 4
-	# Explicit visible flip BEFORE popup_exclusive_on_parent — in headless mode
-	# (no display server), popup_exclusive_on_parent may not flip the visible
-	# flag. Setting it here ensures both windowed AND headless contexts have
-	# consistent state for tests that check `picker.visible`.
+	# Set Window position + size BEFORE popup_exclusive_on_parent, AND also pass
+	# them as Rect2i (with explicit Vector2i conversion). Passing Vector2 to
+	# Rect2i previously was silently broken — embedded popups landed at
+	# top-left of viewport. Explicit Vector2i conversion fixes that.
+	position = Vector2i(pos)
+	size = Vector2i(picker_size)
+	# Explicit visible flip — popup_exclusive_on_parent may not flip the flag
+	# in headless mode (no display server). Setting here makes the contract
+	# consistent across windowed AND headless contexts.
 	visible = true
-	popup_exclusive_on_parent(get_parent(), Rect2i(pos, picker_size))
+	popup_exclusive_on_parent(get_parent(), Rect2i(Vector2i(pos), Vector2i(picker_size)))
 	_spinbox.grab_focus()
 	_spinbox.get_line_edit().select_all()
 
