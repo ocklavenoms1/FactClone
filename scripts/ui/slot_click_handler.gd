@@ -101,3 +101,68 @@ static func _handle_shift_player(slot: ItemStack, cursor: CursorStack) -> void:
 			cursor.clear()
 		return
 	# Different types → no-op (shift never swaps; plain LMB still swaps).
+
+
+## Returns the picker max-value for ctrl+LMB on a player-inventory slot.
+## Caller uses the returned value as the pre-open gate — 0 means "silent
+## no-op, do not open picker" per spec §6.1 + Q4 refinement.
+##
+## Direction is inferred from cursor/slot state:
+##   Empty cursor + slot with N → TAKE direction, max = N.
+##   Cursor M + empty slot → GIVE direction, max = M.
+##   Cursor M + slot K same type, max_stack S → GIVE, max = min(M, S-K).
+##   Different types → 0 (picker would have nothing meaningful to pick).
+##   Empty + empty → 0.
+##   Same-type slot at max_stack (S-K = 0) → 0 (no room to deposit).
+##
+## See spec §6.1 SpinBox bounds matrix.
+static func ctrl_click_max(slot: ItemStack, cursor: CursorStack) -> int:
+	if not cursor.has_item():
+		# TAKE direction.
+		if slot.is_empty():
+			return 0
+		return slot.count
+	# Cursor has item — GIVE direction.
+	if slot.is_empty():
+		return cursor.count
+	if slot.item_type == cursor.item_type:
+		var max_stack: int = Items.max_stack_of(slot.item_type)
+		return min(cursor.count, max_stack - slot.count)
+	# Different types — picker doesn't open (no meaningful exact-N transfer).
+	return 0
+
+
+## Commits an exact-N transfer on picker OK. Direction inferred from
+## cursor/slot state at call time (same rules as ctrl_click_max). N must
+## be in [1, ctrl_click_max(slot, cursor)]; caller is responsible for that
+## upper bound (the SpinBox enforces it in the live picker; n=0 is treated
+## as a defensive no-op).
+##
+## See spec §6.2 fuel picker (asymmetric labels are handled by callers;
+## this helper is player-slot only and operates in items).
+static func ctrl_click_transfer(slot: ItemStack, cursor: CursorStack, n: int) -> void:
+	if n <= 0:
+		return
+	if not cursor.has_item():
+		# TAKE n from slot.
+		if slot.is_empty():
+			return
+		cursor.pick(slot.item_type, n)
+		slot.count -= n
+		if slot.count <= 0:
+			slot.clear()
+		return
+	# Cursor has item — GIVE direction.
+	if slot.is_empty():
+		slot.item_type = cursor.item_type
+		slot.count = n
+		cursor.count -= n
+		if cursor.count <= 0:
+			cursor.clear()
+		return
+	if slot.item_type == cursor.item_type:
+		slot.count += n
+		cursor.count -= n
+		if cursor.count <= 0:
+			cursor.clear()
+	# Different types — no-op (picker shouldn't have opened; defensive).

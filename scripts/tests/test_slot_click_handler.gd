@@ -304,6 +304,102 @@ static func run(parent: Node) -> Dictionary:
 	panel10.queue_free()
 	_disconnect(world10); world10.queue_free()
 
+	# ---------- (11a) ctrl_click_max + ctrl_click_transfer player-slot paths ----------
+	# Tests the picker max-value computation across (cursor × slot) cells per
+	# spec §6.1, and the exact-N transfer logic per spec §6.2 + Q5.
+	# Pure-logic test — no panel, no scene tree. Tasks 19-21 will extend
+	# sub-suite #11 with chest/input/fuel cases (11b/c/d/e).
+
+	# ctrl_click_max cases (cursor × slot → expected max):
+
+	# Empty cursor + slot with 8 wheat → max=8 (TAKE all available).
+	var s11a_take := ItemStack.new(Items.Type.WHEAT, 8)
+	var c11a_take := CursorStack.new()
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_take, c11a_take) == 8,
+		"(11a) ctrl_max empty+8 → 8 (TAKE all available)")
+
+	# Cursor 6 wheat + empty slot → max=6 (GIVE all of cursor).
+	var s11a_give := ItemStack.new()
+	var c11a_give := CursorStack.new()
+	c11a_give.pick(Items.Type.WHEAT, 6)
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_give, c11a_give) == 6,
+		"(11a) ctrl_max cursor 6 + empty → 6 (GIVE all of cursor)")
+
+	# Cursor 40 yeast + slot 45 yeast (max_stack=50) → max = min(40, 5) = 5.
+	# Same-type capacity clamp per spec §6.1.
+	var s11a_clamp := ItemStack.new(Items.Type.YEAST, 45)
+	var c11a_clamp := CursorStack.new()
+	c11a_clamp.pick(Items.Type.YEAST, 40)
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_clamp, c11a_clamp) == 5,
+		"(11a) ctrl_max same-type clamp → 5 (min(40, 50-45)=5)")
+
+	# Cursor 5 wheat + slot 4 flour (different types) → max=0 (picker does not open per spec §6.1).
+	var s11a_diff := ItemStack.new(Items.Type.FLOUR, 4)
+	var c11a_diff := CursorStack.new()
+	c11a_diff.pick(Items.Type.WHEAT, 5)
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_diff, c11a_diff) == 0,
+		"(11a) ctrl_max different-type → 0 (no-op gate per spec §6.1)")
+
+	# Empty cursor + empty slot → max=0 (nothing to transfer per spec §6.1).
+	var s11a_empty := ItemStack.new()
+	var c11a_empty := CursorStack.new()
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_empty, c11a_empty) == 0,
+		"(11a) ctrl_max empty+empty → 0 (nothing to transfer)")
+
+	# Same-type slot at max_stack (S-K=0) → max=0 (no room to deposit per spec §6.1 + pre-open gate).
+	var s11a_full := ItemStack.new(Items.Type.WHEAT, 100)
+	var c11a_full := CursorStack.new()
+	c11a_full.pick(Items.Type.WHEAT, 5)
+	_check(failures, SlotClickHandler.ctrl_click_max(s11a_full, c11a_full) == 0,
+		"(11a) ctrl_max same-type slot at max_stack (100/100) → 0 (no room, picker gated)")
+
+	# ctrl_click_transfer round-trip cases (call after picker SpinBox confirm):
+
+	# TAKE N=3 from slot of 8: cursor 0→3, slot 8→5.
+	var s11a_t1 := ItemStack.new(Items.Type.WHEAT, 8)
+	var c11a_t1 := CursorStack.new()
+	SlotClickHandler.ctrl_click_transfer(s11a_t1, c11a_t1, 3)
+	_check(failures, c11a_t1.count == 3 and c11a_t1.item_type == Items.Type.WHEAT and s11a_t1.count == 5,
+		"(11a) ctrl_transfer TAKE 3 from 8 → cursor=3 wheat, slot=5")
+
+	# TAKE all (N=N): cursor 0→8, slot 8→0 (cleared).
+	var s11a_t2 := ItemStack.new(Items.Type.WHEAT, 8)
+	var c11a_t2 := CursorStack.new()
+	SlotClickHandler.ctrl_click_transfer(s11a_t2, c11a_t2, 8)
+	_check(failures, c11a_t2.count == 8 and s11a_t2.is_empty(),
+		"(11a) ctrl_transfer TAKE all (N=8 from 8) → cursor=8, slot empty")
+
+	# GIVE N=4 into empty slot: cursor 6→2, slot becomes 4 wheat.
+	var s11a_t3 := ItemStack.new()
+	var c11a_t3 := CursorStack.new()
+	c11a_t3.pick(Items.Type.WHEAT, 6)
+	SlotClickHandler.ctrl_click_transfer(s11a_t3, c11a_t3, 4)
+	_check(failures, s11a_t3.item_type == Items.Type.WHEAT and s11a_t3.count == 4 and c11a_t3.count == 2,
+		"(11a) ctrl_transfer GIVE 4 → slot=4 wheat, cursor=2")
+
+	# GIVE all (N=cursor.count) into empty slot: cursor 6→0 (cleared), slot becomes 6 wheat.
+	var s11a_t4 := ItemStack.new()
+	var c11a_t4 := CursorStack.new()
+	c11a_t4.pick(Items.Type.WHEAT, 6)
+	SlotClickHandler.ctrl_click_transfer(s11a_t4, c11a_t4, 6)
+	_check(failures, s11a_t4.item_type == Items.Type.WHEAT and s11a_t4.count == 6 and not c11a_t4.has_item(),
+		"(11a) ctrl_transfer GIVE all (N=6) → slot=6 wheat, cursor empty")
+
+	# GIVE N into same-type slot (merge): cursor 5 + slot 3 wheat → ctrl_transfer N=3 → slot=6, cursor=2.
+	var s11a_t5 := ItemStack.new(Items.Type.WHEAT, 3)
+	var c11a_t5 := CursorStack.new()
+	c11a_t5.pick(Items.Type.WHEAT, 5)
+	SlotClickHandler.ctrl_click_transfer(s11a_t5, c11a_t5, 3)
+	_check(failures, s11a_t5.count == 6 and c11a_t5.count == 2,
+		"(11a) ctrl_transfer GIVE 3 into same-type → slot=6, cursor=2")
+
+	# Defensive: N=0 is a no-op.
+	var s11a_t6 := ItemStack.new(Items.Type.WHEAT, 8)
+	var c11a_t6 := CursorStack.new()
+	SlotClickHandler.ctrl_click_transfer(s11a_t6, c11a_t6, 0)
+	_check(failures, not c11a_t6.has_item() and s11a_t6.count == 8,
+		"(11a) ctrl_transfer N=0 is no-op (defensive guard)")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
