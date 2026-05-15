@@ -113,8 +113,9 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		var slot_idx: int = _slot_under(event.position)
 		if slot_idx < 0:
-			# Click outside any slot — close (cursor persists).
-			_close()
+			# Click inside panel rect but not on a slot → no-op. Only Esc / close
+			# button / outside-panel-rect click should close (NOTES.md "Close-on-
+			# padding-click UX" item 8 — surfaced GATE 1 + PAUSE 2 user feedback).
 			return
 		_handle_left_click_player(slot_idx, _extract_mods(event))
 

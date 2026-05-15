@@ -218,21 +218,24 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, c7c.count == 3 and c7c.item_type == Items.Type.STRAW and int(buf7c[1][1]) == 2,
 		"(7c) output_multi shift+take sub_idx=1: cursor=3 straw, buf[1]=[STRAW,2]")
 
-	# ---------- (8) shift_fuel_take_units: lossy-WOOD on half of units ----------
-	# Fuel buffer is in UNITS (1 wood = 1, 1 coal = 4, 1 briquette = 8 per
-	# Burner.FUEL_VALUES). Take is always lossy WOOD regardless of deposit type.
-	# Pure-logic test: simulate the math, mirrors building_panel.gd _take_from_slot
-	# fuel arm post-Task-12 (split_half(units) if shift else units).
+	# ---------- (8) shift_fuel_take_items_same_type ----------
+	# PAUSE 2 revision (user feedback during session-qol-cluster-a smoke):
+	# fuel TAKE returns items of last_fuel_item type, NOT lossy WOOD. Falls
+	# back to WOOD when last_fuel_item missing OR items_avail == 0 (stranded
+	# sub-item-energy). Pure-logic test mirrors building_panel.gd's fuel arm.
 	#
-	# Scenario: buffer = 16 units (e.g., was 4 coal). Shift+take → cursor=8 wood,
-	# buffer remaining = 8 units.
+	# Scenario: buffer = 16 units (4 coal deposited), last_fuel_item = COAL,
+	# energy_per = 4. items_avail = 16/4 = 4 coal. Shift+take → split_half(4)=2
+	# coal, buffer -= 2*4 = 8 units.
 	var units8: int = 16
+	var energy_per8: int = int(Burner.FUEL_VALUES[Items.Type.COAL])  # 4
+	var items_avail8: int = units8 / energy_per8  # 4
+	var n8: int = SlotClickHandler.split_half(items_avail8)  # 2
 	var c8 := CursorStack.new()
-	var n8: int = SlotClickHandler.split_half(units8)
-	c8.pick(Items.Type.WOOD, n8)
-	units8 -= n8
-	_check(failures, c8.count == 8 and c8.item_type == Items.Type.WOOD and units8 == 8,
-		"(8) fuel shift+take: cursor=8 wood, buffer remaining=8 units (split_half(16)=8)")
+	c8.pick(Items.Type.COAL, n8)
+	units8 -= n8 * energy_per8  # 16 - 8 = 8
+	_check(failures, c8.count == 2 and c8.item_type == Items.Type.COAL and units8 == 8,
+		"(8) fuel shift+take same-type: cursor=2 coal, buffer remaining=8 units")
 
 	# ---------- (9) shift_fuel_drop_items_atomic: silent atomic-clamp ----------
 	# Spec §5.2 fuel-drop: operates in ITEMS, atomic via FUEL_VALUES,

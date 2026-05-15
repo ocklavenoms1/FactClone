@@ -191,8 +191,9 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		var hit = _hit_test(event.position)
 		if hit is int and hit < 0:
-			# Click outside any slot — close panel (cursor persists).
-			close()
+			# Click inside panel rect but not on a slot → no-op. Only Esc / close
+			# button / outside-panel-rect click should close (NOTES.md "Close-on-
+			# padding-click UX" item 8 — surfaced GATE 1 + PAUSE 2 user feedback).
 			return
 		if hit is int:
 			# Player inventory slot.
@@ -432,27 +433,39 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 				buf2.remove_at(sub_idx)
 			building.state[field] = buf2
 		"fuel":
-			# Shift+take: split_half(units), still lossy WOOD per spec §5.2.
-			# Task 13 adds the test sub-suite; this implementation lands here.
+			# PAUSE 2 revision (user feedback during session-qol-cluster-a smoke):
+			# Take returns items of last_fuel_item type (display already uses this
+			# at info_lines fuel arm). Falls back to WOOD lossy (1:1) when
+			# last_fuel_item missing OR remaining units < one item of that type
+			# (so stranded sub-item-energy can be recovered as wood).
+			# Original spec §5a / §6.2 was lossy WOOD always — reversed per user
+			# request after pre-ship smoke surfaced the surprise factor.
 			var units: int = int(building.state.get("fuel_buffer", 0))
 			if units <= 0:
 				return
-			# Ctrl+LMB → picker. Asymmetric label per spec §6.2: TAKE direction
-			# is in units (returned as WOOD lossy).
+			var ret_item: int = _fuel_take_item_type()
+			var energy_per: int = int(Burner.FUEL_VALUES.get(ret_item, 1))
+			var items_avail: int = units / energy_per
+			if items_avail <= 0:
+				# Less than 1 item's worth of last_fuel_item — fall back to WOOD
+				# lossy so player isn't stuck with stranded sub-item-energy.
+				ret_item = Items.Type.WOOD
+				energy_per = 1
+				items_avail = units
+			# Ctrl+LMB → picker (now in items of ret_item, not units).
 			if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
-				var max_n3: int = units
 				var anchor3: Vector2 = _building_slot_anchor(slot_def, sub_idx)
-				quantity_picker.open(anchor3, "Take", "fuel units (returned as wood)", max_n3, max_n3,
+				quantity_picker.open(anchor3, "Take", Items.name_of(ret_item), items_avail, items_avail,
 					func(n: int):
-						_fuel_ctrl_take(n)
+						_fuel_ctrl_take(n, ret_item, energy_per)
 						queue_redraw())
 				return
-			var n: int = SlotClickHandler.split_half(units) if shift else units
-			cursor.pick(Items.Type.WOOD, n)
-			building.state["fuel_buffer"] = units - n
+			var n: int = SlotClickHandler.split_half(items_avail) if shift else items_avail
+			cursor.pick(ret_item, n)
+			building.state["fuel_buffer"] = units - n * energy_per
 			if not shift:
 				building.state["fuel_burn_progress"] = 0
-			_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % n)
+			_toast("Retrieved %d %s." % [n, Items.name_of(ret_item)])
 		"filter":
 			_toast("Filter holds an item TYPE, not items. Drop to set, right-click to clear.")
 
@@ -482,20 +495,34 @@ func _input_output_ctrl_take(field: String, sub_idx: int, n: int, kind: String) 
 			buf.clear()
 	building.state[field] = buf
 
-## Ctrl picker confirm helper for fuel TAKE direction. Lossy WOOD conversion
-## per spec §5a + §6.2 — buffer decrements by exactly n units; cursor gets
-## n wood. fuel_burn_progress is NOT reset for partial takes (only full take
-## clears progress, but ctrl picker is always partial-by-intent).
-func _fuel_ctrl_take(n: int) -> void:
+## Returns the item type to use when taking from the fuel buffer. Uses
+## last_fuel_item if valid (i.e., it's a key in Burner.FUEL_VALUES), otherwise
+## falls back to WOOD (the universal fuel — every save with non-zero buffer
+## has SOME fuel type, but the field may be missing on very old saves).
+## Used by both shift+take and ctrl+picker take to align item-take semantics
+## with the existing display semantics (info_lines fuel arm).
+func _fuel_take_item_type() -> int:
+	var last_item: int = int(building.state.get("last_fuel_item", -1))
+	if last_item < 0 or not Burner.FUEL_VALUES.has(last_item):
+		return Items.Type.WOOD
+	return last_item
+
+## Ctrl picker confirm helper for fuel TAKE direction. Returns items of
+## ret_item type (per PAUSE 2 revision — see _take_from_slot "fuel" arm).
+## Caller passes ret_item + energy_per computed at picker.open() time, so
+## modal-gate guarantees consistency between picker default/max and the
+## confirm callback. fuel_burn_progress is NOT reset for ctrl partial takes.
+func _fuel_ctrl_take(n: int, ret_item: int = Items.Type.WOOD, energy_per: int = 1) -> void:
 	if n <= 0:
 		return
 	var units: int = int(building.state.get("fuel_buffer", 0))
-	var amt: int = min(n, units)
+	var items_avail: int = units / energy_per
+	var amt: int = min(n, items_avail)
 	if amt <= 0:
 		return
-	cursor.pick(Items.Type.WOOD, amt)
-	building.state["fuel_buffer"] = units - amt
-	_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % amt)
+	cursor.pick(ret_item, amt)
+	building.state["fuel_buffer"] = units - amt * energy_per
+	_toast("Retrieved %d %s." % [amt, Items.name_of(ret_item)])
 
 ## Ctrl picker confirm helper for input slot GIVE direction. Atomic drop
 ## of n items into the buffer; cursor decrements + clears on zero.

@@ -13,7 +13,7 @@ extends RefCounted
 ##      b. Drop wrong-type rejected (toast called)
 ##      c. Drop into output slot rejected (read-only)
 ##      d. Drop into fuel slot — converts items to units (1 wood=1, 1 coal=4)
-##      e. Take from fuel slot — lossy (1 unit → 1 wood)
+##      e. Take from fuel slot — returns items of last_fuel_item type (PAUSE 2)
 ##      f. Take from output_multi sub-slot — entries shift up via remove_at
 ##   7. Save/load round-trip preserves cursor stack via player_progression
 
@@ -200,10 +200,12 @@ static func run(parent: Node) -> Dictionary:
 		"drop 2 coal: fuel_buffer should be 8 units, got %d" % int(smelter.state["fuel_buffer"]))
 	_check(failures, not cursor.has_item(), "after fuel drop: cursor should be empty")
 
-	# 6e. Take from fuel — lossy: 8 units → 8 wood.
+	# 6e. Take from fuel — PAUSE 2 revision: returns items of last_fuel_item
+	# type (COAL here, deposited at 6d above). 8 units / 4 = 2 coal. Falls back
+	# to WOOD if last_fuel_item is missing OR remaining units < 1 item's energy.
 	panel._take_from_slot(fuel_slot_def, -1, SlotClickHandler.MOD_NONE)
-	_check(failures, cursor.item_type == Items.Type.WOOD and cursor.count == 8,
-		"lossy take from fuel: cursor should hold WOOD ×8 (1 unit = 1 wood), got %s ×%d" % [Items.name_of(cursor.item_type), cursor.count])
+	_check(failures, cursor.item_type == Items.Type.COAL and cursor.count == 2,
+		"fuel take returns last_fuel_item type: cursor should hold COAL ×2 (8 units / 4 = 2), got %s ×%d" % [Items.name_of(cursor.item_type), cursor.count])
 	_check(failures, int(smelter.state["fuel_buffer"]) == 0,
 		"after take: fuel_buffer should be 0")
 	cursor.clear()
