@@ -91,10 +91,13 @@ const REACH_DEFAULT: int = 1
 
 # REFACTORED from `const ARM_LENGTH: float = 0.55` (line 72 of current code).
 # Baseline 0.55 preserved for INSERTER / FAST_INSERTER — pure additive change.
+# Long-reach: 2.00 — physically reaches the 2-tile-away source/dest (Q5
+# revision during Task 4 smoke gate: original 1.10 stylized choice was
+# confusing; players couldn't tell long-reach apart from basic visually).
 const ARM_LENGTH_BY_TYPE: Dictionary = {
     Buildings.Type.INSERTER:            0.55,
     Buildings.Type.FAST_INSERTER:       0.55,
-    Buildings.Type.LONG_REACH_INSERTER: 1.10,    # 2x — visually communicates reach
+    Buildings.Type.LONG_REACH_INSERTER: 2.00,    # physically reaches 2-tile-away source/dest
 }
 const ARM_LENGTH_DEFAULT: float = 0.55
 

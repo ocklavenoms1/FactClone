@@ -431,9 +431,9 @@ static func run(parent: Node) -> Dictionary:
 	# Reach lookup returns 2.
 	_check(failures, Inserter.reach(lr) == 2,
 		"(12) long-reach reach should be 2, got %d" % Inserter.reach(lr))
-	# Arm length returns 1.10.
-	_check(failures, abs(Inserter.arm_length(lr) - 1.10) < 0.001,
-		"(12) long-reach arm_length should be 1.10, got %f" % Inserter.arm_length(lr))
+	# Arm length returns 2.00 (physically reaches 2-tile-away source/dest).
+	_check(failures, abs(Inserter.arm_length(lr) - 2.00) < 0.001,
+		"(12) long-reach arm_length should be 2.00, got %f" % Inserter.arm_length(lr))
 	# Body color returns the rust-red entry (not the default).
 	var lr_color: Color = Inserter.body_color(lr)
 	# Tolerance 0.001 matches arm_length comparison above — Color floats are

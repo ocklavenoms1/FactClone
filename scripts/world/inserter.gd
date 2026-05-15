@@ -96,7 +96,7 @@ const REACH_DEFAULT: int = 1
 const ARM_LENGTH_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:             0.55,
 	Buildings.Type.FAST_INSERTER:        0.55,
-	Buildings.Type.LONG_REACH_INSERTER:  1.10,    # 2x — visually communicates reach
+	Buildings.Type.LONG_REACH_INSERTER:  2.00,    # physically reaches 2-tile-away source/dest
 }
 const ARM_LENGTH_DEFAULT: float = 0.55
 
