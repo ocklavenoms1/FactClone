@@ -481,33 +481,35 @@ static func run(parent: Node) -> Dictionary:
 	if not world.place_building(Buildings.Type.BELT, Vector2i(4, 0), Belt.DIR_E):
 		_disconnect(world); world.queue_free()
 		return { "ok": false, "message": "(14) dest belt placement at (4,0) failed" }
-	var lr2: Building = world.building_at(Vector2i(2, 0))
-	var src2: Building = world.building_at(Vector2i(0, 0))
-	var belt: Building = world.building_at(Vector2i(4, 0))
+	# Locals suffixed with _14 for consistency with sub-cases (11)(12)(13) and
+	# to avoid the `belt`-shadows-`Belt`-class cognitive collision.
+	var lr_14: Building = world.building_at(Vector2i(2, 0))
+	var src_14: Building = world.building_at(Vector2i(0, 0))
+	var belt_14: Building = world.building_at(Vector2i(4, 0))
 	# Confirm source_tile / dest_tile compute correctly with the 2-tile reach.
-	_check(failures, Inserter.source_tile(lr2) == Vector2i(0, 0),
-		"(14) source_tile should be (0,0), got %s" % str(Inserter.source_tile(lr2)))
-	_check(failures, Inserter.dest_tile(lr2) == Vector2i(4, 0),
-		"(14) dest_tile should be (4,0), got %s" % str(Inserter.dest_tile(lr2)))
+	_check(failures, Inserter.source_tile(lr_14) == Vector2i(0, 0),
+		"(14) source_tile should be (0,0), got %s" % str(Inserter.source_tile(lr_14)))
+	_check(failures, Inserter.dest_tile(lr_14) == Vector2i(4, 0),
+		"(14) dest_tile should be (4,0), got %s" % str(Inserter.dest_tile(lr_14)))
 	# Pre-fuel + load source.
-	lr2.state["fuel_buffer"] = 100
-	src2.state["bag"] = [[Items.Type.WHEAT, 5]]
+	lr_14.state["fuel_buffer"] = 100
+	src_14.state["bag"] = [[Items.Type.WHEAT, 5]]
 	# Run 30 ticks — one full cycle for long-reach.
 	for _i in 30:
 		TickSystem.current_tick += 1
 		TickSystem.tick.emit(TickSystem.current_tick)
 	# Belt should now contain exactly one wheat in one of its slots.
-	var belt_slots: Array = belt.state.get("slots", [])
-	var wheat_on_belt: int = 0
-	for s in belt_slots:
+	var belt_slots_14: Array = belt_14.state.get("slots", [])
+	var wheat_on_belt_14: int = 0
+	for s in belt_slots_14:
 		if int(s) == Items.Type.WHEAT:
-			wheat_on_belt += 1
-	_check(failures, wheat_on_belt == 1,
-		"(14) belt should contain 1 wheat after 1 cycle, got %d" % wheat_on_belt)
+			wheat_on_belt_14 += 1
+	_check(failures, wheat_on_belt_14 == 1,
+		"(14) belt should contain 1 wheat after 1 cycle, got %d" % wheat_on_belt_14)
 	# Source chest should have 4 wheat remaining.
-	var src2_count: int = _bag_count(src2.state.get("bag", []), Items.Type.WHEAT)
-	_check(failures, src2_count == 4,
-		"(14) source chest should have 4 wheat after 1 cycle, got %d" % src2_count)
+	var src_14_count: int = _bag_count(src_14.state.get("bag", []), Items.Type.WHEAT)
+	_check(failures, src_14_count == 4,
+		"(14) source chest should have 4 wheat after 1 cycle, got %d" % src_14_count)
 
 	_disconnect(world); world.queue_free()
 
