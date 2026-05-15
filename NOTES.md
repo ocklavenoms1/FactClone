@@ -62,6 +62,18 @@ Across Tasks 13, 15, 18 of `session-qol-cluster-a` (3 data points), Opus reviewe
 
 ---
 
+## Subagent Protocol Gap (discovered session-qol-cluster-a Task 23)
+
+Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't parse against its actual base class." Code reviewers read diffs at Tasks 18-22 without instantiating or `--headless --import` verifying `scripts/ui/quantity_picker_modal.gd` against PopupPanel/Window API. The script called `get_viewport_rect()` — a `CanvasItem` method that does NOT exist on `Window` (PopupPanel's actual base). The bug was LATENT for 5 task cycles: test_runner doesn't load main.gd (only test_*.gd files), so the parse error never triggered during test runs. Game launched fine because `@onready var quantity_picker: QuantityPickerModal` resolved to null when the script failed to parse, and Task 19's defensive `quantity_picker != null` gate silently no-op'd ctrl+click. GATE 2 smoke tested shift only — ctrl was never exercised. Bug was caught only when Task 23 implementer tried to instantiate the picker scene in a sub-suite.
+
+**Future enhancement candidate:** implementer briefs for tasks creating `.gd` files with `extends <UnusualBaseClass>` (anything beyond Node/Control/Reference/RefCounted) should require a `godot --headless --import` verification step before reporting DONE. This catches parse errors against base-class APIs that test_runner doesn't load.
+
+**Cost:** ~1 additional command per qualifying task (~30s). **Benefit:** catch parse-against-base-class bugs at creation rather than at PAUSE/smoke (which is hours or sessions later, with reviewer + integration cycles consumed in between).
+
+**Tangentially:** code-quality reviewer briefs could also request "run `--headless --import` against the new/modified script files to confirm they parse against actual API" as a sanity step. The line-quoting protocol (validated this session) catches false-positive omissions but doesn't catch "this method doesn't exist on the actual base class."
+
+---
+
 ## Inserter Arc — 2 of 6 sessions shipped
 
 **Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) shipped. 4 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
