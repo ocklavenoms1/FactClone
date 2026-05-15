@@ -21,7 +21,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_inserter.json"
 
 static func test_name() -> String:
-	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression + long-reach tier + cross-tile)"
+	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression + long-reach tier + cross-tile + long-reach save)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -513,8 +513,63 @@ static func run(parent: Node) -> Dictionary:
 
 	_disconnect(world); world.queue_free()
 
+	# ===========================================================================
+	# (15) LONG-REACH SAVE ROUND-TRIP — state preservation across save/load.
+	# Place a long-reach inserter with held item + partial cycle_progress +
+	# partial fuel buffer + non-default fuel item; save; tear down + recreate
+	# world; load; verify all state preserved. Validates append-only enum
+	# compatibility (LONG_REACH_INSERTER gets next int in enum order) and
+	# .get()-defaulted state fields on the persistence path. Save schema
+	# unchanged at v18 — no migration needed.
+	# ===========================================================================
+	world = _make_world(parent)
+	world.place_building(Buildings.Type.LONG_REACH_INSERTER, Vector2i(10, 10), Belt.DIR_S)
+	var lr_15: Building = world.building_at(Vector2i(10, 10))
+	# Set state we want to preserve.
+	lr_15.state["fuel_buffer"] = 42
+	lr_15.state["last_fuel_item"] = Items.Type.COAL
+	lr_15.state["cycle_progress"] = 0.33
+	lr_15.state["state"] = Inserter.STATE_WORKING_OUT
+	lr_15.state["held_item_buffer"] = [[Items.Type.WHEAT, 1]]
+	# Save.
+	var orig_path_15: String = SaveSystem.save_path
+	SaveSystem.save_path = TEST_SAVE_PATH
+	var player_a_15 := Node2D.new()
+	parent.add_child(player_a_15)
+	if not SaveSystem.save_game(world, player_a_15, Inventory.new(16)):
+		_cleanup(world, player_a_15, null, null, orig_path_15)
+		return { "ok": false, "message": "save_game failed during (15) long-reach save-roundtrip test" }
+	# Load into fresh world.
+	var world_b_15 = GridWorldScript.new()
+	parent.add_child(world_b_15)
+	var player_b_15 := Node2D.new()
+	parent.add_child(player_b_15)
+	var result_15: LoadResult = SaveSystem.load_game(world_b_15, player_b_15, Inventory.new(16))
+	if not result_15.success:
+		_cleanup(world, player_a_15, world_b_15, player_b_15, orig_path_15)
+		return { "ok": false, "message": "load_game failed during (15): %s" % result_15.error_message }
+	# Verify state preserved.
+	var lr_after_15: Building = world_b_15.building_at(Vector2i(10, 10))
+	_check(failures, lr_after_15 != null and lr_after_15.type == Buildings.Type.LONG_REACH_INSERTER,
+		"(15) loaded building at (10,10) should be LONG_REACH_INSERTER, got %s" % (str(lr_after_15.type) if lr_after_15 != null else "null"))
+	if lr_after_15 != null:
+		_check(failures, int(lr_after_15.state.get("dir", -1)) == Belt.DIR_S,
+			"(15) loaded dir should be DIR_S, got %d" % int(lr_after_15.state.get("dir", -1)))
+		_check(failures, int(lr_after_15.state.get("fuel_buffer", 0)) == 42,
+			"(15) loaded fuel_buffer should be 42, got %d" % int(lr_after_15.state.get("fuel_buffer", 0)))
+		_check(failures, int(lr_after_15.state.get("last_fuel_item", -1)) == Items.Type.COAL,
+			"(15) loaded last_fuel_item should be COAL, got %d" % int(lr_after_15.state.get("last_fuel_item", -1)))
+		_check(failures, abs(float(lr_after_15.state.get("cycle_progress", 0.0)) - 0.33) < 0.001,
+			"(15) loaded cycle_progress should be 0.33, got %f" % float(lr_after_15.state.get("cycle_progress", 0.0)))
+		_check(failures, int(lr_after_15.state.get("state", -1)) == Inserter.STATE_WORKING_OUT,
+			"(15) loaded state should be STATE_WORKING_OUT, got %d" % int(lr_after_15.state.get("state", -1)))
+		var held_buf_15: Array = lr_after_15.state.get("held_item_buffer", [])
+		_check(failures, held_buf_15.size() == 1 and int(held_buf_15[0][0]) == Items.Type.WHEAT,
+			"(15) loaded held_item_buffer should be [[WHEAT,1]], got %s" % str(held_buf_15))
+	_cleanup(world, player_a_15, world_b_15, player_b_15, orig_path_15)
+
 	if failures.is_empty():
-		return { "ok": true, "message": "14 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach + long-reach cross-tile transport" }
+		return { "ok": true, "message": "15 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach + long-reach cross-tile transport + long-reach save round-trip" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
