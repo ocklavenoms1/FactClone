@@ -436,7 +436,9 @@ static func run(parent: Node) -> Dictionary:
 		"(12) long-reach arm_length should be 1.10, got %f" % Inserter.arm_length(lr))
 	# Body color returns the rust-red entry (not the default).
 	var lr_color: Color = Inserter.body_color(lr)
-	_check(failures, abs(lr_color.r - 0.65) < 0.01 and abs(lr_color.g - 0.30) < 0.01 and abs(lr_color.b - 0.22) < 0.01,
+	# Tolerance 0.001 matches arm_length comparison above — Color floats are
+	# exact to <1e-6, so the looser 0.01 used pre-fix-up was 10000x slack.
+	_check(failures, abs(lr_color.r - 0.65) < 0.001 and abs(lr_color.g - 0.30) < 0.001 and abs(lr_color.b - 0.22) < 0.001,
 		"(12) long-reach body_color should be rust-red (0.65, 0.30, 0.22), got (%f, %f, %f)" % [lr_color.r, lr_color.g, lr_color.b])
 
 	# ===========================================================================

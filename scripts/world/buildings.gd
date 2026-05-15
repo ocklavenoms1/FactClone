@@ -80,13 +80,10 @@ enum Type {
 	# extend the same data tables.
 	FAST_INSERTER,
 	# Inserter Arc Session 3 (session-inserter-long-reach): LONG_REACH tier.
-	# Same code path as basic + fast (Inserter.tick is parametric on b.type),
-	# but reach is 2 tiles (REACH_BY_TYPE table) and cycle is 1.5s. No filter
-	# — filter is a fast-axis capability, long-reach is the reach-axis upgrade.
-	# Players choose long-reach to bridge a 1-tile gap without an extra building;
-	# slower cycle balances the reach advantage. Color: rust-red (weathered
-	# industrial). Future combinations (long-reach-fast, long-reach-electric)
-	# extend the same data tables in later sessions.
+	# Reach is 2 tiles (REACH_BY_TYPE), cycle is 1.5s, no filter (filter is a
+	# fast-axis capability; long-reach is the reach axis). Rust-red color.
+	# Future long-reach-fast / long-reach-electric combinations extend the
+	# same parametric tables in later sessions.
 	LONG_REACH_INSERTER,
 }
 
