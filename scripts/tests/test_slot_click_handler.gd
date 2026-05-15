@@ -400,6 +400,85 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, not c11a_t6.has_item() and s11a_t6.count == 8,
 		"(11a) ctrl_transfer N=0 is no-op (defensive guard)")
 
+	# ---------- (12) ctrl_picker_confirm_cancel_gate ----------
+	# Tests ctrl picker orchestration: caller-side gate + confirm + cancel paths.
+	# Pure-logic test — mocks confirm_cb via Callable closure capturing test-local
+	# state in an Array (reference semantics). Picker scene integration at PAUSE 2.
+
+	# (12a) Confirm path: simulate picker open + Enter. cb fires with N=3.
+	var s12a := ItemStack.new(Items.Type.WHEAT, 8)
+	var c12a := CursorStack.new()
+	var called12a: Array = [false]
+	var called_n12a: Array = [0]
+	var cb12a: Callable = func(n: int):
+		called12a[0] = true
+		called_n12a[0] = n
+		SlotClickHandler.ctrl_click_transfer(s12a, c12a, n)
+	# Caller-side orchestration: compute max, gate on >0, simulate picker confirm.
+	var max_n12a: int = SlotClickHandler.ctrl_click_max(s12a, c12a)
+	if max_n12a > 0:
+		# In live code, picker.open(...) shows the dialog; on Enter, cb.call(N).
+		# We simulate "user typed 3, pressed Enter" by direct cb invocation.
+		cb12a.call(3)
+	_check(failures, max_n12a == 8 and called12a[0] and called_n12a[0] == 3,
+		"(12a) confirm path: max=8, cb invoked with N=3")
+	_check(failures, c12a.count == 3 and s12a.count == 5,
+		"(12a) confirm transfer: slot 8→5, cursor 0→3")
+
+	# (12b) Cancel path: simulate picker open + Esc/Cancel/click-outside.
+	# cb NEVER fires; state unchanged.
+	var s12b := ItemStack.new(Items.Type.WHEAT, 8)
+	var c12b := CursorStack.new()
+	var called12b: Array = [false]
+	var cb12b: Callable = func(_n: int):
+		called12b[0] = true
+	var max_n12b: int = SlotClickHandler.ctrl_click_max(s12b, c12b)
+	# Note: we DO NOT call cb12b. This simulates "picker opened but user cancelled."
+	# The picker's hide() path on Esc/Cancel/click-outside does NOT invoke confirm_cb.
+	_check(failures, max_n12b == 8 and not called12b[0],
+		"(12b) cancel path: max would have been 8, but cb NOT invoked")
+	_check(failures, s12b.count == 8 and not c12b.has_item(),
+		"(12b) cancel state: slot still 8, cursor still empty")
+
+	# (12c) Pre-open gate: max == 0 means caller's `if max_n > 0` gate suppresses
+	# the picker.open() call entirely. cb never gets the chance to fire.
+	# Three gate cells per spec §6.1: empty+empty, different-type, same-type-at-max_stack.
+
+	# (12c.empty) Empty cursor + empty slot → max=0.
+	var s12c_empty := ItemStack.new()
+	var c12c_empty := CursorStack.new()
+	var called12c_empty: Array = [false]
+	var cb12c_empty: Callable = func(_n: int): called12c_empty[0] = true
+	var max_n12c_empty: int = SlotClickHandler.ctrl_click_max(s12c_empty, c12c_empty)
+	if max_n12c_empty > 0:
+		cb12c_empty.call(max_n12c_empty)  # gated — should not execute
+	_check(failures, max_n12c_empty == 0 and not called12c_empty[0],
+		"(12c.empty) gate: empty+empty → max=0, cb NOT invoked")
+
+	# (12c.diff) Different-type cursor + slot → max=0.
+	var s12c_diff := ItemStack.new(Items.Type.FLOUR, 5)
+	var c12c_diff := CursorStack.new()
+	c12c_diff.pick(Items.Type.WHEAT, 3)
+	var called12c_diff: Array = [false]
+	var cb12c_diff: Callable = func(_n: int): called12c_diff[0] = true
+	var max_n12c_diff: int = SlotClickHandler.ctrl_click_max(s12c_diff, c12c_diff)
+	if max_n12c_diff > 0:
+		cb12c_diff.call(max_n12c_diff)
+	_check(failures, max_n12c_diff == 0 and not called12c_diff[0],
+		"(12c.diff) gate: different-type → max=0, cb NOT invoked")
+
+	# (12c.full) Same-type cursor + slot at max_stack → max=0.
+	var s12c_full := ItemStack.new(Items.Type.WHEAT, 100)  # WHEAT max_stack=100
+	var c12c_full := CursorStack.new()
+	c12c_full.pick(Items.Type.WHEAT, 5)
+	var called12c_full: Array = [false]
+	var cb12c_full: Callable = func(_n: int): called12c_full[0] = true
+	var max_n12c_full: int = SlotClickHandler.ctrl_click_max(s12c_full, c12c_full)
+	if max_n12c_full > 0:
+		cb12c_full.call(max_n12c_full)
+	_check(failures, max_n12c_full == 0 and not called12c_full[0],
+		"(12c.full) gate: same-type at max_stack → max=0, cb NOT invoked")
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all sub-suites pass: regression + shift+take + split_half util sanity" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
