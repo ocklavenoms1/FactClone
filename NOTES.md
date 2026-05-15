@@ -83,11 +83,15 @@ When flagging missing code or omitted lines, quote the exact line(s) by line num
    - Migration concern: muscle memory of long-time players may rely on the current behavior; surveying decision worth a brief design-pass.
    Possibly bundled with Cluster B's tooltip work (items 4+5+7) since both address panel discoverability/feedback. ~10-30 lines depending on resolution.
 
+**One UX wart captured during session-qol-cluster-a GATE 2 smoke:**
+
+9. **Chest deposit-on-same-type-slot triggers deposit-and-take-back.** Clicking a chest bag slot that already has the SAME item type as the cursor triggers the swap-pickup branch at `chest_panel.gd:152-162` unconditionally: `_bag_add` cursor's items into the bag (merging with the existing entry), then because `view_present` is true, immediately `_bag_remove` the (now-combined) entry and `cursor.pick` it back. Net effect: cursor's 5 wheat + chest's 3 wheat → cursor ends with 8 wheat, chest empty. Player intent ("deposit my 5 wheat into the existing 3 wheat") produces the unintended outcome ("now I have 8 wheat in cursor and the chest is empty"). Factorio convention is "click to deposit (merge silently into matching slot), cursor decrements to 0; only swap when types differ." Pre-existing pre-Cluster-A; behavior also LOCKED IN by `test_building_ui_2.gd:122` assertion (`Chest._bag_count(... WHEAT) == 50` after deposit). Decision: defer to Cluster B UX polish session — not blocking Cluster A ship. Fix is ~5 lines: add `if item_type2 == cursor.item_type: cursor.clear(); return` before the swap-pickup, plus update `test_building_ui_2.gd:122` assertion to reflect the new clean-deposit semantic.
+
 **Architectural notes:**
 - Items 1+2+3 form a cluster (click-handling). Land together.
-- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — item 8 may bundle in.
+- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — items 8+9 may bundle in (both chest-panel/click UX worts).
 - Item 6 is standalone (player movement / placement).
-- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7+8, then 6.
+- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7+8+9, then 6.
 
 **Save schema impact:** none expected. Stack-split / picker / tooltips / movement are all UI-layer + read-only checks. Walkable flag is data registry, not save state.
 
