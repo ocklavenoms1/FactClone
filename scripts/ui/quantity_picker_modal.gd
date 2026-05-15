@@ -64,9 +64,9 @@ func open(anchor: Vector2, direction: String, label_item: String,
 	# Anchor placement with viewport-edge flip per spec §4.3 / Q4b.
 	var picker_size: Vector2 = size
 	# PopupPanel extends Window, not CanvasItem — get_viewport_rect lives on
-	# CanvasItem. Use the parent Control's viewport-rect for edge-flip math
-	# (parent is HUD, which is a Control, so get_viewport_rect works there).
-	var vp: Vector2 = get_parent().get_viewport_rect().size
+	# CanvasItem. Use the SceneTree root's size for edge-flip math, which
+	# works regardless of parent type (Control in game, Node in tests).
+	var vp: Vector2 = Vector2(get_tree().root.size)
 	var pos: Vector2 = anchor + Vector2(60, -40)
 	if pos.x + picker_size.x > vp.x:
 		pos.x = anchor.x - (60 + picker_size.x)
@@ -76,6 +76,11 @@ func open(anchor: Vector2, direction: String, label_item: String,
 		pos.x = 4
 	if pos.y < 0:
 		pos.y = 4
+	# Explicit visible flip BEFORE popup_exclusive_on_parent — in headless mode
+	# (no display server), popup_exclusive_on_parent may not flip the visible
+	# flag. Setting it here ensures both windowed AND headless contexts have
+	# consistent state for tests that check `picker.visible`.
+	visible = true
 	popup_exclusive_on_parent(get_parent(), Rect2i(pos, picker_size))
 	_spinbox.grab_focus()
 	_spinbox.get_line_edit().select_all()
