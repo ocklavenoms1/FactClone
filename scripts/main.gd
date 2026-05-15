@@ -205,6 +205,10 @@ func _ready() -> void:
 			panel.cursor = cursor
 			panel.inventory = player_inventory
 			panel.toast_callback = _show_toast
+			# Task 20: every BuildingPanel subclass shares the same picker
+			# so ctrl+LMB on player-side slots (and chest-bag slots in
+			# chest_panel) can route to it.
+			panel.quantity_picker = quantity_picker
 	# Player gates movement on any building panel being open.
 	player.building_panels = all_panels
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.

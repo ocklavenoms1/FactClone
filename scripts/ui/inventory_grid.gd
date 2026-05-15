@@ -123,14 +123,15 @@ func _handle_left_click_player(slot_idx: int, mods: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
-	# Ctrl+LMB → quantity picker (spec §6). Pre-open gate on ctrl_click_max > 0.
+	# Ctrl+LMB → quantity picker (spec §6.1). Pre-open gate on ctrl_click_max > 0.
 	if mods & SlotClickHandler.MOD_CTRL != 0 and quantity_picker != null:
 		var max_n: int = SlotClickHandler.ctrl_click_max(slot, cursor)
 		if max_n <= 0:
 			return  # silent no-op gate per spec §6.1
+		var giving: bool = cursor.has_item()
 		var anchor: Vector2 = _slot_rect(slot_idx).get_center() + global_position
-		var direction: String = "Take" if not cursor.has_item() else "Give"
-		var label_item: String = Items.name_of(slot.item_type if not cursor.has_item() else cursor.item_type)
+		var direction: String = "Give" if giving else "Take"
+		var label_item: String = Items.name_of(cursor.item_type if giving else slot.item_type)
 		quantity_picker.open(anchor, direction, label_item, max_n, max_n,
 			func(n: int):
 				SlotClickHandler.ctrl_click_transfer(slot, cursor, n)

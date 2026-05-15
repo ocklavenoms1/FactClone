@@ -41,6 +41,10 @@ const STATUS_BAD: Color = Color(1.00, 0.45, 0.45)
 var cursor: CursorStack = null
 var inventory: Inventory = null
 var toast_callback: Callable = Callable()
+# Quantity picker (Task 20). Set by main.gd. Ctrl+LMB on a player-side slot
+# (or chest-bag slot in chest_panel) opens the picker with a confirm Callable.
+# Plain LMB / shift+LMB unaffected — they still delegate to SlotClickHandler.
+var quantity_picker: QuantityPickerModal = null
 
 # Building this panel is currently bound to. Set by open(); cleared by close().
 var building: Building = null
@@ -217,6 +221,21 @@ func _handle_player_slot_click(slot_idx: int, mods: int) -> void:
 	if slot_idx >= inventory.slots.size():
 		return
 	var slot: ItemStack = inventory.slots[slot_idx]
+	# Ctrl+LMB → quantity picker (spec §6.1). Pre-open gate on ctrl_click_max > 0.
+	if mods & SlotClickHandler.MOD_CTRL != 0 and quantity_picker != null:
+		var max_n: int = SlotClickHandler.ctrl_click_max(slot, cursor)
+		if max_n <= 0:
+			return  # silent no-op gate per spec §6.1
+		var giving: bool = cursor.has_item()
+		var anchor: Vector2 = _player_slot_rect(slot_idx).get_center() + global_position
+		var direction: String = "Give" if giving else "Take"
+		var label_item: String = Items.name_of(cursor.item_type if giving else slot.item_type)
+		quantity_picker.open(anchor, direction, label_item, max_n, max_n,
+			func(n: int):
+				SlotClickHandler.ctrl_click_transfer(slot, cursor, n)
+				queue_redraw())
+		return
+	# Plain LMB / Shift+LMB → existing SlotClickHandler path.
 	SlotClickHandler.handle_player_slot(slot, cursor, mods)
 	queue_redraw()
 

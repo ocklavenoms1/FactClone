@@ -116,20 +116,25 @@ func _hit_test_chest(pos: Vector2) -> Variant:
 			if _player_slot_rect(i).has_point(pos):
 				return i
 	# Chest grid.
-	var area: Rect2 = _top_area_rect()
 	var bag: Array = building.state.get("bag", [])
 	var rows: int = max(MIN_ROWS, int(ceil(float(SlotWidget.chest_bag_to_slot_views(bag).size()) / float(COLS))))
-	var grid_x: float = area.position.x + 24
-	var grid_y: float = area.position.y + HEADER_GAP + 14
 	var slot_count: int = rows * COLS
 	for i in slot_count:
-		var col: int = i % COLS
-		var row: int = i / COLS
-		var x: float = grid_x + col * (SlotWidget.SIZE + SLOT_GAP)
-		var y: float = grid_y + row * (SlotWidget.SIZE + SLOT_GAP)
-		if Rect2(x, y, SlotWidget.SIZE, SlotWidget.SIZE).has_point(pos):
+		if _chest_slot_rect(i).has_point(pos):
 			return {"chest_idx": i}
 	return -1
+
+## Rect for chest-bag slot index `i`. Shared between _hit_test_chest and
+## the ctrl-picker anchor in _handle_chest_slot_click (Task 20).
+func _chest_slot_rect(i: int) -> Rect2:
+	var area: Rect2 = _top_area_rect()
+	var grid_x: float = area.position.x + 24
+	var grid_y: float = area.position.y + HEADER_GAP + 14
+	var col: int = i % COLS
+	var row: int = i / COLS
+	var x: float = grid_x + col * (SlotWidget.SIZE + SLOT_GAP)
+	var y: float = grid_y + row * (SlotWidget.SIZE + SLOT_GAP)
+	return Rect2(x, y, SlotWidget.SIZE, SlotWidget.SIZE)
 
 ## Click on a chest slot. Cursor empty + content → pick. Cursor full →
 ## drop into bag (atomic; capacity-checked).
@@ -161,7 +166,38 @@ func _handle_chest_slot_click(slot_idx: int, mods: int) -> void:
 			cursor.clear()
 		return
 
-	# (ctrl branch lands in Task 20.)
+	# Ctrl+LMB → quantity picker (spec §6.1). Inline max computation —
+	# chest uses bag entries and free_capacity, not ItemStack, so
+	# SlotClickHandler.ctrl_click_max doesn't apply (Q2 minimal-extraction).
+	if mods & SlotClickHandler.MOD_CTRL != 0 and quantity_picker != null:
+		var giving: bool = cursor.has_item()
+		var max_n: int = 0
+		var direction: String = ""
+		var label_item: String = ""
+		if not giving:
+			# TAKE: cursor empty. Pick up `n` items from the addressed bag entry.
+			if not view_present:
+				return  # empty slot, nothing to take
+			var v = views[slot_idx]
+			max_n = int(v["count"])
+			direction = "Take"
+			label_item = Items.name_of(int(v["item_type"]))
+		else:
+			# GIVE: cursor has items. Deposit `n` items into chest, clamped to
+			# free_capacity (chest's whole-cursor refuse-on-overflow LMB convention
+			# does NOT apply here — picker is exact-N, caller chose a specific
+			# value, and the max already accounts for free_capacity).
+			max_n = min(cursor.count, Chest.free_capacity(building))
+			direction = "Give"
+			label_item = Items.name_of(cursor.item_type)
+		if max_n <= 0:
+			return  # pre-open gate
+		var anchor: Vector2 = _chest_slot_rect(slot_idx).get_center() + global_position
+		quantity_picker.open(anchor, direction, label_item, max_n, max_n,
+			func(n: int):
+				_chest_ctrl_transfer(slot_idx, n)
+				queue_redraw())
+		return
 
 	# Plain LMB — unchanged from pre-Task-11 implementation.
 	if not cursor.has_item():
@@ -186,4 +222,26 @@ func _handle_chest_slot_click(slot_idx: int, mods: int) -> void:
 		Chest._bag_remove(bag, item_type2, c2)
 		cursor.pick(item_type2, c2)
 	else:
+		cursor.clear()
+
+## Commits an exact-N transfer for chest ctrl+LMB. Direction inferred from
+## cursor state at call time. Caller (quantity_picker confirm Callable)
+## responsible for n <= pre-computed max.
+func _chest_ctrl_transfer(slot_idx: int, n: int) -> void:
+	if n <= 0:
+		return
+	var bag: Array = building.state.get("bag", [])
+	var views: Array = SlotWidget.chest_bag_to_slot_views(bag)
+	if not cursor.has_item():
+		# TAKE n from chest's bag at slot_idx.
+		if slot_idx >= views.size():
+			return
+		var v = views[slot_idx]
+		Chest._bag_remove(bag, int(v["item_type"]), n)
+		cursor.pick(int(v["item_type"]), n)
+		return
+	# GIVE n from cursor into chest.
+	Chest._bag_add(bag, cursor.item_type, n)
+	cursor.count -= n
+	if cursor.count <= 0:
 		cursor.clear()
