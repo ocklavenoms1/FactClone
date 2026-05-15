@@ -38,6 +38,18 @@ Across Tasks 13, 15, 18 of `session-qol-cluster-a` (3 data points), Opus reviewe
 
 ---
 
+## Test fixture leakage into game saves (discovered session-qol-cluster-a)
+
+`scripts/tests/test_save_migration.gd` uses `user://test_save_migration.json` as a fixture path for negative-path tests (writes a v19 "future save" then asserts the v18 game rejects it). The test has pre-cleanup (L108-109) and post-cleanup (L218-219), but if the test process is killed mid-run before reaching post-cleanup (e.g., interrupted Godot test runner, killed during cold-import stall), the file persists.
+
+**Symptom:** game launch shows a "Save incompatible — Save is v19; this game is v18" popup pointing to `test_save_migration.json`. The game's save-load path apparently scans for any `.json` and treats the test fixture as a candidate save.
+
+**Workaround:** delete the file manually OR re-run the full test suite (pre-cleanup at L108 will remove it).
+
+**Proper fix (deferred to future session):** filter the save-load scan in `scripts/systems/save_system.gd` to exclude paths starting with `test_*.json`. ~3-line change. The test fixture shouldn't be visible to the main game's save loader at all. Tag for a brief design pass (does the game's save-load scan SHOULD enumerate user data, or only load explicit slot paths? Likely the latter — fix is even smaller).
+
+---
+
 ## Test Layering Strategy (validated session-qol-cluster-a)
 
 - **Helper/utility math:** pure-logic tests in `test_*.gd` files (no panel calls). Examples: `SlotClickHandler.split_half`, `ctrl_click_max`, `ctrl_click_transfer` — all tested via direct calls in `test_slot_click_handler.gd` sub-suites #1, #2-#5, #8, #9, #11a.
