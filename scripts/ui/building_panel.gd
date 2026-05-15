@@ -295,6 +295,17 @@ func _drop_into_input(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NON
 	if space <= 0:
 		_toast("%s slot is full." % Items.name_of(cursor.item_type))
 		return
+	# Ctrl+LMB → picker (spec §6.1). Inline max = min(cursor.count, space).
+	if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
+		var max_n: int = min(cursor.count, space)
+		if max_n <= 0:
+			return  # gate
+		var anchor: Vector2 = _building_slot_anchor(slot_def, -1)
+		quantity_picker.open(anchor, "Give", Items.name_of(cursor.item_type), max_n, max_n,
+			func(n: int):
+				_input_ctrl_give(slot_def, n)
+				queue_redraw())
+		return
 	var shift: bool = (mods & SlotClickHandler.MOD_SHIFT) != 0
 	var want: int = SlotClickHandler.split_half(cursor.count) if shift else cursor.count
 	var moved: int = min(space, want)
@@ -325,6 +336,17 @@ func _drop_into_fuel(slot_def: Dictionary, mods: int = SlotClickHandler.MOD_NONE
 	if items_that_fit <= 0:
 		# Zero-fit edge case: shift inherits the plain-LMB toast-and-refuse path.
 		_toast("Fuel slot too full to accept %s (1 = %d units)." % [Items.name_of(cursor.item_type), energy_per])
+		return
+	# Ctrl+LMB → picker (spec §6.1 + §6.2). Inline max = min(cursor.count, items_that_fit).
+	if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
+		var max_n: int = min(cursor.count, items_that_fit)
+		if max_n <= 0:
+			return  # gate
+		var anchor: Vector2 = _building_slot_anchor(slot_def, -1)
+		quantity_picker.open(anchor, "Give", Items.name_of(cursor.item_type), max_n, max_n,
+			func(n: int):
+				_fuel_ctrl_give(n, energy_per)
+				queue_redraw())
 		return
 	# Determine how many items to drop. Plain LMB: all of cursor.count.
 	# Shift+LMB per spec §5.2: split_half(cursor.count), silent atomic-clamp
@@ -370,6 +392,17 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 			if buf.is_empty():
 				return
 			var entry = buf[0]
+			# Ctrl+LMB → picker (spec §6.1). Inline max — input/output buf has single entry.
+			if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
+				var max_n: int = int(entry[1])
+				if max_n <= 0:
+					return  # gate
+				var anchor: Vector2 = _building_slot_anchor(slot_def, sub_idx)
+				quantity_picker.open(anchor, "Take", Items.name_of(int(entry[0])), max_n, max_n,
+					func(n: int):
+						_input_output_ctrl_take(field, sub_idx, n, kind)
+						queue_redraw())
+				return
 			var take: int = SlotClickHandler.split_half(int(entry[1])) if shift else int(entry[1])
 			cursor.pick(int(entry[0]), take)
 			entry[1] = int(entry[1]) - take
@@ -381,6 +414,17 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 			if sub_idx < 0 or sub_idx >= buf2.size():
 				return
 			var entry2 = buf2[sub_idx]
+			# Ctrl+LMB → picker. Inline max = count of addressed sub-entry.
+			if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
+				var max_n2: int = int(entry2[1])
+				if max_n2 <= 0:
+					return  # gate
+				var anchor2: Vector2 = _building_slot_anchor(slot_def, sub_idx)
+				quantity_picker.open(anchor2, "Take", Items.name_of(int(entry2[0])), max_n2, max_n2,
+					func(n: int):
+						_input_output_ctrl_take(field, sub_idx, n, "output_multi")
+						queue_redraw())
+				return
 			var take2: int = SlotClickHandler.split_half(int(entry2[1])) if shift else int(entry2[1])
 			cursor.pick(int(entry2[0]), take2)
 			entry2[1] = int(entry2[1]) - take2
@@ -393,6 +437,16 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 			var units: int = int(building.state.get("fuel_buffer", 0))
 			if units <= 0:
 				return
+			# Ctrl+LMB → picker. Asymmetric label per spec §6.2: TAKE direction
+			# is in units (returned as WOOD lossy).
+			if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
+				var max_n3: int = units
+				var anchor3: Vector2 = _building_slot_anchor(slot_def, sub_idx)
+				quantity_picker.open(anchor3, "Take", "fuel units (returned as wood)", max_n3, max_n3,
+					func(n: int):
+						_fuel_ctrl_take(n)
+						queue_redraw())
+				return
 			var n: int = SlotClickHandler.split_half(units) if shift else units
 			cursor.pick(Items.Type.WOOD, n)
 			building.state["fuel_buffer"] = units - n
@@ -401,6 +455,85 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 			_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % n)
 		"filter":
 			_toast("Filter holds an item TYPE, not items. Drop to set, right-click to clear.")
+
+# ---------- ctrl picker confirm helpers (Task 21) ----------
+
+## Ctrl picker confirm helper for input/output/output_multi TAKE direction.
+## Removes n items from buf[sub_idx if multi else 0] and picks to cursor.
+func _input_output_ctrl_take(field: String, sub_idx: int, n: int, kind: String) -> void:
+	if n <= 0:
+		return
+	var buf: Array = building.state.get(field, [])
+	if kind == "output_multi":
+		if sub_idx < 0 or sub_idx >= buf.size():
+			return
+		var e = buf[sub_idx]
+		cursor.pick(int(e[0]), n)
+		e[1] = int(e[1]) - n
+		if int(e[1]) <= 0:
+			buf.remove_at(sub_idx)
+	else:
+		if buf.is_empty():
+			return
+		var e2 = buf[0]
+		cursor.pick(int(e2[0]), n)
+		e2[1] = int(e2[1]) - n
+		if int(e2[1]) <= 0:
+			buf.clear()
+	building.state[field] = buf
+
+## Ctrl picker confirm helper for fuel TAKE direction. Lossy WOOD conversion
+## per spec §5a + §6.2 — buffer decrements by exactly n units; cursor gets
+## n wood. fuel_burn_progress is NOT reset for partial takes (only full take
+## clears progress, but ctrl picker is always partial-by-intent).
+func _fuel_ctrl_take(n: int) -> void:
+	if n <= 0:
+		return
+	var units: int = int(building.state.get("fuel_buffer", 0))
+	var amt: int = min(n, units)
+	if amt <= 0:
+		return
+	cursor.pick(Items.Type.WOOD, amt)
+	building.state["fuel_buffer"] = units - amt
+	_toast("Retrieved %d wood (lossy: 1 fuel unit = 1 wood)." % amt)
+
+## Ctrl picker confirm helper for input slot GIVE direction. Atomic drop
+## of n items into the buffer; cursor decrements + clears on zero.
+func _input_ctrl_give(slot_def: Dictionary, n: int) -> void:
+	if n <= 0:
+		return
+	var field: String = str(slot_def.get("state_field", "in_buffer"))
+	var buf: Array = building.state.get(field, [])
+	_buffer_add(buf, cursor.item_type, n)
+	building.state[field] = buf
+	cursor.count -= n
+	if cursor.count <= 0:
+		cursor.clear()
+
+## Ctrl picker confirm helper for fuel GIVE direction. Atomic conversion
+## via FUEL_VALUES — buffer gains n * energy_per units; cursor decrements
+## by exactly n items.
+func _fuel_ctrl_give(n: int, energy_per: int) -> void:
+	if n <= 0:
+		return
+	var current_units: int = int(building.state.get("fuel_buffer", 0))
+	building.state["fuel_buffer"] = current_units + n * energy_per
+	building.state["last_fuel_item"] = cursor.item_type
+	cursor.count -= n
+	if cursor.count <= 0:
+		cursor.clear()
+
+## Returns viewport-global Vector2 anchor for a building slot, for picker
+## placement. Looks up the slot in _building_slot_rects() by matching
+## slot_def identity + sub_idx. Falls back to panel center if not found
+## (defensive — shouldn't happen in normal flow).
+func _building_slot_anchor(slot_def: Dictionary, sub_idx: int) -> Vector2:
+	for entry in _building_slot_rects():
+		if entry["slot_def"] == slot_def and int(entry.get("sub_idx", -1)) == sub_idx:
+			return (entry["rect"] as Rect2).get_center() + global_position
+	# Fallback: panel center. Defensive — _building_slot_rects iteration
+	# above should always match for a click that came from _hit_test.
+	return global_position + _panel_rect().get_center()
 
 # ---------- buffer helpers (Array of [type, count]) ----------
 
