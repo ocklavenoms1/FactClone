@@ -1,0 +1,33 @@
+[gd_scene load_steps=2 format=3 uid="uid://qpickmodal01"]
+
+[ext_resource type="Script" path="res://scripts/ui/quantity_picker_modal.gd" id="1_script"]
+
+[node name="QuantityPickerModal" type="PopupPanel"]
+size = Vector2i(220, 110)
+script = ExtResource("1_script")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+
+[node name="Label" type="Label" parent="VBox"]
+text = "Take ___ items"
+
+[node name="SpinBox" type="SpinBox" parent="VBox"]
+min_value = 1.0
+max_value = 999.0
+value = 1.0
+
+[node name="Buttons" type="HBoxContainer" parent="VBox"]
+alignment = 2
+
+[node name="OK" type="Button" parent="VBox/Buttons"]
+text = "OK"
+
+[node name="Cancel" type="Button" parent="VBox/Buttons"]
+text = "Cancel"
