@@ -21,7 +21,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_inserter.json"
 
 static func test_name() -> String:
-	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression)"
+	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression + long-reach tier)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -407,10 +407,56 @@ static func run(parent: Node) -> Dictionary:
 		_check(failures, Inserter.dest_tile(fast_r) == fast_expected_dst,
 			"(11) fast dest_tile dir=%d should be %s, got %s" % [dir_r, str(fast_expected_dst), str(Inserter.dest_tile(fast_r))])
 
+	# ===========================================================================
+	# (12) LONG-REACH INSERTER CYCLE TIMING — 30 ticks per cycle (1.5s @ 20 TPS).
+	# Drop fires when cycle_progress first reaches 0.5; with inc = 1/30, that's
+	# the 15th tick of WORKING_OUT.
+	# ===========================================================================
+	_disconnect(world); world.queue_free()
+	world = _make_world(parent)
+	if not world.place_building(Buildings.Type.LONG_REACH_INSERTER, Vector2i(10, 10), Belt.DIR_E):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "(12) long-reach inserter placement failed" }
+	# Source 2 tiles west of inserter; dest 2 tiles east.
+	world.place_building(Buildings.Type.CHEST, Vector2i(8, 10), Belt.DIR_E)
+	world.place_building(Buildings.Type.CHEST, Vector2i(12, 10), Belt.DIR_E)
+	var lr: Building = world.building_at(Vector2i(10, 10))
+	var src_12: Building = world.building_at(Vector2i(8, 10))
+	var dst_12: Building = world.building_at(Vector2i(12, 10))
+	lr.state["fuel_buffer"] = 100
+	src_12.state["bag"] = [[Items.Type.WHEAT, 5]]
+	# Cycle ticks lookup returns 30.
+	_check(failures, Inserter.cycle_ticks(lr) == 30,
+		"(12) long-reach cycle_ticks should be 30, got %d" % Inserter.cycle_ticks(lr))
+	# Reach lookup returns 2.
+	_check(failures, Inserter.reach(lr) == 2,
+		"(12) long-reach reach should be 2, got %d" % Inserter.reach(lr))
+	# Arm length returns 1.10.
+	_check(failures, abs(Inserter.arm_length(lr) - 1.10) < 0.001,
+		"(12) long-reach arm_length should be 1.10, got %f" % Inserter.arm_length(lr))
+	# Body color returns the rust-red entry (not the default).
+	var lr_color: Color = Inserter.body_color(lr)
+	_check(failures, abs(lr_color.r - 0.65) < 0.01 and abs(lr_color.g - 0.30) < 0.01 and abs(lr_color.b - 0.22) < 0.01,
+		"(12) long-reach body_color should be rust-red (0.65, 0.30, 0.22), got (%f, %f, %f)" % [lr_color.r, lr_color.g, lr_color.b])
+
+	# ===========================================================================
+	# (13) LONG-REACH 2-TILE REACH — source/dest tiles offset by 2 across all
+	# 4 rotations. Validates that source_tile() / dest_tile() multiply by reach(b).
+	# ===========================================================================
+	for dir_13 in [Belt.DIR_E, Belt.DIR_S, Belt.DIR_W, Belt.DIR_N]:
+		lr.state["dir"] = dir_13
+		var v_13: Vector2i = Belt.DIR_VECS[dir_13]
+		var expected_src: Vector2i = Vector2i(lr.anchor.x - v_13.x * 2, lr.anchor.y - v_13.y * 2)
+		var expected_dst: Vector2i = Vector2i(lr.anchor.x + v_13.x * 2, lr.anchor.y + v_13.y * 2)
+		_check(failures, Inserter.source_tile(lr) == expected_src,
+			"(13) long-reach source_tile dir=%d should be %s, got %s" % [dir_13, str(expected_src), str(Inserter.source_tile(lr))])
+		_check(failures, Inserter.dest_tile(lr) == expected_dst,
+			"(13) long-reach dest_tile dir=%d should be %s, got %s" % [dir_13, str(expected_dst), str(Inserter.dest_tile(lr))])
+
 	_disconnect(world); world.queue_free()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "11 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression" }
+		return { "ok": true, "message": "13 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------

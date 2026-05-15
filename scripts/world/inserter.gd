@@ -53,8 +53,9 @@ const STATE_NO_FUEL: int         = 4
 #   INSERTER:      20 ticks = 1.0s — basic (Session 1)
 #   FAST_INSERTER: row added at session-inserter-fast-filter (Session 2)
 const CYCLE_TICKS_BY_TYPE: Dictionary = {
-	Buildings.Type.INSERTER:      20,    # 1.0s — basic
-	Buildings.Type.FAST_INSERTER: 10,    # 0.5s — twice as fast
+	Buildings.Type.INSERTER:             20,    # 1.0s — basic
+	Buildings.Type.FAST_INSERTER:        10,    # 0.5s — twice as fast
+	Buildings.Type.LONG_REACH_INSERTER:  30,    # 1.5s — slower, balances reach
 }
 const CYCLE_TICKS_DEFAULT: int = 20
 
@@ -65,8 +66,9 @@ const CYCLE_TICKS_DEFAULT: int = 20
 #   FAST_INSERTER:       row added at session-inserter-fast-filter (Session 2)
 #   LONG_REACH_INSERTER: row added at session-inserter-long-reach (Session 3)
 const BODY_COLOR_BY_TYPE: Dictionary = {
-	Buildings.Type.INSERTER:      Color(0.55, 0.45, 0.30),    # bronze
-	Buildings.Type.FAST_INSERTER: Color(0.45, 0.55, 0.70),    # cool blue-grey
+	Buildings.Type.INSERTER:             Color(0.55, 0.45, 0.30),    # bronze
+	Buildings.Type.FAST_INSERTER:        Color(0.45, 0.55, 0.70),    # cool blue-grey
+	Buildings.Type.LONG_REACH_INSERTER:  Color(0.65, 0.30, 0.22),    # rust-red — "reach" tier
 }
 const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
 
@@ -78,8 +80,9 @@ const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
 #   FAST_INSERTER:        1 — fast (Session 2)
 #   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
 const REACH_BY_TYPE: Dictionary = {
-	Buildings.Type.INSERTER:      1,
-	Buildings.Type.FAST_INSERTER: 1,
+	Buildings.Type.INSERTER:             1,
+	Buildings.Type.FAST_INSERTER:        1,
+	Buildings.Type.LONG_REACH_INSERTER:  2,
 }
 const REACH_DEFAULT: int = 1
 
@@ -91,8 +94,9 @@ const REACH_DEFAULT: int = 1
 #   FAST_INSERTER:        0.55 — fast (visually identical to basic)
 #   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
 const ARM_LENGTH_BY_TYPE: Dictionary = {
-	Buildings.Type.INSERTER:      0.55,
-	Buildings.Type.FAST_INSERTER: 0.55,
+	Buildings.Type.INSERTER:             0.55,
+	Buildings.Type.FAST_INSERTER:        0.55,
+	Buildings.Type.LONG_REACH_INSERTER:  1.10,    # 2x — visually communicates reach
 }
 const ARM_LENGTH_DEFAULT: float = 0.55
 

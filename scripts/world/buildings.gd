@@ -79,6 +79,15 @@ enum Type {
 	# Future tiers (electric → multi-filter, long-reach → reach 2 tiles)
 	# extend the same data tables.
 	FAST_INSERTER,
+	# Inserter Arc Session 3 (session-inserter-long-reach): LONG_REACH tier.
+	# Same code path as basic + fast (Inserter.tick is parametric on b.type),
+	# but reach is 2 tiles (REACH_BY_TYPE table) and cycle is 1.5s. No filter
+	# — filter is a fast-axis capability, long-reach is the reach-axis upgrade.
+	# Players choose long-reach to bridge a 1-tile gap without an extra building;
+	# slower cycle balances the reach advantage. Color: rust-red (weathered
+	# industrial). Future combinations (long-reach-fast, long-reach-electric)
+	# extend the same data tables in later sessions.
+	LONG_REACH_INSERTER,
 }
 
 const DATA: Dictionary = {
@@ -586,6 +595,33 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.LONG_REACH_INSERTER: {
+		"name": "Long-Reach Inserter",
+		"swatch_color": Color(0.65, 0.30, 0.22),    # rust-red: "reach" tier (Session 3)
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,                  # source/dest/fuel rotate together
+		"player_drainable": false,
+		# Walkable like the basic/fast inserter (thin device, arm swings overhead).
+		"walkable": true,
+		# Inserter UI (session-inserter-long-reach):
+		# Same 2-slot layout as basic INSERTER — held_item (read-only display) +
+		# fuel (Burner pattern, 16 units capacity). NO filter slot: filter is a
+		# fast-tier capability, not the reach axis. Panel reuses InserterPanel
+		# (NOT FastInserterPanel) via main.gd dispatch.
+		"slot_layout": [
+			{
+				"id": "held_item", "kind": "output",
+				"accepts": [],                       # informational; any item can be held
+				"max_stack": 1, "state_field": "held_item_buffer",
+			},
+			{
+				"id": "fuel", "kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16, "state_field": "fuel_buffer",
+			},
+		],
+	},
 	Type.FERTILIZER_APPLICATOR: {
 		"name": "Fertilizer Applicator",
 		"swatch_color": Color(0.55, 0.70, 0.55),    # sage / sprinkler-green
@@ -792,6 +828,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Inserter.make(pos, dir, Type.INSERTER)
 		Type.FAST_INSERTER:
 			return Inserter.make(pos, dir, Type.FAST_INSERTER)
+		Type.LONG_REACH_INSERTER:
+			return Inserter.make(pos, dir, Type.LONG_REACH_INSERTER)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -822,13 +860,15 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Custom tick (no recipe — applies fertilizer directly to
 			# tile_fertilizer_state via GridWorld.try_apply_fertilizer).
 			FertilizerApplicator.tick(b, world)
-		Type.INSERTER, Type.FAST_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
 			# Custom tick — phase machine + parametric cycle speed via
-			# Inserter.cycle_ticks(b) lookup. Same code path for both
-			# basic (1.0s cycle) and fast (0.5s cycle, with filter slot)
-			# tiers. Uses Burner module via try_pull_fuel restricted to
-			# FUEL_PORT_DIR (S edge in canonical orientation) so source
-			# items aren't consumed as fuel.
+			# Inserter.cycle_ticks(b) lookup. Same code path across all
+			# tiers: basic (1.0s cycle), fast (0.5s cycle, filter slot),
+			# long-reach (1.5s cycle, 2-tile reach). Tier-specific values
+			# resolved by *_BY_TYPE tables in inserter.gd. Uses Burner
+			# module via try_pull_fuel restricted to FUEL_PORT_DIR (S edge
+			# in canonical orientation) so source items aren't consumed
+			# as fuel.
 			Inserter.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
@@ -883,7 +923,7 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Composter.draw(b, canvas, world_pos, tile_size)
 		Type.FERTILIZER_APPLICATOR:
 			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
-		Type.INSERTER, Type.FAST_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
 			Inserter.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
@@ -1083,7 +1123,7 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Processor.info_lines(b, world)
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.info_lines(b, world)
-		Type.INSERTER, Type.FAST_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
 			return Inserter.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)
