@@ -97,17 +97,17 @@ Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't 
 
 ---
 
-## QoL Polish Session — Cluster C SHIPPED, A+B queued
+## QoL Polish Session — Clusters A+C SHIPPED, B queued (3 items)
 
-**Status:** Cluster C (building-blocks-movement) shipped as a small post-session fix immediately after `session-inserter-fast-filter`. Clusters A (click extraction + stack-split + quantity picker) and B (tooltips + filter dropdown + filter status diagnostic) remain queued for a dedicated future session. Six original items minus Cluster C → 5 remaining. Estimated 3-4 hours for the remaining clusters.
+**Status:** Cluster A (click extraction + stack-split + quantity picker) shipped as `session-qol-cluster-a` (2026-05-15). Cluster C (building-blocks-movement) shipped earlier as a small post-session fix. Cluster B (items 4 + 5 + 7 + 9 — UI feedback / discoverability + chest swap UX) remains queued. Item 8 (close-on-padding) was shipped as a Cluster A PAUSE 2 fix. **3 items remain in Cluster B.**
 
 **Items (ordered by architectural dependency, NOT priority):**
 
-1. **Click-handling extraction** — refactor pick/drop/swap logic shared by `BuildingPanel._handle_player_slot_click` and `inventory_grid._handle_left_click_player` into a shared helper. Most likely shape: `SlotWidget.handle_click(slot_provider, cursor, modifiers) -> void` OR `CursorStack.click_swap(slot, cursor, modifiers) -> void`. Decide concrete shape during implementation. **This is the architectural prerequisite for items 2+3** — both modify the click-handling code paths in identical ways, refactoring first means one site to edit instead of two. Trigger criteria from prior NOTES.md entry NOW MET (per session-inserter-fast-filter — filter slot RMB-clear is the first context-specific click semantic).
+1. **Click-handling extraction.** **SHIPPED** (Cluster A — `session-qol-cluster-a`). Static `SlotClickHandler` module at `scripts/ui/slot_click_handler.gd` with `handle_player_slot`, `ctrl_click_max`, `ctrl_click_transfer`, `split_half`. Inline shift/ctrl branches in chest_panel + BuildingPanel dispatchers for per-kind context (Q2 minimal-extraction principle).
 
-2. **Shift+click stack-split (half).** Empty cursor + shift-click on slot → take half (rounded up) into cursor. Cursor-holding-stack + shift-click → drop half. Applies to: inventory grid, chest panels, building input slots, fuel slots (half-by-item-count, then convert to units on drop). NOT filter slots (metadata, no shift behavior).
+2. **Shift+click stack-split (half).** **SHIPPED** (Cluster A). Full matrix per spec §5.1: player-slot silent-clamp on same-type drop, chest refuse-with-toast convention preserved on no-fit, fuel atomic conversion with stranded-units fallback, filter no-op (no toast).
 
-3. **Ctrl+click quantity picker modal.** Click → opens a small popup near the slot with a number input + confirm/cancel. New small UI element, ~100 lines. Same slot-applicability as #2.
+3. **Ctrl+click quantity picker modal.** **SHIPPED** (Cluster A). `QuantityPickerModal extends PopupPanel` at `scripts/ui/quantity_picker_modal.gd`, hard-modal via `popup_exclusive_on_parent`, edge-flip placement, asymmetric fuel labels per direction. Pre-open gate suppresses picker for no-op cells (different-type, full same-type, etc.).
 
 4. **Item hover tooltips with descriptions.** Hover any slot (inventory or panel) for ~500ms → tooltip with item name + description. Requires `Items.gd` description field per item type (~30 items × ~50-char descriptions). Tooltip widget is shared component. Estimated ~150 lines for the tooltip rendering + ~30 lines for description field plumbing. Per-item description text is content authoring (~1 hour).
 
@@ -119,27 +119,24 @@ Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't 
 
 7. **Filter status diagnostic.** When fast inserter has filter set but no matching items in source, panel shows `Status: IDLE` with no hint why. Add a `Status: IDLE (no items match filter)` line. ~5 lines. Tag it onto whichever QoL sub-session ships #5 (filter dropdown).
 
-**One follow-up captured during session-qol-cluster-a GATE 1 smoke:**
+**One follow-up captured during session-qol-cluster-a GATE 1 smoke (since SHIPPED):**
 
-8. **Close-on-padding-click UX.** Currently panels close when an LMB lands on any non-slot pixel within or outside the panel rectangle (intentional pre-existing behavior, explicitly documented in inline comments at `building_panel.gd:188-192` "Click outside any slot — close panel (cursor persists)", `chest_panel.gd:97-100`, and `inventory_grid.gd:110-112`). Factorio convention treats empty panel space as a no-op; only an explicit close button, Esc, OR a click in the dimmed-out background area outside the panel rectangle closes. Worth revisiting as UX polish. Decision points for future design pass:
-   - Should panel padding/header/footer be no-op (and only Esc + close button + dim-background click close)?
-   - Or keep current behavior but make the "hit-test" area more obvious (e.g., explicit close button glyph)?
-   - Migration concern: muscle memory of long-time players may rely on the current behavior; surveying decision worth a brief design-pass.
-   Possibly bundled with Cluster B's tooltip work (items 4+5+7) since both address panel discoverability/feedback. ~10-30 lines depending on resolution.
+8. **Close-on-padding-click UX.** **SHIPPED** (Cluster A PAUSE 2 fix, commit `7998024`). User escalated from "log for Cluster B" to "fix now" during PAUSE 2 smoke. `_close()` / `close()` calls in inventory_grid.gd / chest_panel.gd / building_panel.gd `_gui_input` slot_idx<0 branches removed. Clicks inside panel padding now no-op; Esc still closes via the unchanged Esc handler path. Migration concern (muscle-memory players) deemed non-issue — solo-dev player can adapt.
 
 **One UX wart captured during session-qol-cluster-a GATE 2 smoke:**
 
 9. **Chest deposit-on-same-type-slot triggers deposit-and-take-back.** Clicking a chest bag slot that already has the SAME item type as the cursor triggers the swap-pickup branch at `chest_panel.gd:152-162` unconditionally: `_bag_add` cursor's items into the bag (merging with the existing entry), then because `view_present` is true, immediately `_bag_remove` the (now-combined) entry and `cursor.pick` it back. Net effect: cursor's 5 wheat + chest's 3 wheat → cursor ends with 8 wheat, chest empty. Player intent ("deposit my 5 wheat into the existing 3 wheat") produces the unintended outcome ("now I have 8 wheat in cursor and the chest is empty"). Factorio convention is "click to deposit (merge silently into matching slot), cursor decrements to 0; only swap when types differ." Pre-existing pre-Cluster-A; behavior also LOCKED IN by `test_building_ui_2.gd:122` assertion (`Chest._bag_count(... WHEAT) == 50` after deposit). Decision: defer to Cluster B UX polish session — not blocking Cluster A ship. Fix is ~5 lines: add `if item_type2 == cursor.item_type: cursor.clear(); return` before the swap-pickup, plus update `test_building_ui_2.gd:122` assertion to reflect the new clean-deposit semantic.
 
 **Architectural notes:**
-- Items 1+2+3 form a cluster (click-handling). Land together.
-- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — items 8+9 may bundle in (both chest-panel/click UX worts).
-- Item 6 is standalone (player movement / placement).
-- Multi-session split: cluster-by-cluster is the obvious cut. Single-session: do extraction first, then 2+3, then 4+5+7+8+9, then 6.
+- ~~Items 1+2+3 form a cluster (click-handling). Land together.~~ **SHIPPED** as Cluster A.
+- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — item 9 (chest swap UX) may bundle in.
+- ~~Item 6 is standalone (player movement / placement).~~ **SHIPPED** as Cluster C.
+- ~~Item 8 (close-on-padding)~~ **SHIPPED** as Cluster A PAUSE 2 fix.
+- **Cluster B remaining:** items 4 + 5 + 7 + 9. Estimated 2-3 hours.
 
-**Save schema impact:** none expected. Stack-split / picker / tooltips / movement are all UI-layer + read-only checks. Walkable flag is data registry, not save state.
+**Save schema impact:** none across Cluster A (UI-layer only). Cluster B's items also UI-only.
 
-**Tests:** est ~6-8 new sub-suites across the cluster.
+**Cluster A actual:** 13 internal sub-suites added (target: 6-8 — exceeded for thorough ctrl-picker orchestration coverage). Runner pass count 33 → 34 (one new test file: `test_slot_click_handler.gd`).
 
 ---
 

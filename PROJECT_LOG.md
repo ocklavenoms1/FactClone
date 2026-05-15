@@ -9,7 +9,81 @@ Each entry has three sections:
 
 ---
 
-## Cluster C — Building-blocks-movement (small post-session fix)
+## QoL Cluster A — Click extraction + shift/ctrl stack ops
+
+**Date:** 2026-05-15
+**Tag:** `session-qol-cluster-a`
+**Save:** v18 (no schema bump — UI-only changes, no state shape change)
+
+**First Superpowers-methodology session.** Wrapped CLAUDE.md project protocols (design pass / PAUSE checkpoints / PROJECT_LOG / tagged commit) around Superpowers' brainstorming → writing-plans → subagent-driven-development → TDD inner loop. 27-task implementation plan executed via Opus/Sonnet/Haiku subagents with two-stage review (spec compliance + code quality) per task. Final commit chain: ~45 commits from `1ce0d4d` (design spec) through PAUSE 2 fixes.
+
+Cluster A as planned: (1) refactor the duplicated player-slot click handler into a static `SlotClickHandler` module, (2) add shift+LMB half-stack take/drop across all slot kinds, (3) add ctrl+LMB exact-N quantity picker modal across the same matrix. Each phase ended with a manual smoke gate (GATE 1 / GATE 2 / PAUSE 2). 13 internal sub-suites in one new test file (`test_slot_click_handler.gd`); runner pass count 33 → 34, internal coverage 33 → 46 sub-suites.
+
+### What shipped
+
+**Phase 1 — Refactor extraction (Tasks 1-5, GATE 1):**
+- `scripts/ui/slot_click_handler.gd` (new, ~80 lines): static module with `MOD_NONE/MOD_SHIFT/MOD_CTRL` constants, `split_half(n)` math util, `handle_player_slot(slot, cursor, mods)` for plain-LMB pick/place/merge/swap. Mirrors `Burner`/`Processor`/`Inserter` static-module pattern.
+- `inventory_grid._handle_left_click_player` and `BuildingPanel._handle_player_slot_click` migrated to delegate to the new handler. Byte-identical-outcomes contract preserved for plain LMB.
+
+**Phase 2 — Shift+LMB (Tasks 6-16, GATE 2):**
+- `_handle_shift_player` helper extended SlotClickHandler with the full 5-cell shift matrix (spec §5.1).
+- Modifier extraction (`_extract_mods`) wired into `inventory_grid` and `BuildingPanel` `_gui_input` events. `mods` parameter threaded through `_handle_chest_slot_click`, `_take_from_slot`, `_drop_into_slot`, `_drop_into_input`, `_drop_into_fuel`.
+- Per-kind shift behaviors:
+  - **Player** (player Inventory.slots): cell-matrix per §5.1.
+  - **Chest** (bag Array): take half / drop half. Drop **refuses with toast** on no-fit (preserves chest LMB convention — does NOT silent-clamp like player slot).
+  - **Building input**: take half / drop half with max_stack silent-clamp.
+  - **Building output / output_multi**: take half of addressed entry only.
+  - **Building fuel (TAKE)**: split_half(units) (initially lossy WOOD per spec §5a — REVISED at PAUSE 2; see "Decisions" below).
+  - **Building fuel (DROP)**: split_half(cursor.count) items, atomic via FUEL_VALUES, silent-clamp to free units.
+  - **Filter slot**: no-op for shift/ctrl, no toast.
+
+**Phase 3 — Ctrl+LMB picker (Tasks 17-23, PAUSE 2):**
+- `scripts/ui/quantity_picker_modal.gd` (new, ~95 lines): `class_name QuantityPickerModal extends PopupPanel`. Hard modal via `popup_exclusive_on_parent`, Esc/click-outside via `close_requested` signal, Enter via custom `_input`. SpinBox-based exact-N picker with edge-flip placement (anchor + (60,-40) offset, flip on right/bottom viewport edge).
+- `scenes/quantity_picker_modal.tscn` (new): VBoxContainer { Label, SpinBox, HBoxContainer { OK, Cancel } }. Single HUD singleton wired in `main.gd` and distributed to all `BuildingPanel`-derived panels.
+- `SlotClickHandler.ctrl_click_max(slot, cursor)` + `ctrl_click_transfer(slot, cursor, n)` for the player-slot path. Other slot kinds compute max inline (Q2 minimal-extraction principle).
+- Ctrl branches wired into every click dispatcher: `inventory_grid._handle_left_click_player`, `BuildingPanel._handle_player_slot_click`, `chest_panel._handle_chest_slot_click`, `BuildingPanel._take_from_slot` (all 4 take kinds), `_drop_into_input`, `_drop_into_fuel`. Each branch: caller-side gate (`if max_n > 0`), build anchor + direction + label_item, open picker with Callable confirm_cb.
+
+**Test coverage (13 sub-suites in `test_slot_click_handler.gd`):**
+1. `player_slot_regression` — 5-cell critical-gate test (the refactor must be byte-identical).
+2-5. shift_take_player_half / shift_drop_player_half_empty / shift_drop_player_half_matching (with capacity clamp) / shift_player_diff_type_noop.
+6. shift_chest_take_and_drop (with refuse-with-toast on no-fit).
+7. shift_building_input_and_output.
+8. shift_fuel_take_items_same_type (PAUSE 2 revision — was shift_fuel_take_units).
+9. shift_fuel_drop_items_atomic.
+10. shift_filter_noop.
+11. ctrl_picker_open_default_max (player-slot cases).
+12. ctrl_picker_confirm_cancel_gate (orchestration: confirm fires cb, cancel doesn't, max==0 gate suppresses).
+13. ctrl_picker_outside_click_no_propagation (scene-tree test — first sub-suite to instantiate the picker scene).
+
+**PAUSE 2 fixes (committed pre-ship):**
+- **Picker placement** (`222cb9e`): explicit Window position+size + Vector2i Rect2i conversion. Initial Vector2 → Rect2i implicit conversion was silently broken for embedded sub-windows.
+- **Close-on-padding** (`7998024`): removed `_close()` / `close()` from `_gui_input` slot_idx<0 branches in inventory_grid / chest_panel / building_panel. Clicks inside panel padding now no-op; Esc still closes.
+- **Fuel TAKE design reversal** (`7998024`): see "Decisions" below.
+
+### Decisions
+
+- **Helper shape: static module `SlotClickHandler`** (Q1, design pass). Rejected: method on `CursorStack` (would double the size of a pure-data class); method on `SlotWidget` (CLAUDE.md forbids click logic in pure render helpers); universal entry point dispatching across kinds (would couple SlotClickHandler to `Burner.FUEL_VALUES`, `Chest._bag_*`, `Buildings.slot_layout_for`'s `accepts` validation — defeats isolation/clarity).
+- **API surface: minimal extraction** (Q2). Helper covers player-slot path only + `split_half(n)` math util. Other slot kinds compute max inline in dispatchers — each kind's max formula is 1-2 lines tightly coupled to its data shape. Per-kind dispatcher max formulas covered by integration smoke, NOT unit tests (Test Layering Strategy now pinned to NOTES.md).
+- **Shift+LMB cursor×slot matrix (Q3)**: same-type drop = drop ceil(M/2) clamped to space (cursor-as-donor consistent across all M+_ cells); different-type = no-op (shift never swaps; plain LMB still swaps). Chest's drop behavior preserves its existing LMB refuse-with-toast convention on no-fit; player-slot silent-clamp does NOT inherit.
+- **Ctrl+LMB picker (Q4)**: PopupPanel subclass with `popup_exclusive_on_parent()` for hard-modal + click-outside-close + Esc handling all native. SpinBox default = max (Minecraft convention: "transfer all unless you change it"). Pre-open gate on `max ≤ 0` — picker doesn't open for empty+empty, different-type, full same-type slots, or fuel-drop with no atomic fit. Asymmetric fuel labels per direction (originally TAKE in units / DROP in items; revised at PAUSE 2 to both in items).
+- **Default-value parameter addition (Task 12 deviation)**: implementer added `mods: int = SlotClickHandler.MOD_NONE` defaults to `_take_from_slot`, `_drop_into_slot`, `_drop_into_input` (later `_drop_into_fuel`) without surfacing as DONE_WITH_CONCERNS. Caught at controller code-quality review. Decision: keep the defaults pragmatically (avoids cascading test churn for 14 existing call sites), but flag for future protocol enhancement (strengthen scope-deviation wording to include "adding default values" explicitly). Strengthened protocol applied from Task 13 onward.
+- **REVERSAL: Fuel TAKE returns last_fuel_item type, NOT lossy WOOD** (PAUSE 2, post-Q5 reversal). Original spec §5a/§6.2 was lossy WOOD always; user confirmed at Q5 ("5a units for take — keep math one-line"). After actually playing it, user found the surprise factor exceeded the simplicity gain ("put coal in, take back, got wood?"). Fix: `_fuel_take_item_type()` helper reads `last_fuel_item` with WOOD fallback when missing OR remaining units < one item's energy (so stranded sub-item-energy can be recovered). Aligns take semantics with display semantics — `info_lines` fuel arm already uses last_fuel_item for the slot icon. Working protocol #6 ("Reversal is cheap at design time, expensive after shipping") — we're at PAUSE 2 pre-ship, reversal cost is bounded (4 files touched + 1 test assertion update).
+- **NOTES.md backlog item 8 (close-on-padding-click UX) elevated to MUST-FIX**: originally deferred to Cluster B at GATE 1 smoke. At PAUSE 2 user escalated. ~3-site removal (1 line each) lands in same commit as fuel reversal.
+- **test_save_migration fixture leakage architectural fix**: user repeatedly hit "Save incompatible" popup after each test run because `test_save_migration.gd` creates a v19 fixture at `user://test_save_migration.json` and the game's load_game OS.alert popups any v19 save it encounters. **Definitive fix at commit `9b4e972`**: `save_system.gd._is_test_fixture_path(path)` helper guards all 3 `OS.alert` call sites — push_error still fires for logging, but OS.alert only fires for non-test paths. Test fixtures can now appear/disappear at any path; user-facing popup is killed at the source.
+
+### Lessons
+
+- **Superpowers methodology integration was a net win.** 27-task plan executed cleanly via subagent-driven-development with two-stage review per task. The brainstorming skill caught 2 spec issues during self-review pass (chest refuse-clamp semantic + Phase 3 helper-vs-inline ambivalence). The writing-plans skill produced a 1974-line plan that survived execution with only mechanical corrections.
+- **Code-quality reviewer line-quoting protocol was empirically validated.** Pre-protocol: 3 false-positive omission claims in 6 reviews (~50% FP rate). Post-protocol (added at Task 7): 0 false positives in 17 reviews. Strong evidence that requiring reviewers to quote-by-line-number forces them to read the file rather than pattern-match. Pinned to NOTES.md as standard practice for future subagent-driven sessions.
+- **Opus reviewers exhibit context-discrimination behavior that Sonnet doesn't.** Across Tasks 13, 15, 18 (3 data points), Opus reviewer explicitly identified and ignored ambient context that leaked into tool output (MCP system reminders, link-safety prompts). Sonnet did not surface this in 6 reviews. Real model-level provenance reasoning, context-dependent. Worth the cost for high-stakes reviews of foundational code.
+- **Subagent stall pattern is cross-model and orchestration-framework-bound.** Implementer subagents (Sonnet@12, Opus@14, Opus@21) all stalled at the test-verification step when Godot's cold-cache test takes >2 minutes. Controller had to verify independently and commit on behalf. DONE_PENDING_VERIFICATION protocol added at Task 14 mitigated the recovery cost (~5 min/stall) but didn't prevent the stalls themselves. Future enhancement: lower the threshold to 2 min OR move test-verification to controller as standard step.
+- **Parse-error-against-base-class is invisible to test_runner.** Picker (`QuantityPickerModal extends PopupPanel`) had `get_viewport_rect()` (a `CanvasItem` method, NOT on `Window`) at line 66 — latent bug since Task 18 commit `286493e`, missed by 5 code-quality reviewer cycles. Test_runner never loads main.gd (only test_*.gd files), so the parse error never fired during test runs. Game launched because `@onready var quantity_picker` resolved to null and Task 19's defensive `quantity_picker != null` gate silently no-op'd ctrl+LMB. Caught at Task 23 when implementer tried to instantiate the picker scene under test conditions. **Future enhancement: implementer briefs for scripts with `extends <UnusualBaseClass>` should require `godot --headless --import` verification before reporting DONE.** Pinned to NOTES.md "Subagent Protocol Gap" section.
+- **GATE 2 smoke is necessary but not sufficient.** Shift+LMB worked perfectly at GATE 2. Ctrl+LMB was silently broken (picker resolved to null, gate no-op'd). PAUSE 2 caught it but only because the user explicitly tested ctrl-click. Lesson: smoke matrices need explicit per-modifier coverage, not just per-slot-kind.
+- **Test fixture leakage into game saves is an architectural smell.** `test_save_migration.gd` creates a v19 fixture and the game's save loader can encounter it if the test crashes mid-run. The path-relocation workaround (`c20286a` move to `test_artifacts/` subdir) didn't fix it — the game's load path still scans the user_data. The right fix is at the load_game source: filter test paths from user-facing alerts. **Pattern: don't fix at the file-location level (workaround); fix at the alert-source level (definitive).** ~3 hours of recurring popup frustration could have been avoided by going to the OS.alert call site sooner.
+- **The "test_runner reports per FILE, not per sub-suite" convention is load-bearing.** All 13 sub-suites land in one test file → runner shows 33→34, internal coverage 33→46. Initial draft of the plan had stale `Expected: 38 passed` lines from before I'd internalized this. Caught at plan self-review; documented at GATE 1 sign-off section as the convention reference for future sessions.
+- **Design reversal at PAUSE 2 is acceptable when bounded.** Fuel-take returning lossy WOOD was confirmed at Q5; player tested it and hated it. Reversal cost: 4 production files + 1 test assertion = ~30 min including review. Working protocol #6 warns about reversal cost; this one was small enough to land pre-ship rather than as a Cluster B follow-up. The bar for "land pre-ship vs defer": is the existing behavior actively user-hostile, or just suboptimal? Lossy WOOD was user-hostile (surprise factor); the chest-deposit-on-same-type swap (NOTES item 9) is suboptimal but not hostile, defer to Cluster B.
+
+
 
 **Date:** 2026-05-09
 **Tag:** none (small post-session fix, not a session in its own right)
