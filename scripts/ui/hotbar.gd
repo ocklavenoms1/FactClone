@@ -115,6 +115,10 @@ func _build_categories() -> void:
 			# Same building category; cycle is 0.5s and the panel adds a filter
 			# slot for selective pickup (drop item to set, RMB to clear).
 			{ "kind": "building", "value": Buildings.Type.FAST_INSERTER },
+			# Inserter Arc Session 3 (session-inserter-long-reach): long-reach
+			# tier. 2-tile reach (bridges 1-tile gap), 1.5s cycle, no filter.
+			# Reuses basic InserterPanel via main.gd dispatch (no filter row).
+			{ "kind": "building", "value": Buildings.Type.LONG_REACH_INSERTER },
 		],
 		"selected": 0,
 	})

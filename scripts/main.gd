@@ -971,6 +971,10 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			inserter_panel.open(b, grid_world)
 		Buildings.Type.FAST_INSERTER:
 			fast_inserter_panel.open(b, grid_world)
+		Buildings.Type.LONG_REACH_INSERTER:
+			# Reuses basic InserterPanel — no filter row needed (filter is a
+			# fast-axis capability, long-reach is the reach-axis upgrade).
+			inserter_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-
