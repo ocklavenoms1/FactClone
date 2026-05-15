@@ -23,7 +23,8 @@ extends RefCounted
 ##      with "Save is from a newer game" message.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
-const TEST_SAVE_PATH: String = "user://test_save_migration.json"
+const TEST_SAVE_PATH: String = "user://test_artifacts/test_save_migration.json"
+const TEST_ARTIFACTS_DIR: String = "user://test_artifacts/"
 
 static func test_name() -> String:
 	return "save migration framework (registry + v17→v18 + no-path + end-to-end)"
@@ -105,6 +106,11 @@ static func run(parent: Node) -> Dictionary:
 	# call load_game, assert success + GridWorld state matches expectations.
 	var orig_path: String = SaveSystem.save_path
 	SaveSystem.save_path = TEST_SAVE_PATH
+	# Ensure the test artifacts subdirectory exists. Subdirectory is used so
+	# the game's save scanner (which enumerates user_data top level) cannot
+	# accidentally pick up this v19 fixture and show a "Save incompatible"
+	# popup at game launch. See NOTES.md "Test fixture leakage into game saves."
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TEST_ARTIFACTS_DIR))
 	if FileAccess.file_exists(TEST_SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
 
