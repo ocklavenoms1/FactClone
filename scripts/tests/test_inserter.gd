@@ -548,11 +548,14 @@ static func run(parent: Node) -> Dictionary:
 	if not result_15.success:
 		_cleanup(world, player_a_15, world_b_15, player_b_15, orig_path_15)
 		return { "ok": false, "message": "load_game failed during (15): %s" % result_15.error_message }
-	# Verify state preserved.
+	# Verify state preserved. Style mirrors sub-case (9): early-return null
+	# check, then unguarded asserts below.
 	var lr_after_15: Building = world_b_15.building_at(Vector2i(10, 10))
-	_check(failures, lr_after_15 != null and lr_after_15.type == Buildings.Type.LONG_REACH_INSERTER,
-		"(15) loaded building at (10,10) should be LONG_REACH_INSERTER, got %s" % (str(lr_after_15.type) if lr_after_15 != null else "null"))
-	if lr_after_15 != null:
+	if lr_after_15 == null:
+		failures.append("(15) loaded building at (10,10) is null (LONG_REACH_INSERTER not deserialized)")
+	else:
+		_check(failures, lr_after_15.type == Buildings.Type.LONG_REACH_INSERTER,
+			"(15) loaded building should be LONG_REACH_INSERTER, got type %d" % lr_after_15.type)
 		_check(failures, int(lr_after_15.state.get("dir", -1)) == Belt.DIR_S,
 			"(15) loaded dir should be DIR_S, got %d" % int(lr_after_15.state.get("dir", -1)))
 		_check(failures, int(lr_after_15.state.get("fuel_buffer", 0)) == 42,
@@ -563,8 +566,14 @@ static func run(parent: Node) -> Dictionary:
 			"(15) loaded cycle_progress should be 0.33, got %f" % float(lr_after_15.state.get("cycle_progress", 0.0)))
 		_check(failures, int(lr_after_15.state.get("state", -1)) == Inserter.STATE_WORKING_OUT,
 			"(15) loaded state should be STATE_WORKING_OUT, got %d" % int(lr_after_15.state.get("state", -1)))
+		# Full held_item_buffer shape check: BOTH item type AND count. Without
+		# the count assert, a save corrupting [[WHEAT, 1]] to [[WHEAT, 99]]
+		# or [[WHEAT, 0]] would slip through (coverage-gap nit from review).
 		var held_buf_15: Array = lr_after_15.state.get("held_item_buffer", [])
-		_check(failures, held_buf_15.size() == 1 and int(held_buf_15[0][0]) == Items.Type.WHEAT,
+		_check(failures,
+			held_buf_15.size() == 1
+				and int(held_buf_15[0][0]) == Items.Type.WHEAT
+				and int(held_buf_15[0][1]) == 1,
 			"(15) loaded held_item_buffer should be [[WHEAT,1]], got %s" % str(held_buf_15))
 	_cleanup(world, player_a_15, world_b_15, player_b_15, orig_path_15)
 
