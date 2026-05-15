@@ -126,6 +126,14 @@ const DEFAULT_SAVE_PATH: String = "user://save_slot_1.json"
 ## DEFAULT_SAVE_PATH after the test.
 static var save_path: String = DEFAULT_SAVE_PATH
 
+## True if the given path looks like a test fixture (test files set save_path
+## to scratch paths during negative-path tests; those should NEVER trigger
+## user-facing OS.alert popups even if the test runs windowed). Used to gate
+## OS.alert calls in load_game error branches. push_error still fires for
+## logging in both cases.
+static func _is_test_fixture_path(path: String) -> bool:
+	return path.begins_with("user://test_") or path.find("/test_artifacts/") >= 0
+
 # ---------- migration framework (session-save-migration) ----------
 #
 # Replaces the prior hard-fail-on-version-mismatch behavior. When loading
@@ -339,7 +347,8 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			# data is genuinely lost.
 			result.error_message = "Save migration failed: no path from v%d to v%d." % [version, SAVE_VERSION]
 			push_error(result.error_message)
-			OS.alert(result.error_message + "\n\nA fresh world will be generated. Original save will be overwritten on next F5.", "Save incompatible")
+			if not _is_test_fixture_path(save_path):
+				OS.alert(result.error_message + "\n\nA fresh world will be generated. Original save will be overwritten on next F5.", "Save incompatible")
 			return result
 		data = migrated
 		version = int(data.get("version", 0))   # now equals SAVE_VERSION
@@ -352,7 +361,8 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		var msg: String = "Save is v%d; this game is v%d.\n\nUpdate the game to load this save, or delete to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
 		result.error_message = "Save is from a newer game (v%d vs v%d)." % [version, SAVE_VERSION]
 		push_error(msg)
-		OS.alert(msg, "Save incompatible")
+		if not _is_test_fixture_path(save_path):
+			OS.alert(msg, "Save incompatible")
 		return result
 
 	# v11: also hard-fail on worldgen_version mismatch. Any change to procgen
@@ -366,7 +376,8 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, native_path]
 		result.error_message = "Worldgen version mismatch (v%d vs v%d) — see dialog." % [saved_worldgen_version, WorldGenerator.VERSION]
 		push_error(msg)
-		OS.alert(msg, "Save incompatible")
+		if not _is_test_fixture_path(save_path):
+			OS.alert(msg, "Save incompatible")
 		return result
 
 	var player_pos: Array = data.get("player", [0, 0])
