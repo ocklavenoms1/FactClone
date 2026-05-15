@@ -21,7 +21,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_inserter.json"
 
 static func test_name() -> String:
-	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix)"
+	return "inserter (parametric refactor + filter pickup + drop-to-set + RMB-clear + save + fuel-port fix + refactor regression)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -358,10 +358,59 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, src_wood_after + dst_wood + held_wood == 3,
 		"(10) wood conservation: source(%d) + dest(%d) + held(%d) should = 3 (none lost to fuel)" % [src_wood_after, dst_wood, held_wood])
 
+	# ===========================================================================
+	# (11) PARAMETRIC REFACTOR REGRESSION — Session 3 (long-reach prep).
+	# Guards the ARM_LENGTH const → ARM_LENGTH_BY_TYPE refactor and the new
+	# REACH_BY_TYPE accessor. Asserts that basic + fast tiers' values are
+	# unchanged after the refactor.
+	# ===========================================================================
+	_disconnect(world); world.queue_free()
+	world = _make_world(parent)
+	world.place_building(Buildings.Type.INSERTER, Vector2i(10, 10), Belt.DIR_E)
+	world.place_building(Buildings.Type.FAST_INSERTER, Vector2i(15, 10), Belt.DIR_E)
+	# Note: variables suffixed `_r` (regression) to avoid scope collision with
+	# `fast_b` already declared earlier in this function at sub-case (2).
+	var basic_r: Building = world.building_at(Vector2i(10, 10))
+	var fast_r: Building = world.building_at(Vector2i(15, 10))
+	# Cycle ticks unchanged (already covered by (1)(2), repeated here as a
+	# package — readers landing on (11) get the full refactor contract).
+	_check(failures, Inserter.cycle_ticks(basic_r) == 20,
+		"(11) basic cycle_ticks should remain 20, got %d" % Inserter.cycle_ticks(basic_r))
+	_check(failures, Inserter.cycle_ticks(fast_r) == 10,
+		"(11) fast cycle_ticks should remain 10, got %d" % Inserter.cycle_ticks(fast_r))
+	# NEW: reach() accessor returns 1 for both pre-existing tiers.
+	_check(failures, Inserter.reach(basic_r) == 1,
+		"(11) basic reach should be 1, got %d" % Inserter.reach(basic_r))
+	_check(failures, Inserter.reach(fast_r) == 1,
+		"(11) fast reach should be 1, got %d" % Inserter.reach(fast_r))
+	# NEW: arm_length() accessor returns 0.55 for both pre-existing tiers
+	# (was a const before the refactor; baseline preserved).
+	_check(failures, abs(Inserter.arm_length(basic_r) - 0.55) < 0.001,
+		"(11) basic arm_length should be 0.55, got %f" % Inserter.arm_length(basic_r))
+	_check(failures, abs(Inserter.arm_length(fast_r) - 0.55) < 0.001,
+		"(11) fast arm_length should be 0.55, got %f" % Inserter.arm_length(fast_r))
+	# source_tile / dest_tile remain 1-tile offset for both tiers across rotations.
+	for dir_r in [Belt.DIR_E, Belt.DIR_S, Belt.DIR_W, Belt.DIR_N]:
+		basic_r.state["dir"] = dir_r
+		fast_r.state["dir"] = dir_r
+		var v_r: Vector2i = Belt.DIR_VECS[dir_r]
+		var basic_expected_src: Vector2i = Vector2i(basic_r.anchor.x - v_r.x, basic_r.anchor.y - v_r.y)
+		var basic_expected_dst: Vector2i = Vector2i(basic_r.anchor.x + v_r.x, basic_r.anchor.y + v_r.y)
+		_check(failures, Inserter.source_tile(basic_r) == basic_expected_src,
+			"(11) basic source_tile dir=%d should be %s, got %s" % [dir_r, str(basic_expected_src), str(Inserter.source_tile(basic_r))])
+		_check(failures, Inserter.dest_tile(basic_r) == basic_expected_dst,
+			"(11) basic dest_tile dir=%d should be %s, got %s" % [dir_r, str(basic_expected_dst), str(Inserter.dest_tile(basic_r))])
+		var fast_expected_src: Vector2i = Vector2i(fast_r.anchor.x - v_r.x, fast_r.anchor.y - v_r.y)
+		var fast_expected_dst: Vector2i = Vector2i(fast_r.anchor.x + v_r.x, fast_r.anchor.y + v_r.y)
+		_check(failures, Inserter.source_tile(fast_r) == fast_expected_src,
+			"(11) fast source_tile dir=%d should be %s, got %s" % [dir_r, str(fast_expected_src), str(Inserter.source_tile(fast_r))])
+		_check(failures, Inserter.dest_tile(fast_r) == fast_expected_dst,
+			"(11) fast dest_tile dir=%d should be %s, got %s" % [dir_r, str(fast_expected_dst), str(Inserter.dest_tile(fast_r))])
+
 	_disconnect(world); world.queue_free()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "10 sub-suites pass: parametric refactor regression + fast cycle + filter chest/belt + drop-to-set + RMB clear + save round-trip + fuel-port fix" }
+		return { "ok": true, "message": "11 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------

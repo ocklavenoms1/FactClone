@@ -59,17 +59,42 @@ const CYCLE_TICKS_BY_TYPE: Dictionary = {
 const CYCLE_TICKS_DEFAULT: int = 20
 
 # Per-tier body color. New tiers add an entry; default fallback is bronze
-# (basic). Future LONG_INSERTER would add `ARM_LENGTH_BY_TYPE` similarly.
-#   INSERTER:      bronze (basic — Session 1)
-#   FAST_INSERTER: row added at session-inserter-fast-filter (Session 2)
+# (basic). Pattern mirrored in CYCLE_TICKS_BY_TYPE, REACH_BY_TYPE, and
+# ARM_LENGTH_BY_TYPE below.
+#   INSERTER:            bronze (basic — Session 1)
+#   FAST_INSERTER:       row added at session-inserter-fast-filter (Session 2)
+#   LONG_REACH_INSERTER: row added at session-inserter-long-reach (Session 3)
 const BODY_COLOR_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:      Color(0.55, 0.45, 0.30),    # bronze
 	Buildings.Type.FAST_INSERTER: Color(0.45, 0.55, 0.70),    # cool blue-grey
 }
 const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
 
-# Animation parameter shared across tiers (LONG_INSERTER would override).
-const ARM_LENGTH: float = 0.55       # fraction of tile_size
+# Per-tier reach (in tiles). Source = anchor - reach*DIR_VECS[dir]; dest =
+# anchor + reach*DIR_VECS[dir]. New table introduced at session-inserter-
+# long-reach to support reach as an orthogonal upgrade axis from speed.
+# Default fallback = 1 (basic-equivalent — preserves existing tier behavior).
+#   INSERTER:             1 — basic (Session 1)
+#   FAST_INSERTER:        1 — fast (Session 2)
+#   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
+const REACH_BY_TYPE: Dictionary = {
+	Buildings.Type.INSERTER:      1,
+	Buildings.Type.FAST_INSERTER: 1,
+}
+const REACH_DEFAULT: int = 1
+
+# Per-tier arm length (fraction of tile_size). REFACTORED from a single
+# `const ARM_LENGTH = 0.55` at session-inserter-long-reach — long-reach
+# tier needs a longer arm visual, so the param becomes per-type. Baseline
+# 0.55 preserved for INSERTER / FAST_INSERTER (pure additive change).
+#   INSERTER:             0.55 — basic
+#   FAST_INSERTER:        0.55 — fast (visually identical to basic)
+#   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
+const ARM_LENGTH_BY_TYPE: Dictionary = {
+	Buildings.Type.INSERTER:      0.55,
+	Buildings.Type.FAST_INSERTER: 0.55,
+}
+const ARM_LENGTH_DEFAULT: float = 0.55
 
 # Fuel input port direction (canonical orientation; rotates with b.dir
 # via Buildings.world_dir). Mirrors the Smelter pattern from session-
@@ -102,6 +127,17 @@ static func cycle_ticks(b: Building) -> int:
 ## Body color for this inserter's tier. Public API — used by draw().
 static func body_color(b: Building) -> Color:
 	return BODY_COLOR_BY_TYPE.get(b.type, BODY_COLOR_DEFAULT)
+
+## Reach (in tiles) for this inserter's tier. Public API — used by
+## source_tile() and dest_tile() to compute the offset along b.dir.
+## Default fallback = 1 (basic-equivalent).
+static func reach(b: Building) -> int:
+	return int(REACH_BY_TYPE.get(b.type, REACH_DEFAULT))
+
+## Arm length (fraction of tile_size) for this inserter's tier. Public API
+## — used by draw(). Default fallback = 0.55 (basic-equivalent baseline).
+static func arm_length(b: Building) -> float:
+	return float(ARM_LENGTH_BY_TYPE.get(b.type, ARM_LENGTH_DEFAULT))
 
 ## Build initial state. dir defaults to canonical east (DIR_E = 0).
 ## b_type defaults to INSERTER; pass FAST_INSERTER (or future tiers) for
@@ -191,17 +227,21 @@ static func tick(b: Building, world) -> void:
 
 # ---------- helpers ----------
 
-## Source tile = anchor + opposite-of-dir. dir=E → source is west.
+## Source tile = anchor + opposite-of-dir * reach. dir=E, reach=1 → source
+## is west (1 tile away); reach=2 → source is 2 tiles west.
 static func source_tile(b: Building) -> Vector2i:
 	var d: int = int(b.state.get("dir", 0))
 	var v: Vector2i = Belt.DIR_VECS[d]
-	return Vector2i(b.anchor.x - v.x, b.anchor.y - v.y)
+	var r: int = reach(b)
+	return Vector2i(b.anchor.x - v.x * r, b.anchor.y - v.y * r)
 
-## Destination tile = anchor + dir. dir=E → destination is east.
+## Destination tile = anchor + dir * reach. dir=E, reach=1 → destination
+## is east (1 tile away); reach=2 → destination is 2 tiles east.
 static func dest_tile(b: Building) -> Vector2i:
 	var d: int = int(b.state.get("dir", 0))
 	var v: Vector2i = Belt.DIR_VECS[d]
-	return Vector2i(b.anchor.x + v.x, b.anchor.y + v.y)
+	var r: int = reach(b)
+	return Vector2i(b.anchor.x + v.x * r, b.anchor.y + v.y * r)
 
 ## Held item type or -1 if empty.
 static func held_item_type(b: Building) -> int:
@@ -502,8 +542,9 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 	var dir_offset: float = float(dir) * (PI * 0.5)
 	var arm_angle: float = canonical_angle + dir_offset
 
-	# Draw arm — line from pivot to arm tip.
-	var arm_len: float = float(tile_size) * ARM_LENGTH
+	# Draw arm — line from pivot to arm tip. Arm length is per-tier
+	# (long-reach uses 2x); see ARM_LENGTH_BY_TYPE.
+	var arm_len: float = float(tile_size) * arm_length(b)
 	var arm_dir: Vector2 = Vector2(cos(arm_angle), sin(arm_angle))
 	var arm_tip: Vector2 = center + arm_dir * arm_len
 	canvas.draw_line(center, arm_tip, ARM_COLOR, 3.0)
