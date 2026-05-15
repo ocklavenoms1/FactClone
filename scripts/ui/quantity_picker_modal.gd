@@ -63,7 +63,10 @@ func open(anchor: Vector2, direction: String, label_item: String,
 	_spinbox.value = clamp(default_n, 1, max_n)
 	# Anchor placement with viewport-edge flip per spec §4.3 / Q4b.
 	var picker_size: Vector2 = size
-	var vp: Vector2 = get_viewport_rect().size
+	# PopupPanel extends Window, not CanvasItem — get_viewport_rect lives on
+	# CanvasItem. Use the parent Control's viewport-rect for edge-flip math
+	# (parent is HUD, which is a Control, so get_viewport_rect works there).
+	var vp: Vector2 = get_parent().get_viewport_rect().size
 	var pos: Vector2 = anchor + Vector2(60, -40)
 	if pos.x + picker_size.x > vp.x:
 		pos.x = anchor.x - (60 + picker_size.x)
