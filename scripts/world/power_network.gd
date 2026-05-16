@@ -27,12 +27,22 @@ extends RefCounted
 # Maximum Chebyshev distance for pole-to-pole auto-connection.
 const POLE_RANGE: int = 5
 
-# 4-directional adjacency for building-to-pole association.
+# 4-directional adjacency for building-to-pole association. Local copy —
+# grid_world.gd has its own `_CARDINALS` at line 471; kept separate so
+# PowerNetwork stays self-contained and doesn't need to reach into
+# grid_world for a private constant.
 const _CARDINALS: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]
 
 ## Mark the power network as needing a topology rebuild on next query.
 ## Called by grid_world on placement/removal of poles, generators, or
 ## consumers.
+##
+## NOTE: `world` is intentionally untyped across this module. Adding
+## `world: GridWorld` would create a cyclic class_name dependency
+## (grid_world.gd already preloads/references PowerNetwork via
+## `power_satisfaction_at` wrapper). Untyped duck-typing is the
+## established Godot 4 escape hatch for this loop; same pattern used
+## by Buildings.tick_one(b, world) etc.
 static func mark_dirty(world) -> void:
 	world._power_network_dirty = true
 
