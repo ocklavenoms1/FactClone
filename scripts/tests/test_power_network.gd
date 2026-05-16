@@ -232,6 +232,12 @@ static func run(parent: Node) -> Dictionary:
 				continue
 			if world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(col, 5)):
 				lamps_placed += 1
+	# Guard: confirm we actually placed enough lamps to force brownout. The
+	# layout above targets ~12+ lamps adjacent to the 5 poles; if a future
+	# place_building regression silently rejects placements, the brownout
+	# precondition below could pass for the wrong reason. Lock the count.
+	_check(failures, lamps_placed >= 12,
+		"(9) expected >=12 lamps placed for brownout layout, got %d (place_building regression?)" % lamps_placed)
 	# Tick once to populate wheel's output_active, then update_supply_demand.
 	TickSystem.current_tick += 1
 	TickSystem.tick.emit(TickSystem.current_tick)

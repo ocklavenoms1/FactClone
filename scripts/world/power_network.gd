@@ -110,7 +110,14 @@ static func update_supply_demand(world) -> void:
 				world._component_supply[comp_id] = int(world._component_supply.get(comp_id, 0)) + WaterWheel.MAX_OUTPUT
 		elif b.type == Buildings.Type.ELECTRIC_LAMP:
 			world._component_demand[comp_id] = int(world._component_demand.get(comp_id, 0)) + ElectricLamp.DEMAND
-	# Compute satisfaction per component.
+	# Compute satisfaction per component. Formula is semantically equivalent
+	# to the spec's `min(1.0, supply / max(1, demand))` for dem >= 1 (the
+	# consequential range). For dem == 0 (network has no consumers) this
+	# returns 1.0 unconditionally — diverges from the spec's literal
+	# `min(1.0, sup/1)` (which would be 0 when sup == 0). Benign because no
+	# consumer is reading satisfaction on a network with no consumers; the
+	# cycle-multiplier contract `1.0 / max(0.1, sat)` is never evaluated
+	# either. Reaffirmed at Task 7 review.
 	for comp_id in world._pole_component.values():
 		var sup: int = int(world._component_supply.get(comp_id, 0))
 		var dem: int = int(world._component_demand.get(comp_id, 0))
