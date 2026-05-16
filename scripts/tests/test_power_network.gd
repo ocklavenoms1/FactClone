@@ -12,8 +12,10 @@ extends RefCounted
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
+const TEST_SAVE_PATH: String = "user://test_power_network.json"
+
 static func test_name() -> String:
-	return "power network (topology + generator + consumer + linear satisfaction)"
+	return "power network (topology + generator + consumer + linear satisfaction + save)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -254,10 +256,97 @@ static func run(parent: Node) -> Dictionary:
 		# Sanity: brownout actually occurred (sup < dem).
 		_check(failures, sup_9 < dem_9, "(9) brownout precondition: supply %d should be < demand %d" % [sup_9, dem_9])
 
+	# ===========================================================================
+	# (10) SAVE ROUND-TRIP — place network, save, reload, verify topology
+	# reconstructed and lamp still powered. Validates that save schema
+	# unchanged at v18 handles append-only enum entries (POWER_POLE /
+	# WATER_WHEEL / ELECTRIC_LAMP) and that .get()-defaulted state fields
+	# survive serialization. Network maps (_pole_component etc.) are NOT
+	# serialized — rebuilt on load via dirty-flag.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	# Paint stone for both 2x2 wheel footprint rows.
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	# Water at (3,5). For save-roundtrip we MUST record in tile_modifications
+	# so SaveSystem persists it (procgen regenerates canonical tiles on load;
+	# tile_modifications overlays player edits). Direct `tiles[pos] = ...` is
+	# in-memory only and would be lost across save/load. Distinct Tile.new()
+	# instances per dict matches the pattern in set_overlay (no shared refs).
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	world.tile_modifications[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(11, 5))
+	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(7, 5))
+	# Pre-save: tick + update + verify lamp powered.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	var pre_comp: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	var pre_sat: float = PowerNetwork.satisfaction_for(world, pre_comp)
+	_check(failures, abs(pre_sat - 1.0) < 0.001, "(10) pre-save: lamp should be fully powered, got sat %f" % pre_sat)
+
+	# Save via SaveSystem (matches test_inserter.gd sub-case (15) pattern).
+	var orig_path_10: String = SaveSystem.save_path
+	SaveSystem.save_path = TEST_SAVE_PATH
+	var player_a_10 := Node2D.new()
+	parent.add_child(player_a_10)
+	if not SaveSystem.save_game(world, player_a_10, Inventory.new(16)):
+		SaveSystem.save_path = orig_path_10
+		_disconnect(world)
+		player_a_10.queue_free()
+		return { "ok": false, "message": "(10) save_game failed" }
+
+	# Load into a fresh world.
+	_disconnect(world)
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var player_b_10 := Node2D.new()
+	parent.add_child(player_b_10)
+	var result_10: LoadResult = SaveSystem.load_game(world, player_b_10, Inventory.new(16))
+	if not result_10.success:
+		SaveSystem.save_path = orig_path_10
+		_disconnect(world)
+		player_a_10.queue_free()
+		player_b_10.queue_free()
+		if FileAccess.file_exists(TEST_SAVE_PATH):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+		return { "ok": false, "message": "(10) load_game failed: %s" % result_10.error_message }
+
+	# Post-load: tick + update + verify lamp still powered (network reconstructed).
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	var post_comp: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, post_comp >= 0, "(10) post-load: pole at (6,5) should be in a network, got %d" % post_comp)
+	if post_comp >= 0:
+		var post_sat: float = PowerNetwork.satisfaction_for(world, post_comp)
+		_check(failures, abs(post_sat - 1.0) < 0.001, "(10) post-load: lamp should still be fully powered, got sat %f" % post_sat)
+		# Sanity: wheel + 2 poles + 1 lamp all loaded as the correct types.
+		_check(failures, world.has_building_at(Vector2i(4, 5)) and world.building_at(Vector2i(4, 5)).type == Buildings.Type.WATER_WHEEL,
+			"(10) wheel at (4,5) should be loaded")
+		_check(failures, world.has_building_at(Vector2i(6, 5)) and world.building_at(Vector2i(6, 5)).type == Buildings.Type.POWER_POLE,
+			"(10) pole at (6,5) should be loaded")
+		_check(failures, world.has_building_at(Vector2i(11, 5)) and world.building_at(Vector2i(11, 5)).type == Buildings.Type.POWER_POLE,
+			"(10) pole at (11,5) should be loaded")
+		_check(failures, world.has_building_at(Vector2i(7, 5)) and world.building_at(Vector2i(7, 5)).type == Buildings.Type.ELECTRIC_LAMP,
+			"(10) lamp at (7,5) should be loaded")
+
+	# Cleanup test save file + restore path.
+	SaveSystem.save_path = orig_path_10
+	if FileAccess.file_exists(TEST_SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+	player_a_10.queue_free()
+	player_b_10.queue_free()
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "9 sub-cases pass: + supply sufficient + brownout (linear satisfaction)" }
+		return { "ok": true, "message": "10 sub-cases pass: + save round-trip (network rebuilt on load)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
