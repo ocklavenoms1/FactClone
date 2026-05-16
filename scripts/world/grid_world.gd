@@ -1596,13 +1596,14 @@ func _draw_power_wires() -> void:
 		if not poles_by_comp.has(cid):
 			poles_by_comp[cid] = []
 		poles_by_comp[cid].append(pos)
-	# Draw wires per component.
+	# Draw wires per component. Colors named for the network state they
+	# represent, not for the hue (live = any power, dead = zero supply).
 	const WIRE_THICKNESS: float = 2.0
-	var golden: Color = Color(0.85, 0.70, 0.40)
-	var dark: Color = Color(0.30, 0.22, 0.15)
+	var WIRE_COLOR_LIVE: Color = Color(0.85, 0.70, 0.40)    # golden — network has power
+	var WIRE_COLOR_DEAD: Color = Color(0.30, 0.22, 0.15)    # dark brown — no supply
 	for cid in poles_by_comp:
 		var sat: float = float(_component_satisfaction.get(cid, 0.0))
-		var wire_color: Color = golden if sat > 0.0 else dark
+		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
 		var poles: Array = poles_by_comp[cid]
 		# Pairwise draw (canonical ordering: lex-smaller anchor first).
 		for i in range(poles.size()):
