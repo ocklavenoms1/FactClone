@@ -48,7 +48,7 @@ static func tick(b: Building, world) -> void:
 static func _has_water_adjacent(b: Building, world) -> bool:
 	for cell in Buildings.all_edge_cells(b.type, b.anchor):
 		if world.tiles.has(cell):
-			var tile = world.tiles[cell]
+			var tile: Tile = world.tiles[cell]
 			if tile != null and tile.base == Terrain.Base.WATER:
 				return true
 	return false
@@ -57,14 +57,16 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 	# 2x2 frame.
 	var frame_rect: Rect2 = Rect2(world_pos, Vector2(tile_size * 2, tile_size * 2))
 	var active: bool = bool(b.state.get("output_active", false))
+	# Componentwise multiply via Godot's Color * Color operator. IDLE_TINT
+	# has alpha = 1.0 so result alpha stays 1.0; same for Color.WHITE.
 	var tint: Color = Color.WHITE if active else IDLE_TINT
-	var frame_color: Color = Color(FRAME_COLOR.r * tint.r, FRAME_COLOR.g * tint.g, FRAME_COLOR.b * tint.b, 1.0)
+	var frame_color: Color = FRAME_COLOR * tint
 	canvas.draw_rect(frame_rect, frame_color, true)
 	canvas.draw_rect(frame_rect, WHEEL_RIM, false, 2.0)
 	# Wheel — central rotating spokes.
 	var center: Vector2 = world_pos + Vector2(tile_size, tile_size)
 	var radius: float = float(tile_size) * 0.85
-	var wheel_color: Color = Color(WHEEL_COLOR.r * tint.r, WHEEL_COLOR.g * tint.g, WHEEL_COLOR.b * tint.b, 1.0)
+	var wheel_color: Color = WHEEL_COLOR * tint
 	canvas.draw_arc(center, radius, 0.0, TAU, 24, WHEEL_RIM, 2.0)
 	canvas.draw_arc(center, radius * 0.8, 0.0, TAU, 24, wheel_color, 1.5)
 	# Spokes — 6 of them, rotated by wheel_rotation.
