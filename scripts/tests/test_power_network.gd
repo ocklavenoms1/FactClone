@@ -299,6 +299,10 @@ static func run(parent: Node) -> Dictionary:
 		SaveSystem.save_path = orig_path_10
 		_disconnect(world)
 		player_a_10.queue_free()
+		# Mirror load-failure cleanup: remove any partial save file even on
+		# the save-failure path (unlikely but possible — keeps reruns clean).
+		if FileAccess.file_exists(TEST_SAVE_PATH):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
 		return { "ok": false, "message": "(10) save_game failed" }
 
 	# Load into a fresh world.
