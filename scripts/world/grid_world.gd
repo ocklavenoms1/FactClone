@@ -591,6 +591,18 @@ func _rebuild_fluid_network() -> void:
 # ---------- simulation ----------
 
 func _on_tick(_tick_no: int) -> void:
+	# Pre-pass: update power network supply/demand/satisfaction. Generators
+	# and consumers read/write state during their own tick (output_active /
+	# satisfaction); this pre-pass aggregates those into the per-component
+	# numbers, so consumers see the CURRENT-tick numbers when their tick
+	# runs in the building loop below.
+	#
+	# Tick-ordering subtlety: generator's output_active is set during its
+	# own tick (which fires AFTER this pre-pass). So on the FIRST tick
+	# after a generator is placed, supply will be 0 (output_active is still
+	# false from initial state). Subsequent ticks see correct supply.
+	# Acceptable for v1; refine in Session 2 if it surfaces as UX issue.
+	PowerNetwork.update_supply_demand(self)
 	# Two-pass tick: pass 1 mutates self only, pass 2 hands items to neighbors.
 	# Reading neighbor state in pass 2 is safe because pass 1 has finished
 	# everywhere — order-independent for chain belts.

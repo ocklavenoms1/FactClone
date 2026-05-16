@@ -13,7 +13,7 @@ extends RefCounted
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
 static func test_name() -> String:
-	return "power network (topology + generator + consumer)"
+	return "power network (topology + generator + consumer + linear satisfaction)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -156,10 +156,102 @@ static func run(parent: Node) -> Dictionary:
 		_check(failures, demand_7 == ElectricLamp.DEMAND,
 			"(7) network demand should equal lamp DEMAND (%d), got %d" % [ElectricLamp.DEMAND, demand_7])
 
+
+	# ===========================================================================
+	# (8) SUPPLY SUFFICIENT — wheel (10) + lamp (1), satisfaction == 1.0.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	# Paint stone for both 2x2 footprint rows (wheel covers y=5+y=6).
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	# Layout: water (3,5), wheel (4,5) facing west, pole (6,5), lamp (7,5).
+	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(7, 5))
+	# Tick once to populate wheel's output_active.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	# update_supply_demand now also runs as part of _on_tick (pre-pass).
+	# But the test runner has TickSystem paused (test_runner.gd line 53),
+	# so _on_tick doesn't fire automatically when tests emit ticks. Call
+	# update_supply_demand explicitly to populate the state.
+	PowerNetwork.update_supply_demand(world)
+	var comp_8: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, comp_8 >= 0, "(8) pole should be in a network")
+	if comp_8 >= 0:
+		var sat_8: float = PowerNetwork.satisfaction_for(world, comp_8)
+		_check(failures, abs(sat_8 - 1.0) < 0.001,
+			"(8) satisfaction should be 1.0 (supply 10 > demand 1), got %f" % sat_8)
+		# Tick lamp again to update its cached satisfaction.
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+		var lamp_8: Building = world.building_at(Vector2i(7, 5))
+		_check(failures, abs(float(lamp_8.state.get("satisfaction", -1.0)) - 1.0) < 0.001,
+			"(8) lamp.state.satisfaction should be 1.0, got %f" % float(lamp_8.state.get("satisfaction", -1.0)))
+
+	# ===========================================================================
+	# (9) BROWNOUT — 1 wheel (10 supply) + 12+ lamps (12+ demand). Sat < 1.0.
+	# Layout: stone strip 0..30, water at (3,5), wheel at (4,5) facing west,
+	# chain of poles at 6/11/16/21/26 (5-tile spacing → all connected),
+	# many lamps around those poles.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 30):
+		for y in range(3, 8):
+			world.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
+	# Chain of poles at 5-tile spacing — all in same component.
+	for px in [6, 11, 16, 21, 26]:
+		world.place_building(Buildings.Type.POWER_POLE, Vector2i(px, 5))
+	# Place lamps adjacent to those poles. Use y=4 and y=6 (above/below
+	# the pole row) plus column-adjacent cells where available.
+	var lamps_placed: int = 0
+	for px in [6, 11, 16, 21, 26]:
+		# y=4 and y=6 for each pole — 2 lamps per pole × 5 poles = 10 lamps.
+		for ly in [4, 6]:
+			if world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(px, ly)):
+				lamps_placed += 1
+		# Column-adjacent cells (px-1, 5) and (px+1, 5) where not already taken.
+		for dx in [-1, 1]:
+			var col: int = px + dx
+			if col == 4 or col == 5:  # wheel zone
+				continue
+			var taken: bool = false
+			for other_px in [6, 11, 16, 21, 26]:
+				if col == other_px:
+					taken = true
+					break
+			if taken:
+				continue
+			if world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(col, 5)):
+				lamps_placed += 1
+	# Tick once to populate wheel's output_active, then update_supply_demand.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	var comp_9: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, comp_9 >= 0, "(9) pole should be in a network")
+	if comp_9 >= 0:
+		var sup_9: int = PowerNetwork.supply_for(world, comp_9)
+		var dem_9: int = PowerNetwork.demand_for(world, comp_9)
+		var sat_9: float = PowerNetwork.satisfaction_for(world, comp_9)
+		var expected_sat: float = min(1.0, float(sup_9) / float(max(1, dem_9)))
+		_check(failures, abs(sat_9 - expected_sat) < 0.001,
+			"(9) brownout satisfaction should be %f (supply %d / demand %d), got %f" % [expected_sat, sup_9, dem_9, sat_9])
+		# Sanity: brownout actually occurred (sup < dem).
+		_check(failures, sup_9 < dem_9, "(9) brownout precondition: supply %d should be < demand %d" % [sup_9, dem_9])
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "7 sub-cases pass: + consumer joins network" }
+		return { "ok": true, "message": "9 sub-cases pass: + supply sufficient + brownout (linear satisfaction)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
