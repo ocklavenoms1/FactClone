@@ -13,7 +13,7 @@ extends RefCounted
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
 static func test_name() -> String:
-	return "power network (topology)"
+	return "power network (topology + generator)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -95,10 +95,50 @@ static func run(parent: Node) -> Dictionary:
 	var post_remove_b: int = PowerNetwork.network_id_at(world, Vector2i(10, 5))
 	_check(failures, post_remove_a != post_remove_b, "(5) post-remove: ends should be separate components again, both got %d" % post_remove_a)
 
+	# ===========================================================================
+	# (6) GENERATOR JOINS NETWORK — water wheel adjacent to pole contributes
+	# MAX_OUTPUT (10) to that network's supply pool when active.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	# Paint a strip of stone + a water tile next to where the wheel will be.
+	# Wheel is 2x2, so paint two rows. Also paint y=6 for the pole row's
+	# southern neighbor of the wheel.
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	# Water tile at (3, 5) — wheel will be at (4, 5) covering (4,5)(5,5)(4,6)(5,6).
+	# Water at (3, 5) is adjacent to (4, 5) — the wheel's west edge.
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	# Pole east of the wheel at (6, 5). Adjacent to wheel's (5, 5) cell.
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	# Place wheel facing west (DIR_W). DIR_W is Belt.DIR_W.
+	if not world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W):
+		_disconnect(world)
+		return { "ok": false, "message": "(6) could not place water wheel at (4,5) — check water-overlay setup" }
+	# Tick once to populate output_active.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	# Now run update_supply_demand explicitly (per-tick orchestrator will be
+	# hooked into _on_tick in Task 7; for now call directly).
+	PowerNetwork.update_supply_demand(world)
+	# Verify: pole's component has supply >= MAX_OUTPUT.
+	var comp_6: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, comp_6 >= 0, "(6) pole should be in a network, got comp_id %d" % comp_6)
+	if comp_6 >= 0:
+		var supply_6: int = PowerNetwork.supply_for(world, comp_6)
+		_check(failures, supply_6 == WaterWheel.MAX_OUTPUT,
+			"(6) network supply should equal MAX_OUTPUT (%d), got %d" % [WaterWheel.MAX_OUTPUT, supply_6])
+		# Sanity: wheel's output_active should be true.
+		var wheel_b: Building = world.building_at(Vector2i(4, 5))
+		_check(failures, bool(wheel_b.state.get("output_active", false)),
+			"(6) wheel should be output_active = true (water at (3,5) adjacent)")
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "5 sub-cases pass: single pole + in-range merge + out-of-range + bridge merge + split on remove" }
+		return { "ok": true, "message": "6 sub-cases pass: + generator joins network" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------

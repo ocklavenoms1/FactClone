@@ -88,6 +88,36 @@ static func rebuild_topology(world) -> void:
 
 	world._power_network_dirty = false
 
+## Per-tick orchestrator. Called from grid_world._on_tick BEFORE the
+## building tick loop. Rebuilds topology if dirty, then walks generators
+## (water wheels) to accumulate supply per component. Computes
+## satisfaction last.
+##
+## Task 5 scope: WATER_WHEEL supply only. Task 6 will extend for
+## ELECTRIC_LAMP demand. Task 7 wires this into grid_world._on_tick.
+static func update_supply_demand(world) -> void:
+	if world._power_network_dirty:
+		rebuild_topology(world)
+	# Reset accumulators.
+	for comp_id in world._pole_component.values():
+		world._component_supply[comp_id] = 0
+		world._component_demand[comp_id] = 0
+	# Walk all buildings. Generators contribute supply.
+	for anchor in world.buildings:
+		var b: Building = world.buildings[anchor]
+		var comp_id: int = _adjacent_component_id(world, b)
+		if comp_id < 0:
+			continue
+		if b.type == Buildings.Type.WATER_WHEEL:
+			if bool(b.state.get("output_active", false)):
+				world._component_supply[comp_id] = int(world._component_supply.get(comp_id, 0)) + WaterWheel.MAX_OUTPUT
+	# Compute satisfaction per component.
+	for comp_id in world._pole_component.values():
+		var sup: int = int(world._component_supply.get(comp_id, 0))
+		var dem: int = int(world._component_demand.get(comp_id, 0))
+		var sat: float = 1.0 if dem == 0 else min(1.0, float(sup) / float(dem))
+		world._component_satisfaction[comp_id] = sat
+
 ## Find the component ID of any pole adjacent to building `b`. Returns -1
 ## if no adjacent pole. Used by generators (supply) and consumers (demand)
 ## once they exist. Lex-first iteration order resolves the ambiguity when

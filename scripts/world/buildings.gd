@@ -91,6 +91,11 @@ enum Type {
 	# (DATA entry + dispatch cases land in Task 3; WATER_WHEEL/ELECTRIC_LAMP
 	# enum entries land in Tasks 5+6 respectively.)
 	POWER_POLE,
+	# Water Wheel — first generator. 2x2, requires STONE/PATH base, must
+	# have at least one perimeter cell over a water terrain tile to be
+	# active. MAX_OUTPUT = 10 power units when active. No fuel —
+	# sustainable theme.
+	WATER_WHEEL,
 }
 
 const DATA: Dictionary = {
@@ -660,6 +665,17 @@ const DATA: Dictionary = {
 		# No slot_layout — pole is passive infrastructure, no inventory UI.
 		# Info-only via Q-inspect (info_lines shows network ID + capacity).
 	},
+	Type.WATER_WHEEL: {
+		"name": "Water Wheel",
+		"swatch_color": Color(0.40, 0.55, 0.65),    # wet wood-teal
+		"footprint": Vector2i(2, 2),
+		# Substantial generator — needs solid base near water. Mirrors PUMP.
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": true,                  # wheel faces water
+		"player_drainable": false,
+		"walkable": false,
+		# No slot_layout — generator has no items. Info via Q-inspect.
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -847,6 +863,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Inserter.make(pos, dir, Type.LONG_REACH_INSERTER)
 		Type.POWER_POLE:
 			return PowerPole.make(pos)
+		Type.WATER_WHEEL:
+			return WaterWheel.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -887,6 +905,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# in canonical orientation) so source items aren't consumed
 			# as fuel.
 			Inserter.tick(b, world)
+		Type.WATER_WHEEL:
+			WaterWheel.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -944,6 +964,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Inserter.draw(b, canvas, world_pos, tile_size)
 		Type.POWER_POLE:
 			PowerPole.draw(b, canvas, world_pos, tile_size)
+		Type.WATER_WHEEL:
+			WaterWheel.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1150,6 +1172,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Smelter.info_lines(b, world)
 		Type.POWER_POLE:
 			return PowerPole.info_lines(b, world)
+		Type.WATER_WHEEL:
+			return WaterWheel.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():
