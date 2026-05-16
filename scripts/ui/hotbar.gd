@@ -123,6 +123,21 @@ func _build_categories() -> void:
 		"selected": 0,
 	})
 
+	# Electricity Arc Session 1 (session-electricity-foundation): NEW Power
+	# category. Three slots — pole (connector), water wheel (generator),
+	# electric lamp (test consumer). Future sessions extend with more
+	# generators (windmill, steam engine), storage (accumulator), and
+	# tier variants (medium pole, substation).
+	categories.append({
+		"name": "Power",
+		"slots": [
+			{ "kind": "building", "value": Buildings.Type.POWER_POLE },
+			{ "kind": "building", "value": Buildings.Type.WATER_WHEEL },
+			{ "kind": "building", "value": Buildings.Type.ELECTRIC_LAMP },
+		],
+		"selected": 0,
+	})
+
 	categories.append({
 		"name": "Production",
 		"slots": [
