@@ -88,13 +88,10 @@ static func rebuild_topology(world) -> void:
 
 	world._power_network_dirty = false
 
-## Per-tick orchestrator. Called from grid_world._on_tick BEFORE the
-## building tick loop. Rebuilds topology if dirty, then walks generators
-## (water wheels) to accumulate supply per component. Computes
-## satisfaction last.
+## Walks generators (water wheels → supply) and consumers (lamps → demand)
+## adjacent to poles. Computes satisfaction per component.
 ##
-## Task 5 scope: WATER_WHEEL supply only. Task 6 will extend for
-## ELECTRIC_LAMP demand. Task 7 wires this into grid_world._on_tick.
+## Task 7 wires this into grid_world._on_tick.
 static func update_supply_demand(world) -> void:
 	if world._power_network_dirty:
 		rebuild_topology(world)
@@ -102,7 +99,7 @@ static func update_supply_demand(world) -> void:
 	for comp_id in world._pole_component.values():
 		world._component_supply[comp_id] = 0
 		world._component_demand[comp_id] = 0
-	# Walk all buildings. Generators contribute supply.
+	# Walk all buildings. Generators contribute supply; consumers contribute demand.
 	for anchor in world.buildings:
 		var b: Building = world.buildings[anchor]
 		var comp_id: int = _adjacent_component_id(world, b)
@@ -111,6 +108,8 @@ static func update_supply_demand(world) -> void:
 		if b.type == Buildings.Type.WATER_WHEEL:
 			if bool(b.state.get("output_active", false)):
 				world._component_supply[comp_id] = int(world._component_supply.get(comp_id, 0)) + WaterWheel.MAX_OUTPUT
+		elif b.type == Buildings.Type.ELECTRIC_LAMP:
+			world._component_demand[comp_id] = int(world._component_demand.get(comp_id, 0)) + ElectricLamp.DEMAND
 	# Compute satisfaction per component.
 	for comp_id in world._pole_component.values():
 		var sup: int = int(world._component_supply.get(comp_id, 0))

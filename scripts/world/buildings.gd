@@ -96,6 +96,11 @@ enum Type {
 	# active. MAX_OUTPUT = 10 power units when active. No fuel —
 	# sustainable theme.
 	WATER_WHEEL,
+	# Electric Lamp — first consumer. 1x1, DEMAND = 1 power unit.
+	# Brightness modulates by network satisfaction in [0, 1]. The lamp
+	# is intentionally binary-visual (on/off threshold at sat>0.05 + alpha
+	# scaling); future processors will scale throughput linearly.
+	ELECTRIC_LAMP,
 }
 
 const DATA: Dictionary = {
@@ -676,6 +681,15 @@ const DATA: Dictionary = {
 		"walkable": false,
 		# No slot_layout — generator has no items. Info via Q-inspect.
 	},
+	Type.ELECTRIC_LAMP: {
+		"name": "Electric Lamp",
+		"swatch_color": Color(0.95, 0.85, 0.45),    # warm yellow
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+		"walkable": false,
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -865,6 +879,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return PowerPole.make(pos)
 		Type.WATER_WHEEL:
 			return WaterWheel.make(pos, dir)
+		Type.ELECTRIC_LAMP:
+			return ElectricLamp.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -907,6 +923,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Inserter.tick(b, world)
 		Type.WATER_WHEEL:
 			WaterWheel.tick(b, world)
+		Type.ELECTRIC_LAMP:
+			ElectricLamp.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -966,6 +984,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			PowerPole.draw(b, canvas, world_pos, tile_size)
 		Type.WATER_WHEEL:
 			WaterWheel.draw(b, canvas, world_pos, tile_size)
+		Type.ELECTRIC_LAMP:
+			ElectricLamp.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1174,6 +1194,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return PowerPole.info_lines(b, world)
 		Type.WATER_WHEEL:
 			return WaterWheel.info_lines(b, world)
+		Type.ELECTRIC_LAMP:
+			return ElectricLamp.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

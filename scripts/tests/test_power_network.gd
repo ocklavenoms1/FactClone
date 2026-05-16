@@ -13,7 +13,7 @@ extends RefCounted
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
 static func test_name() -> String:
-	return "power network (topology + generator)"
+	return "power network (topology + generator + consumer)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -135,10 +135,31 @@ static func run(parent: Node) -> Dictionary:
 		_check(failures, bool(wheel_b.state.get("output_active", false)),
 			"(6) wheel should be output_active = true (water at (3,5) adjacent)")
 
+	# ===========================================================================
+	# (7) CONSUMER JOINS NETWORK — lamp adjacent to pole contributes DEMAND
+	# to that network's demand pool.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+	# Place pole at (5, 5), lamp at (6, 5) (adjacent).
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5))
+	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(6, 5))
+	# update_supply_demand to populate demand.
+	PowerNetwork.update_supply_demand(world)
+	var comp_7: int = PowerNetwork.network_id_at(world, Vector2i(5, 5))
+	_check(failures, comp_7 >= 0, "(7) pole should be in a network, got comp_id %d" % comp_7)
+	if comp_7 >= 0:
+		var demand_7: int = PowerNetwork.demand_for(world, comp_7)
+		_check(failures, demand_7 == ElectricLamp.DEMAND,
+			"(7) network demand should equal lamp DEMAND (%d), got %d" % [ElectricLamp.DEMAND, demand_7])
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "6 sub-cases pass: + generator joins network" }
+		return { "ok": true, "message": "7 sub-cases pass: + consumer joins network" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
