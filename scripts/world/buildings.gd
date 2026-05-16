@@ -85,6 +85,12 @@ enum Type {
 	# Future long-reach-fast / long-reach-electric combinations extend the
 	# same parametric tables in later sessions.
 	LONG_REACH_INSERTER,
+	# Electricity Arc Session 1 (session-electricity-foundation): Power
+	# infrastructure foundation. POWER_POLE forms the wire network via
+	# 5-tile Chebyshev adjacency; auto-connects on placement. Empty state.
+	# (DATA entry + dispatch cases land in Task 3; WATER_WHEEL/ELECTRIC_LAMP
+	# enum entries land in Tasks 5+6 respectively.)
+	POWER_POLE,
 }
 
 const DATA: Dictionary = {

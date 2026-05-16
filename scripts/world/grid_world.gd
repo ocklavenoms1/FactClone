@@ -212,6 +212,16 @@ var _fluid_network_dirty: bool = true
 var _pipe_component: Dictionary = {}      # Vector2i -> int (component id)
 var _component_has_pump: Dictionary = {}  # int -> bool
 
+# Power network — mirrors fluid network pattern (BFS + dirty-flag). See
+# scripts/world/power_network.gd for the resolver module. Linear-
+# satisfaction model: each component has a ratio in [0, 1] applied by
+# consumers to scale their throughput/visual feedback.
+var _pole_component: Dictionary = {}              # Vector2i → int (component id)
+var _component_supply: Dictionary = {}            # int (comp_id) → int (units)
+var _component_demand: Dictionary = {}            # int (comp_id) → int (units)
+var _component_satisfaction: Dictionary = {}      # int (comp_id) → float in [0, 1]
+var _power_network_dirty: bool = true
+
 @export var camera: Camera2D
 
 func _ready() -> void:
@@ -465,6 +475,17 @@ const _CARDINALS: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vect
 ## going through place_building / remove_building.
 func mark_fluid_network_dirty() -> void:
 	_fluid_network_dirty = true
+
+## Mark the power network as needing a topology rebuild on next query.
+## Useful for tests or future code paths that mutate buildings without
+## going through place_building / remove_building.
+func mark_power_network_dirty() -> void:
+	_power_network_dirty = true
+
+## Wrapper around PowerNetwork.power_satisfaction_at — convenience for
+## consumers in their tick: `var sat = world.power_satisfaction_at(b.anchor)`.
+func power_satisfaction_at(pos: Vector2i) -> float:
+	return PowerNetwork.power_satisfaction_at(self, pos)
 
 ## Returns true iff the given position is adjacent to a pipe whose
 ## connected component contains at least one pump.
