@@ -648,6 +648,18 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.POWER_POLE: {
+		"name": "Power Pole",
+		"swatch_color": Color(0.50, 0.38, 0.25),    # dark wood-brown
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+		# Thin pole — player walks under wires, matches inserter convention.
+		"walkable": true,
+		# No slot_layout — pole is passive infrastructure, no inventory UI.
+		# Info-only via Q-inspect (info_lines shows network ID + capacity).
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -833,6 +845,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Inserter.make(pos, dir, Type.FAST_INSERTER)
 		Type.LONG_REACH_INSERTER:
 			return Inserter.make(pos, dir, Type.LONG_REACH_INSERTER)
+		Type.POWER_POLE:
+			return PowerPole.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -928,6 +942,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
 		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
 			Inserter.draw(b, canvas, world_pos, tile_size)
+		Type.POWER_POLE:
+			PowerPole.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1132,6 +1148,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return MiningDrill.info_lines(b, world)
 		Type.SMELTER:
 			return Smelter.info_lines(b, world)
+		Type.POWER_POLE:
+			return PowerPole.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

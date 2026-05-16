@@ -82,7 +82,7 @@ static func run(parent: Node) -> Dictionary:
 	# ---------- 3. Multi-session arc COMPLETE: every interactive building has a panel ----------
 	# All Buildings.Type values EXCEPT passive infrastructure should have
 	# has_interaction_ui == true.
-	var passive: Array = [Buildings.Type.PIPE, Buildings.Type.PUMP, Buildings.Type.BELT]
+	var passive: Array = [Buildings.Type.PIPE, Buildings.Type.PUMP, Buildings.Type.BELT, Buildings.Type.POWER_POLE]
 	for type_value in Buildings.DATA.keys():
 		var t: int = int(type_value)
 		if t in passive:

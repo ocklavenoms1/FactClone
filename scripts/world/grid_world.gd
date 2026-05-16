@@ -445,6 +445,8 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 		occupied[cell] = pos
 	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
+	if t == Buildings.Type.POWER_POLE:
+		_power_network_dirty = true
 	# Post-make placement hooks: building types that need world context to
 	# finish their initial state populate it here. (make() runs before the
 	# building is registered, so it can't see the world via has_building_at.)
@@ -464,6 +466,8 @@ func remove_building_at(pos: Vector2i) -> bool:
 	buildings.erase(anchor)
 	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
+	if b.type == Buildings.Type.POWER_POLE:
+		_power_network_dirty = true
 	return true
 
 # ---------- fluid network resolver ----------
