@@ -1508,6 +1508,10 @@ func _draw() -> void:
 			continue
 		Buildings.draw_one(b, self, tile_to_world_origin(anchor), TILE_SIZE)
 
+	# Power wire pass — between buildings and post-pass indicators so wires
+	# render on the building layer but below hover/harvest UI.
+	_draw_power_wires()
+
 	# Harvest progress arc — yellow arc on the targeted tile, fills 0 → TAU
 	# clockwise as the next tick approaches. Visual feedback for "this tile
 	# is being harvested" (mined for ore, chopped for tree).
@@ -1574,3 +1578,42 @@ func _draw() -> void:
 			draw_line(base_l, tip, arrow_color, 2.5)
 			draw_line(base_r, tip, arrow_color, 2.5)
 			draw_line(center - dir_vec * (TILE_SIZE * 0.30), center + dir_vec * (TILE_SIZE * 0.20), arrow_color, 2.0)
+
+
+# ---------- power network rendering ----------
+
+## Draw wires between all pole pairs that are (a) in the same component
+## and (b) within POLE_RANGE Chebyshev distance. Color reflects
+## component satisfaction: golden if any power, dark brown if dead.
+## Called from _draw between building draws and post-pass indicators.
+func _draw_power_wires() -> void:
+	if _power_network_dirty:
+		PowerNetwork.rebuild_topology(self)
+	# Collect poles grouped by component.
+	var poles_by_comp: Dictionary = {}    # comp_id → Array[Vector2i]
+	for pos in _pole_component:
+		var cid: int = int(_pole_component[pos])
+		if not poles_by_comp.has(cid):
+			poles_by_comp[cid] = []
+		poles_by_comp[cid].append(pos)
+	# Draw wires per component.
+	const WIRE_THICKNESS: float = 2.0
+	var golden: Color = Color(0.85, 0.70, 0.40)
+	var dark: Color = Color(0.30, 0.22, 0.15)
+	for cid in poles_by_comp:
+		var sat: float = float(_component_satisfaction.get(cid, 0.0))
+		var wire_color: Color = golden if sat > 0.0 else dark
+		var poles: Array = poles_by_comp[cid]
+		# Pairwise draw (canonical ordering: lex-smaller anchor first).
+		for i in range(poles.size()):
+			for j in range(i + 1, poles.size()):
+				var a: Vector2i = poles[i]
+				var b: Vector2i = poles[j]
+				var dx: int = abs(b.x - a.x)
+				var dy: int = abs(b.y - a.y)
+				if max(dx, dy) > PowerNetwork.POLE_RANGE:
+					continue
+				# Wire from pole-top to pole-top. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
+				var a_top: Vector2 = Vector2(a.x * TILE_SIZE + TILE_SIZE * 0.5, a.y * TILE_SIZE + TILE_SIZE * 0.16)
+				var b_top: Vector2 = Vector2(b.x * TILE_SIZE + TILE_SIZE * 0.5, b.y * TILE_SIZE + TILE_SIZE * 0.16)
+				draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
