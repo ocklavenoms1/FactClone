@@ -25,7 +25,13 @@ extends RefCounted
 ## Task 7 once WATER_WHEEL and ELECTRIC_LAMP enum entries exist (Tasks 5+6).
 
 # Maximum Chebyshev distance for pole-to-pole auto-connection.
-const POLE_RANGE: int = 5
+# Reduced from 5 to 3 at PAUSE 1 user request: 5-tile range produced too
+# many in-range pairs in dense layouts (K4 with 6 wires for 4 poles),
+# even though that was the locked mesh-within-network rule. Tighter
+# range forces denser pole placement but produces visually cleaner
+# topology — direct neighbors only, no long diagonals that "skip over"
+# intermediate poles.
+const POLE_RANGE: int = 3
 
 # 4-directional adjacency for building-to-pole association. Local copy —
 # grid_world.gd has its own `_CARDINALS` at line 471; kept separate so

@@ -39,19 +39,20 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, comp_1 == 0, "(1) single pole should be component 0, got %d" % comp_1)
 
 	# ===========================================================================
-	# (2) TWO POLES IN RANGE — within 5-tile Chebyshev, same component.
-	# Place 2nd pole 5 tiles away (just at the edge of the connection range).
+	# (2) TWO POLES IN RANGE — within POLE_RANGE (3) Chebyshev, same
+	# component. Place 2nd pole 3 tiles away (at the edge of the
+	# connection range).
 	# ===========================================================================
-	if not world.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5)):
+	if not world.place_building(Buildings.Type.POWER_POLE, Vector2i(3, 5)):
 		_disconnect(world)
-		return { "ok": false, "message": "(2) could not place pole at (5,5)" }
+		return { "ok": false, "message": "(2) could not place pole at (3,5)" }
 	var comp_2a: int = PowerNetwork.network_id_at(world, Vector2i(0, 5))
-	var comp_2b: int = PowerNetwork.network_id_at(world, Vector2i(5, 5))
-	_check(failures, comp_2a == comp_2b, "(2) poles at (0,5) and (5,5) should share component, got %d vs %d" % [comp_2a, comp_2b])
+	var comp_2b: int = PowerNetwork.network_id_at(world, Vector2i(3, 5))
+	_check(failures, comp_2a == comp_2b, "(2) poles at (0,5) and (3,5) should share component, got %d vs %d" % [comp_2a, comp_2b])
 
 	# ===========================================================================
-	# (3) TWO POLES OUT OF RANGE — 6+ tiles apart, different components.
-	# Reset world, place poles at (0,5) and (11,5) (Chebyshev dist 11 > 5).
+	# (3) TWO POLES OUT OF RANGE — 4+ tiles apart, different components.
+	# Reset world, place poles at (0,5) and (7,5) (Chebyshev dist 7 > POLE_RANGE=3).
 	# ===========================================================================
 	world.queue_free()
 	world = GridWorldScript.new()
@@ -59,15 +60,15 @@ static func run(parent: Node) -> Dictionary:
 	for x in range(0, 31):
 		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(0, 5))
-	world.place_building(Buildings.Type.POWER_POLE, Vector2i(11, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(7, 5))
 	var comp_3a: int = PowerNetwork.network_id_at(world, Vector2i(0, 5))
-	var comp_3b: int = PowerNetwork.network_id_at(world, Vector2i(11, 5))
-	_check(failures, comp_3a != comp_3b, "(3) poles at (0,5) and (11,5) should be different components, both got %d" % comp_3a)
+	var comp_3b: int = PowerNetwork.network_id_at(world, Vector2i(7, 5))
+	_check(failures, comp_3a != comp_3b, "(3) poles at (0,5) and (7,5) should be different components, both got %d" % comp_3a)
 
 	# ===========================================================================
 	# (4) BRIDGE MERGES NETWORKS — place a third pole linking two separate.
-	# Layout: (0,5) and (10,5) are 10 apart → different networks.
-	# Bridge at (5,5): 5 tiles from each → in range of both → merges.
+	# Layout: (0,5) and (6,5) are 6 apart → different networks (> POLE_RANGE=3).
+	# Bridge at (3,5): 3 tiles from each → in range of both → merges.
 	# ===========================================================================
 	world.queue_free()
 	world = GridWorldScript.new()
@@ -75,16 +76,16 @@ static func run(parent: Node) -> Dictionary:
 	for x in range(0, 31):
 		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(0, 5))
-	world.place_building(Buildings.Type.POWER_POLE, Vector2i(10, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
 	# Before bridge: different components.
 	var pre_bridge_a: int = PowerNetwork.network_id_at(world, Vector2i(0, 5))
-	var pre_bridge_b: int = PowerNetwork.network_id_at(world, Vector2i(10, 5))
-	_check(failures, pre_bridge_a != pre_bridge_b, "(4) pre-bridge: (0,5) and (10,5) should be separate, both got %d" % pre_bridge_a)
-	# Place bridge.
-	world.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5))
+	var pre_bridge_b: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, pre_bridge_a != pre_bridge_b, "(4) pre-bridge: (0,5) and (6,5) should be separate, both got %d" % pre_bridge_a)
+	# Place bridge at (3,5) — 3 tiles from each end, in range of both.
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(3, 5))
 	var post_bridge_a: int = PowerNetwork.network_id_at(world, Vector2i(0, 5))
-	var post_bridge_b: int = PowerNetwork.network_id_at(world, Vector2i(10, 5))
-	var post_bridge_mid: int = PowerNetwork.network_id_at(world, Vector2i(5, 5))
+	var post_bridge_b: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	var post_bridge_mid: int = PowerNetwork.network_id_at(world, Vector2i(3, 5))
 	_check(failures, post_bridge_a == post_bridge_b, "(4) post-bridge: ends should share component, got %d vs %d" % [post_bridge_a, post_bridge_b])
 	_check(failures, post_bridge_a == post_bridge_mid, "(4) bridge itself should share component with both ends")
 
@@ -92,9 +93,9 @@ static func run(parent: Node) -> Dictionary:
 	# (5) REMOVE BRIDGE SPLITS NETWORK — remove the middle pole, network
 	# splits back into two separate components.
 	# ===========================================================================
-	world.remove_building_at(Vector2i(5, 5))
+	world.remove_building_at(Vector2i(3, 5))
 	var post_remove_a: int = PowerNetwork.network_id_at(world, Vector2i(0, 5))
-	var post_remove_b: int = PowerNetwork.network_id_at(world, Vector2i(10, 5))
+	var post_remove_b: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
 	_check(failures, post_remove_a != post_remove_b, "(5) post-remove: ends should be separate components again, both got %d" % post_remove_a)
 
 	# ===========================================================================
@@ -198,8 +199,8 @@ static func run(parent: Node) -> Dictionary:
 	# ===========================================================================
 	# (9) BROWNOUT — 1 wheel (10 supply) + 12+ lamps (12+ demand). Sat < 1.0.
 	# Layout: stone strip 0..30, water at (3,5), wheel at (4,5) facing west,
-	# chain of poles at 6/11/16/21/26 (5-tile spacing → all connected),
-	# many lamps around those poles.
+	# chain of poles at 6/9/12/15/18 (3-tile spacing = POLE_RANGE → all
+	# connected), many lamps around those poles.
 	# ===========================================================================
 	world.queue_free()
 	world = GridWorldScript.new()
@@ -209,13 +210,13 @@ static func run(parent: Node) -> Dictionary:
 			world.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
 	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
-	# Chain of poles at 5-tile spacing — all in same component.
-	for px in [6, 11, 16, 21, 26]:
+	# Chain of poles at 3-tile spacing (POLE_RANGE = 3) — all in same component.
+	for px in [6, 9, 12, 15, 18]:
 		world.place_building(Buildings.Type.POWER_POLE, Vector2i(px, 5))
 	# Place lamps adjacent to those poles. Use y=4 and y=6 (above/below
 	# the pole row) plus column-adjacent cells where available.
 	var lamps_placed: int = 0
-	for px in [6, 11, 16, 21, 26]:
+	for px in [6, 9, 12, 15, 18]:
 		# y=4 and y=6 for each pole — 2 lamps per pole × 5 poles = 10 lamps.
 		for ly in [4, 6]:
 			if world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(px, ly)):
@@ -226,7 +227,7 @@ static func run(parent: Node) -> Dictionary:
 			if col == 4 or col == 5:  # wheel zone
 				continue
 			var taken: bool = false
-			for other_px in [6, 11, 16, 21, 26]:
+			for other_px in [6, 9, 12, 15, 18]:
 				if col == other_px:
 					taken = true
 					break
@@ -280,7 +281,7 @@ static func run(parent: Node) -> Dictionary:
 	world.tile_modifications[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
-	world.place_building(Buildings.Type.POWER_POLE, Vector2i(11, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(9, 5))    # 3 tiles from (6,5) — in range with POLE_RANGE=3
 	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(7, 5))
 	# Pre-save: tick + update + verify lamp powered.
 	TickSystem.current_tick += 1
@@ -335,8 +336,8 @@ static func run(parent: Node) -> Dictionary:
 			"(10) wheel at (4,5) should be loaded")
 		_check(failures, world.has_building_at(Vector2i(6, 5)) and world.building_at(Vector2i(6, 5)).type == Buildings.Type.POWER_POLE,
 			"(10) pole at (6,5) should be loaded")
-		_check(failures, world.has_building_at(Vector2i(11, 5)) and world.building_at(Vector2i(11, 5)).type == Buildings.Type.POWER_POLE,
-			"(10) pole at (11,5) should be loaded")
+		_check(failures, world.has_building_at(Vector2i(9, 5)) and world.building_at(Vector2i(9, 5)).type == Buildings.Type.POWER_POLE,
+			"(10) pole at (9,5) should be loaded")
 		_check(failures, world.has_building_at(Vector2i(7, 5)) and world.building_at(Vector2i(7, 5)).type == Buildings.Type.ELECTRIC_LAMP,
 			"(10) lamp at (7,5) should be loaded")
 
