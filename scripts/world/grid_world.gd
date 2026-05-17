@@ -1594,21 +1594,29 @@ func _draw() -> void:
 
 # ---------- power network rendering ----------
 
-## Draw wires between poles. Each pole connects to its single NEAREST
-## in-range neighbor in the same component (with dedup so each pair is
-## drawn at most once). This produces chain-like visuals instead of the
-## fully-connected triangulation a naive all-pairs draw would create.
+## Draw wires between poles using a Minimum Spanning Tree (Kruskal's
+## algorithm). Per component, sort all in-range pole-pairs by Euclidean
+## distance ascending; walk them in order, drawing each only if its
+## endpoints aren't already connected via earlier wires (Union-Find
+## cycle detection). Produces exactly N-1 wires per N-pole component,
+## guaranteeing all poles are visually connected through the shortest
+## tree of in-range edges.
+##
 ## Color reflects component satisfaction: golden if any power, dark
 ## brown if dead. Called from _draw between building draws and post-
 ## pass indicators.
 ##
-## Note: this is a nearest-neighbor approximation of a minimum spanning
-## tree — clean enough for typical farm-scale pole counts (~dozens).
-## Edge case: if pole A's nearest is B but B's nearest is C, only A-B
-## and B-C are drawn (C-A is suppressed by the nearest-only rule even
-## though they're in range). Component connectivity is unaffected
-## (network membership is still computed by BFS over the full
-## in-range graph in PowerNetwork.rebuild_topology).
+## Distance metrics — TWO are used:
+## - Chebyshev `max(dx, dy)` for the in-range CHECK (matches the BFS
+##   connectivity rule in PowerNetwork.rebuild_topology — keeps the
+##   visual exactly-matches-logical-network invariant)
+## - Euclidean-squared `dx*dx + dy*dy` for edge SORT (visually-shortest
+##   wins; no sqrt needed for comparison)
+##
+## Complexity: O(N² log N) per component per frame (sort dominates).
+## For ~50 poles per farm-scale component → ~14K ops, trivial. If pole
+## counts climb past ~500 per component, cache MST and invalidate on
+## _power_network_dirty.
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
@@ -1628,41 +1636,54 @@ func _draw_power_wires() -> void:
 		var sat: float = float(_component_satisfaction.get(cid, 0.0))
 		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
 		var poles: Array = poles_by_comp[cid]
-		# For each pole, find its single nearest in-range neighbor in this
-		# same component. TWO distance metrics: Chebyshev for the in-range
-		# CHECK (matches the BFS connectivity rule in PowerNetwork), but
-		# Euclidean-squared for the nearest SELECTION (so visually-closer
-		# always wins when Chebyshev ties — e.g., a diagonal-4 pole and a
-		# horizontal-4 pole both have Chebyshev 4, but Euclidean√32 vs √16
-		# correctly picks the horizontal one).
-		# Dedup pairs via canonical (lex-smaller-first) key.
-		var drawn: Dictionary = {}
-		for a in poles:
-			var nearest: Vector2i = Vector2i.ZERO
-			var nearest_sq: int = -1
-			for b in poles:
-				if b == a:
-					continue
+		if poles.size() < 2:
+			continue   # single-pole component has no edges to draw
+		# (1) Collect all in-range pole-pair edges as [sq_dist, i, j].
+		var edges: Array = []
+		for i in range(poles.size()):
+			for j in range(i + 1, poles.size()):
+				var a: Vector2i = poles[i]
+				var b: Vector2i = poles[j]
 				var dx: int = abs(b.x - a.x)
 				var dy: int = abs(b.y - a.y)
-				var cheb: int = max(dx, dy)
-				if cheb > PowerNetwork.POLE_RANGE:
+				if max(dx, dy) > PowerNetwork.POLE_RANGE:
 					continue
-				var sq: int = dx * dx + dy * dy
-				if nearest_sq < 0 or sq < nearest_sq:
-					nearest = b
-					nearest_sq = sq
-			if nearest_sq < 0:
-				continue   # isolated pole (no in-range neighbor)
-			# Canonical pair key — smaller anchor first. Dedup so A→B and
-			# B→A (if B's nearest is A) only draws one wire.
-			var lo: Vector2i = a if (a.x < nearest.x or (a.x == nearest.x and a.y < nearest.y)) else nearest
-			var hi: Vector2i = nearest if lo == a else a
-			var pair_key: String = "%d,%d-%d,%d" % [lo.x, lo.y, hi.x, hi.y]
-			if drawn.has(pair_key):
-				continue
-			drawn[pair_key] = true
-			# Wire from pole-top to pole-top. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
-			var a_top: Vector2 = Vector2(a.x * TILE_SIZE + TILE_SIZE * 0.5, a.y * TILE_SIZE + TILE_SIZE * 0.16)
-			var n_top: Vector2 = Vector2(nearest.x * TILE_SIZE + TILE_SIZE * 0.5, nearest.y * TILE_SIZE + TILE_SIZE * 0.16)
-			draw_line(a_top, n_top, wire_color, WIRE_THICKNESS)
+				edges.append([dx * dx + dy * dy, i, j])
+		# (2) Sort by Euclidean-squared ascending. Tie-break by indices
+		# for determinism (same poles → same draw order across frames).
+		edges.sort_custom(func(e1, e2):
+			if e1[0] != e2[0]:
+				return e1[0] < e2[0]
+			if e1[1] != e2[1]:
+				return e1[1] < e2[1]
+			return e1[2] < e2[2]
+		)
+		# (3) Union-Find: parent[i] starts as i (each pole its own root).
+		var parent: Array = []
+		for i in range(poles.size()):
+			parent.append(i)
+		# (4) Kruskal: walk edges shortest-first, draw if endpoints aren't
+		# already connected (different roots). Inline iterative find with
+		# path compression (no closure capture quirks).
+		for edge in edges:
+			var i: int = int(edge[1])
+			var j: int = int(edge[2])
+			# Find root of i.
+			var ri: int = i
+			while parent[ri] != ri:
+				parent[ri] = parent[parent[ri]]   # path compression
+				ri = parent[ri]
+			# Find root of j.
+			var rj: int = j
+			while parent[rj] != rj:
+				parent[rj] = parent[parent[rj]]
+				rj = parent[rj]
+			if ri == rj:
+				continue   # already connected via earlier (shorter) edges
+			parent[ri] = rj
+			# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
+			var pa: Vector2i = poles[i]
+			var pb: Vector2i = poles[j]
+			var a_top: Vector2 = Vector2(pa.x * TILE_SIZE + TILE_SIZE * 0.5, pa.y * TILE_SIZE + TILE_SIZE * 0.16)
+			var b_top: Vector2 = Vector2(pb.x * TILE_SIZE + TILE_SIZE * 0.5, pb.y * TILE_SIZE + TILE_SIZE * 0.16)
+			draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
