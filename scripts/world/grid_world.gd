@@ -1594,10 +1594,21 @@ func _draw() -> void:
 
 # ---------- power network rendering ----------
 
-## Draw wires between all pole pairs that are (a) in the same component
-## and (b) within POLE_RANGE Chebyshev distance. Color reflects
-## component satisfaction: golden if any power, dark brown if dead.
-## Called from _draw between building draws and post-pass indicators.
+## Draw wires between poles. Each pole connects to its single NEAREST
+## in-range neighbor in the same component (with dedup so each pair is
+## drawn at most once). This produces chain-like visuals instead of the
+## fully-connected triangulation a naive all-pairs draw would create.
+## Color reflects component satisfaction: golden if any power, dark
+## brown if dead. Called from _draw between building draws and post-
+## pass indicators.
+##
+## Note: this is a nearest-neighbor approximation of a minimum spanning
+## tree — clean enough for typical farm-scale pole counts (~dozens).
+## Edge case: if pole A's nearest is B but B's nearest is C, only A-B
+## and B-C are drawn (C-A is suppressed by the nearest-only rule even
+## though they're in range). Component connectivity is unaffected
+## (network membership is still computed by BFS over the full
+## in-range graph in PowerNetwork.rebuild_topology).
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
@@ -1617,16 +1628,34 @@ func _draw_power_wires() -> void:
 		var sat: float = float(_component_satisfaction.get(cid, 0.0))
 		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
 		var poles: Array = poles_by_comp[cid]
-		# Pairwise draw (canonical ordering: lex-smaller anchor first).
-		for i in range(poles.size()):
-			for j in range(i + 1, poles.size()):
-				var a: Vector2i = poles[i]
-				var b: Vector2i = poles[j]
+		# For each pole, find its single nearest in-range neighbor in this
+		# same component. Dedup pairs via canonical (lex-smaller-first) key.
+		var drawn: Dictionary = {}
+		for a in poles:
+			var nearest: Vector2i = Vector2i.ZERO
+			var nearest_dist: int = -1
+			for b in poles:
+				if b == a:
+					continue
 				var dx: int = abs(b.x - a.x)
 				var dy: int = abs(b.y - a.y)
-				if max(dx, dy) > PowerNetwork.POLE_RANGE:
+				var d: int = max(dx, dy)
+				if d > PowerNetwork.POLE_RANGE:
 					continue
-				# Wire from pole-top to pole-top. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
-				var a_top: Vector2 = Vector2(a.x * TILE_SIZE + TILE_SIZE * 0.5, a.y * TILE_SIZE + TILE_SIZE * 0.16)
-				var b_top: Vector2 = Vector2(b.x * TILE_SIZE + TILE_SIZE * 0.5, b.y * TILE_SIZE + TILE_SIZE * 0.16)
-				draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
+				if nearest_dist < 0 or d < nearest_dist:
+					nearest = b
+					nearest_dist = d
+			if nearest_dist < 0:
+				continue   # isolated pole (no in-range neighbor)
+			# Canonical pair key — smaller anchor first. Dedup so A→B and
+			# B→A (if B's nearest is A) only draws one wire.
+			var lo: Vector2i = a if (a.x < nearest.x or (a.x == nearest.x and a.y < nearest.y)) else nearest
+			var hi: Vector2i = nearest if lo == a else a
+			var pair_key: String = "%d,%d-%d,%d" % [lo.x, lo.y, hi.x, hi.y]
+			if drawn.has(pair_key):
+				continue
+			drawn[pair_key] = true
+			# Wire from pole-top to pole-top. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
+			var a_top: Vector2 = Vector2(a.x * TILE_SIZE + TILE_SIZE * 0.5, a.y * TILE_SIZE + TILE_SIZE * 0.16)
+			var n_top: Vector2 = Vector2(nearest.x * TILE_SIZE + TILE_SIZE * 0.5, nearest.y * TILE_SIZE + TILE_SIZE * 0.16)
+			draw_line(a_top, n_top, wire_color, WIRE_THICKNESS)
