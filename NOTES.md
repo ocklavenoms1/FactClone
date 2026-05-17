@@ -76,13 +76,15 @@ Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't 
 
 ## Working protocol: Design Brief Verification (validated session-inserter-long-reach)
 
-Senior dev briefs describe code changes at conceptual level; implementation agents should ALWAYS verify against actual current code shape via code search + line citations before accepting brief assumptions. Three data points across the Inserter Arc / QoL Cluster A:
+Senior dev briefs describe code changes at conceptual level; implementation agents should ALWAYS verify against actual current code shape via code search + line citations before accepting brief assumptions. **Five data points** across Cluster A + Inserter Arc + Electricity Arc:
 
 - **Cluster A Task 14:** refuse-clamp semantic conflation caught by spec re-read before code.
 - **Inserter Session 3 Q4:** brief said "modify tick to use REACH lookup"; verification against `inserter.gd:134-190` revealed tick is already accessor-driven. REACH belongs in `source_tile()` / `dest_tile()` accessors, NOT in tick. Tick stays tier-agnostic.
 - **Inserter Session 3 Task 6:** brief template contained 5 stale API references (SaveSystem `save_game(world, save_path)` signature — actually `(world, player, inventory)`; state field `current_fuel_item` — actually `last_fuel_item`; LoadResult shape; placement coordinate `(5,5)` outside stone overlay; standalone save path — should reuse `TEST_SAVE_PATH` + `_cleanup` helper). Implementer caught all five by comparing against sub-case (9) precedent + checking actual `save_system.gd` / `burner.gd` signatures.
+- **Electricity Foundation Q1:** brief said "per-pole `network_id` field, recompute on changes." Code search at `grid_world.gd:475-565` revealed the codebase precedent is graph + dirty-flag with grid_world-level state maps (no per-instance field). Mirror that exactly. Saves stay flat — only pole positions persist; network rebuilt on load. Controller (planner) wrote the wrong brief; implementer correctly refused to scope-deviate and reported BLOCKED.
+- **Electricity Foundation Task 2 (forward references):** original brief had `update_supply_demand` reference `Buildings.Type.WATER_WHEEL` / `ElectricLamp.DEMAND` etc. before those existed. GDScript 4 resolves class_name globals and enum members at PARSE time (not lazily). Implementer caught the parse-error precondition before any commit. Defer forward-referencing functions to the task that introduces their dependencies.
 
-**Pattern:** brief assumptions about code structure are approximate; verification against current code is cheap and catches imprecision before it propagates. Bake into all implementer-subagent briefs: "before accepting a brief's description of an existing API or code shape, verify by grep + line citation. If the brief and code disagree, the code wins; flag the discrepancy in your DONE report."
+**Pattern:** brief assumptions about code structure are approximate; verification against current code is cheap and catches imprecision before it propagates. **100% of conceptual errors caught by code-citation verification across 5 incidents.** Bake into all implementer-subagent briefs: "before accepting a brief's description of an existing API or code shape, verify by grep + line citation. If the brief and code disagree, the code wins; flag the discrepancy in your DONE report."
 
 ---
 
@@ -117,6 +119,97 @@ Triggered during `session-inserter-long-reach` Task 4. The `Edit` tool refused s
 **Pattern:** if `Edit` fails string-not-found and the search string is byte-identical to what `Read` returned, suspect line-ending mismatch. The harness on Windows can mojibake between LF (what Edit ships) and CRLF (what `git diff` and Godot write). PowerShell direct-write or a normalize-line-endings preprocess step bypasses the issue.
 
 Related to the existing `2>nul` caveat above — both are Windows-specific tooling friction modes worth documenting.
+
+---
+
+## Working protocol: UX iteration trap — require the rule, not the symptom
+
+When iterating on visual / UX feedback features (wire rendering, lamp brightness, hotbar layout, etc.) based on screenshot feedback: **after 2 failed iterations, STOP and require the user to articulate the rule, not describe the symptom.**
+
+**Earned at `session-electricity-foundation` PAUSE 1.** Wire rendering took **5 iterations** before locking the actual mental model:
+
+1. **Mesh** (every in-range pair) → user: "too tangled in clusters" (showed 5 poles → 10 wires)
+2. **Nearest-neighbor** → user: "two pairs that should bridge don't" (2×2 layout, mutually-nearest pairs)
+3. **Euclidean-nearest** (vs Chebyshev) → user: "wrong neighbor selected on ties" (one wire pick was misleading)
+4. **MST (Kruskal)** → user: "these 2 should connect directly" (MST routed through other poles)
+5. **Mesh-within-network + POLE_RANGE=3 + supply-radius=1** → PASS
+
+Each iteration was symptom-driven: "this wire shouldn't exist" / "this wire is missing" — the user described what they saw, not the underlying expectation. Asking 4-option-choice questions failed twice (user dismissed). The 5th iteration succeeded because the user (and the controller) finally agreed to lock option (b) explicitly, then layer two refinements (range and supply area) once option (b)'s flaws surfaced.
+
+**Pattern:** symptom-driven iteration on visual features is a trap. The user can describe what they see and what they don't want, but extracting the rule requires forcing the conversation past the "doesn't this look better?" loop. Concrete tactics:
+
+- **After 2 failures:** propose 3-4 concrete algorithmic rules as multiple-choice with descriptions. Force a single explicit pick before any more code.
+- **After 4 failures:** STOP entirely. Don't iterate without the rule even if you have a hypothesis. The hypothesis is wrong (your evidence: it didn't work the last 4 times).
+- **Use Factorio (or other reference game) names** for proposed rules when applicable — players know "supply area," "Gabriel graph" is conceptually clear via reference even without the name.
+
+Apply to any future visual-feedback feature: render styles, animation timing, color choices, layout decisions.
+
+---
+
+## Working protocol: Magic-number-in-tests audit pattern
+
+When changing a "magic number" constant in code that has embedded geometry / values in tests, grep for that number across tests FIRST and audit each occurrence. Distinguish (a) hardcoded value being asserted (must update) from (b) coincidental usage (leave alone).
+
+**Earned at `session-electricity-foundation` POLE_RANGE 5→3 reduction.** The change to `power_network.gd:28` was 1 line but cascaded to 5 test sub-case layouts in `test_power_network.gd`:
+
+- Sub-case (2) in-range: `(0,5)` and `(5,5)` at dist 5 — would no longer be in-range with POLE_RANGE=3. Updated to `(3,5)`.
+- Sub-case (3) out-of-range: `(0,5)` and `(11,5)` at dist 11 — still out of range. Coincidental; left alone.
+- Sub-case (4) bridge merge: 10-tile gap with bridge at midpoint (5 from each end) — bridge no longer reaches either end. Updated to 6-tile gap with bridge at 3 from each end.
+- Sub-case (5) split: depended on (4)'s layout. Updated together.
+- Sub-case (9) brownout: pole chain at 5-tile spacing `[6, 11, 16, 21, 26]` — broken. Updated to 3-tile spacing `[6, 9, 12, 15, 18]`.
+- Sub-case (10) save round-trip: poles at dist 5 — updated to dist 3.
+
+**Pattern (concrete steps):**
+
+1. `grep -n "<OLD_VALUE>\|<MAGIC_NUMBER>" scripts/tests/*.gd`
+2. For each match: determine if it's an assertion of the old value (UPDATE) or a coincidental tile/index (LEAVE).
+3. After updates, run the full test suite — any failures point to missed occurrences.
+4. Note the pattern: simple constant changes can have cascade depth >1. Diff before commit.
+
+---
+
+## Electricity Network Design Decision (asymmetric — earned `session-electricity-foundation`)
+
+Generators require strict cardinal adjacency to pole (physical wiring metaphor).
+Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area metaphor).
+
+**Constants:** `POLE_RANGE = 3` (pole-to-pole network connectivity, Chebyshev), `SUPPLY_RADIUS = 1` (pole's consumer reach, Chebyshev).
+
+**Rationale:** matches Factorio convention. Two different concepts:
+
+- **Generator-to-pole** = high-current connection, robust contact required. Code: `PowerNetwork._adjacent_component_id(world, b)` — iterates `Buildings.all_edge_cells()` for 4-directional 1-tile adjacency.
+- **Consumer-to-pole** = supply area, electromagnetic field metaphor, more forgiving. Code: `PowerNetwork._supply_component_id(world, b)` — iterates b's full footprint and scans `(2*SUPPLY_RADIUS+1)²` Chebyshev box for any pole.
+
+**Forward implications for future sessions:**
+
+- **Future electric processors (Sessions 5+: electric smelter, drill, inserter) are CONSUMERS** — they use supply-area rule. Their tick reads `world.power_satisfaction_at(b.anchor)` and applies the arc-wide cycle-multiplier `1.0 / max(0.1, satisfaction)`.
+- **Future generators (windmill, steam engine, solar) use strict adjacency** — same as water wheel. Their tick computes `output_active` based on their condition (wind direction, fuel level, daylight, etc.) and pre-tick supply pass sums them into the network's supply pool.
+- **Pole tier expansion (Session 3 candidate)** would add `RANGE_BY_TYPE` and/or `SUPPLY_RADIUS_BY_TYPE` parametric tables — medium pole has wider connection range AND larger supply area; substation even larger.
+
+---
+
+## Electricity Arc — 1 of N sessions shipped
+
+**Status:** Session 1 (foundation) shipped. Linear-satisfaction model locked as arc-wide consumer interface contract. Asymmetric generator-vs-consumer pole rules locked (see "Electricity Network Design Decision" above). Future sessions extend.
+
+**Shipped:**
+
+- **Session 1 (`session-electricity-foundation`)** — POWER_POLE (1×1, walkable) + WATER_WHEEL (2×2, requires water adjacency, MAX_OUTPUT=10) + ELECTRIC_LAMP (1×1, DEMAND=1, brightness modulates with satisfaction) + PowerNetwork module (BFS topology + dirty-flag + per-component supply/demand/satisfaction). Wire rendering: mesh-within-network. Hotbar "Power" category. 10-sub-case dedicated test file `test_power_network.gd`. Save schema unchanged at v18.
+  - `POLE_RANGE = 3` (pole-to-pole connectivity, Chebyshev)
+  - `SUPPLY_RADIUS = 1` (consumer-to-pole, Chebyshev)
+
+**Queued (re-plan each at session start):**
+
+- **Session 2 — More Generators + Storage.** Windmill (wind direction adjacency), Steam Engine (fuel-powered via Burner), Solar (daylight-dependent), Accumulator (battery smooths supply/demand). DATA entries + per-generator tick logic. All use strict cardinal adjacency.
+- **Session 3 — Power Pole Tiers.** Medium pole + substation with wider connection range AND wider supply area. `RANGE_BY_TYPE` + `SUPPLY_RADIUS_BY_TYPE` parametric tables on `power_network.gd`. Reuses BFS — only lookups change.
+- **Session 4 — Electric Processors.** Electric variants of smelter, drill. First consumers using the `1.0 / max(0.1, satisfaction)` cycle-multiplier arc-wide contract.
+- **Session 5 — Electric Inserters (closes Inserter Arc).** Combines reach + speed + electric power. Reuses Inserter parametric tables. Last session of both arcs.
+
+**Cross-cutting contracts (locked at Session 1):**
+
+- **Consumer interface** — every electric consumer reads `world.power_satisfaction_at(b.anchor)`. Lamps modulate brightness; processors will multiply `cycle_ticks` by `1.0 / max(0.1, satisfaction)`.
+- **Network identity** — component IDs are dynamic labels, NOT stable references. Users identify networks by topology, not ID. Don't persist component IDs.
+- **Save** — only building positions persist. Network is rebuilt on load via dirty flag. Test `tile_modifications` quirk: save-roundtrip tests must write to BOTH `world.tiles` AND `world.tile_modifications` for terrain (e.g., water tiles), since SaveSystem only persists `tile_modifications`.
 
 ---
 

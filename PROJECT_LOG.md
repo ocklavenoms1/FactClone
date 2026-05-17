@@ -9,6 +9,56 @@ Each entry has three sections:
 
 ---
 
+## Electricity Arc Session 1 — Foundation
+
+**Tag:** `session-electricity-foundation`
+**Save schema:** v18 (no bump — append-only enum + `.get()`-defaulted state + network rebuild on load)
+**Test count:** 34 → 35 (new dedicated `test_power_network.gd` with 10 internal sub-cases)
+
+First session of a NEW major arc. Foundation only — power network module, Power Pole, Water Wheel generator, Electric Lamp consumer, wire rendering, hotbar Power category. Linear satisfaction `min(1.0, supply / max(1, demand))` locked as the **arc-wide consumer interface contract**: future Sessions 4+ apply `1.0 / max(0.1, satisfaction)` cycle-multiplier to electric processors.
+
+### What shipped
+
+**Production code (5 new files, 4 modified):**
+
+- `scripts/world/power_network.gd` — pure-logic module: BFS topology over Chebyshev-range pole graph, dirty-flag lazy rebuild, per-component supply/demand/satisfaction. Mirrors `grid_world.gd:475-565` fluid network pattern (Q1 corrected via Design Brief Verification — 5th catch this arc).
+- `scripts/world/power_pole.gd` — passive 1×1 wood-brown connector, no tick, no state. Tile + pole + crossarm visual.
+- `scripts/world/water_wheel.gd` — 2×2 wet-teal generator, requires water-adjacency, `MAX_OUTPUT=10`, supports_direction (wheel faces water), rotating spokes visual.
+- `scripts/world/electric_lamp.gd` — 1×1 warm-yellow consumer, `DEMAND=1`, brightness modulates with network satisfaction (color lerp + alpha halo at sat>0.05).
+- `scripts/tests/test_power_network.gd` — 10 internal sub-cases: topology (single pole, in-range, out-of-range, bridge merge, split), generator joins network, consumer joins network, supply sufficient, brownout (linear scaling), save round-trip.
+
+- `scripts/world/buildings.gd` — 3 enum entries + 3 DATA blocks + dispatch (`make`/`tick_one`/`draw_one`/`info_lines_for`).
+- `scripts/world/grid_world.gd` — 5 dict members (`_pole_component`, `_component_supply`, `_component_demand`, `_component_satisfaction`, `_power_network_dirty`), `mark_power_network_dirty()`, `power_satisfaction_at(pos)` wrapper, dirty-flag hooks in `place_building` + `remove_building_at`, pre-tick `PowerNetwork.update_supply_demand` in `_on_tick`, `_draw_power_wires` helper.
+- `scripts/ui/hotbar.gd` — Power category with 3 slots (pole / wheel / lamp).
+- `scripts/tests/test_runner.gd` — append new test file.
+
+### Decisions
+
+- **Q1 — Network data model**: BFS + dirty-flag mirroring fluid network pattern (`grid_world.gd:475-565`), NOT per-pole `network_id` field as the original brief suggested. **5th Design Brief Verification catch this arc.** Saves stay flat — only pole positions persist; network rebuilt on load.
+- **Q2 — Pole connection range**: started at 5 (spec), reduced to **3** at PAUSE 1 user feedback. 5-tile range produced too many in-range pairs in dense clusters (K4 with 6 wires for 4 poles). 3-tile range forces denser pole placement but produces visually cleaner topology.
+- **Q3 — Building-network association**: started symmetric (cardinal adjacency for both generators and consumers). **Revised at PAUSE 1** to asymmetric:
+  - **Generators (water wheel, future windmill/steam/solar)**: strict cardinal adjacency to a pole. Physical-wiring metaphor — must touch.
+  - **Consumers (lamp, future electric processors)**: Chebyshev radius ≤ `SUPPLY_RADIUS` (=1, so 3×3 area centered on pole). Factorio-style supply area. Wireless / electromagnetic-field metaphor.
+- **Q4 — Brownout**: linear satisfaction scaling (USER OVERRIDE of recommended binary). Each component has `satisfaction: float ∈ [0,1]`. Lamps modulate brightness. **Arc-wide contract** — Sessions 4+ apply `1.0 / max(0.1, satisfaction)` cycle-multiplier to electric processors.
+- **Q5 — Tick integration**: pre-pass in `grid_world._on_tick` calls `PowerNetwork.update_supply_demand(self)` before the building tick loop. Documented 1-tick supply-delay caveat on initial placement (generator's `output_active` set during its own tick AFTER pre-pass).
+- **Wire rendering algorithm** — iterated 5 times before locking. Final: **mesh-within-network** (every in-range same-component pole-pair gets a wire). Combined with POLE_RANGE=3, dense layouts stay clean. See "Lessons" for the iteration trap.
+- **Save schema unchanged at v18** — append-only enum, `.get()` defaults on new state fields, network maps NOT serialized (rebuilt on load via dirty flag).
+
+### Lessons
+
+- **Design Brief Verification (DBV) protocol now at 5 catches across the multi-session run.** Q1 of this session — brief said "per-pole `network_id` field"; code search at `grid_world.gd:475-565` revealed the codebase precedent is graph+dirty-flag. Implementer correctly refused to scope-deviate, controller (me) acknowledged the brief error publicly. **Protocol is earning compound value — 100% of conceptual errors caught by code-citation verification.** Pin to NOTES alongside the prior 4.
+- **UX iteration trap** — wire rendering took **5 iterations** (mesh → nearest-neighbor → Euclidean-nearest → MST → mesh-within-network) before user articulated the actual mental model. Each fix addressed the latest screenshot complaint but failed on the next layout. **Lesson:** when symptom-driven iterations are failing, STOP and require the user to describe the **rule**, not the symptom. The 5th iteration succeeded because the user finally locked option (b) explicitly. **Apply meta-rule to future visual-feedback features:** after 2 failed iterations, force a mental-model-rule conversation before any more code.
+- **Magic-number-in-tests audit pattern** (earned at POLE_RANGE 5→3 reduction): when changing a "magic number" in code that has embedded geometry in tests, grep for that number across tests and audit each occurrence. Distinguish (a) hardcoded value being asserted (must update) from (b) coincidental usage (leave alone). The POLE_RANGE change required updates to 5 test sub-case layouts; missing any one would have produced silent test-failure cascades.
+- **Asymmetric design**: separate rules for generators (strict adjacency) and consumers (supply area) is a Factorio-validated pattern. Player understands "wheel must touch a pole" (physical wiring) and "lamp gets power from nearby pole" (radio metaphor). The asymmetry is intuitive without explanation.
+- **Tick-ordering subtlety** (deferred to Session 2): pre-pass `update_supply_demand` runs BEFORE building ticks; generator's `output_active` is set DURING its tick. First tick post-placement, supply is 0 (stale). Acceptable v1; refine if surfaces as UX issue.
+- **Test fixture `tile_modifications` discovery** (from Task 9 save round-trip): direct `world.tiles[...] = Tile.new(WATER, ...)` works for in-memory tests but FAILS for save-roundtrip — SaveSystem only persists `tile_modifications`. Save-roundtrip tests must write to BOTH `world.tiles` AND `world.tile_modifications`. Documented inline in sub-case (10).
+
+### Commit chain (compact)
+
+`6977a81` spec → `9206425` plan → `8037a21` Task 2 module skeleton (revised after 1st implementer BLOCKED) → `ab7219a` Task 2 nit fix-up → `9d0f077` Task 3 Power Pole + topology tests → `d2730ec` Task 3 housekeeping (.uid) → `dc52520` Task 4 wire rendering → `ada5f9f` Task 4 nit fix-up → `dfe59ad` Task 5 Water Wheel + sub-case (6) → `452819e` Task 5 nit fix-up → `2f0e86d` Task 6 Electric Lamp + sub-case (7) → `03ce0be` Task 7 linear satisfaction + sub-cases (8)(9) + pre-tick hook → `f499ce3` Task 7 nit fix-up → `e8502c7` Task 8 hotbar Power category → `0c9f3be` Task 9 save round-trip sub-case (10) → `287ec0d` Task 9 nit fix-up → `6936f22` housekeeping (.uid) → `35f3d98` PAUSE 1 fix-up: MST wire rendering (later reverted) → `da91558` Wire rendering: mesh-within-network (revert MST) → `acbc0e1` Reduce POLE_RANGE 5 → 3 + update test layouts → `8c49be0` Pole supply area: 1-tile Chebyshev radius for consumers; generators stay strict-adjacency.
+
+---
+
 ## Inserter Arc Session 3 — Long-Reach Inserter
 
 **Date:** 2026-05-15
