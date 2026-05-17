@@ -1594,29 +1594,28 @@ func _draw() -> void:
 
 # ---------- power network rendering ----------
 
-## Draw wires between poles using a Minimum Spanning Tree (Kruskal's
-## algorithm). Per component, sort all in-range pole-pairs by Euclidean
-## distance ascending; walk them in order, drawing each only if its
-## endpoints aren't already connected via earlier wires (Union-Find
-## cycle detection). Produces exactly N-1 wires per N-pole component,
-## guaranteeing all poles are visually connected through the shortest
-## tree of in-range edges.
+## Draw wires between poles: mesh-within-network. For each pair of poles
+## (i, j) with j > i (dedup), draw a wire if both endpoints are within
+## POLE_RANGE Chebyshev distance AND share the same component. Matches
+## the player mental model: "if two poles are in range and on the same
+## network, I see a wire." Visually busier than MST for dense clusters
+## but predictable and never surprises by omitting an expected wire.
+##
+## The same-network guard is technically redundant — PowerNetwork's BFS
+## uses the same Chebyshev range for connectivity, so two in-range poles
+## are always in the same component. The guard is kept explicit anyway:
+## (1) it documents the rendering rule for future readers, and (2) it
+## protects against future divergence between BFS range and wire range
+## (e.g., if Session 3's pole-tier work introduces a substation with a
+## wider connection range but the wire-render uses the per-pole range).
 ##
 ## Color reflects component satisfaction: golden if any power, dark
 ## brown if dead. Called from _draw between building draws and post-
 ## pass indicators.
 ##
-## Distance metrics — TWO are used:
-## - Chebyshev `max(dx, dy)` for the in-range CHECK (matches the BFS
-##   connectivity rule in PowerNetwork.rebuild_topology — keeps the
-##   visual exactly-matches-logical-network invariant)
-## - Euclidean-squared `dx*dx + dy*dy` for edge SORT (visually-shortest
-##   wins; no sqrt needed for comparison)
-##
-## Complexity: O(N² log N) per component per frame (sort dominates).
-## For ~50 poles per farm-scale component → ~14K ops, trivial. If pole
-## counts climb past ~500 per component, cache MST and invalidate on
-## _power_network_dirty.
+## Complexity: O(N²) per component per frame. Trivial for ~50 poles.
+## If pole counts climb past ~500 per component, cache the edge list
+## and invalidate on _power_network_dirty.
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
@@ -1636,54 +1635,23 @@ func _draw_power_wires() -> void:
 		var sat: float = float(_component_satisfaction.get(cid, 0.0))
 		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
 		var poles: Array = poles_by_comp[cid]
-		if poles.size() < 2:
-			continue   # single-pole component has no edges to draw
-		# (1) Collect all in-range pole-pair edges as [sq_dist, i, j].
-		var edges: Array = []
+		# Pairwise mesh draw — j > i dedup avoids drawing each pair twice.
 		for i in range(poles.size()):
 			for j in range(i + 1, poles.size()):
-				var a: Vector2i = poles[i]
-				var b: Vector2i = poles[j]
-				var dx: int = abs(b.x - a.x)
-				var dy: int = abs(b.y - a.y)
+				var pa: Vector2i = poles[i]
+				var pb: Vector2i = poles[j]
+				# In-range check (Chebyshev, matches BFS connectivity).
+				var dx: int = abs(pb.x - pa.x)
+				var dy: int = abs(pb.y - pa.y)
 				if max(dx, dy) > PowerNetwork.POLE_RANGE:
 					continue
-				edges.append([dx * dx + dy * dy, i, j])
-		# (2) Sort by Euclidean-squared ascending. Tie-break by indices
-		# for determinism (same poles → same draw order across frames).
-		edges.sort_custom(func(e1, e2):
-			if e1[0] != e2[0]:
-				return e1[0] < e2[0]
-			if e1[1] != e2[1]:
-				return e1[1] < e2[1]
-			return e1[2] < e2[2]
-		)
-		# (3) Union-Find: parent[i] starts as i (each pole its own root).
-		var parent: Array = []
-		for i in range(poles.size()):
-			parent.append(i)
-		# (4) Kruskal: walk edges shortest-first, draw if endpoints aren't
-		# already connected (different roots). Inline iterative find with
-		# path compression (no closure capture quirks).
-		for edge in edges:
-			var i: int = int(edge[1])
-			var j: int = int(edge[2])
-			# Find root of i.
-			var ri: int = i
-			while parent[ri] != ri:
-				parent[ri] = parent[parent[ri]]   # path compression
-				ri = parent[ri]
-			# Find root of j.
-			var rj: int = j
-			while parent[rj] != rj:
-				parent[rj] = parent[parent[rj]]
-				rj = parent[rj]
-			if ri == rj:
-				continue   # already connected via earlier (shorter) edges
-			parent[ri] = rj
-			# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
-			var pa: Vector2i = poles[i]
-			var pb: Vector2i = poles[j]
-			var a_top: Vector2 = Vector2(pa.x * TILE_SIZE + TILE_SIZE * 0.5, pa.y * TILE_SIZE + TILE_SIZE * 0.16)
-			var b_top: Vector2 = Vector2(pb.x * TILE_SIZE + TILE_SIZE * 0.5, pb.y * TILE_SIZE + TILE_SIZE * 0.16)
-			draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
+				# Same-network guard — explicit rendering rule. Currently a
+				# no-op (poles_by_comp grouping already filters by network)
+				# but kept for future-proofing if pole ranges ever diverge
+				# from wire ranges.
+				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
+					continue
+				# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
+				var a_top: Vector2 = Vector2(pa.x * TILE_SIZE + TILE_SIZE * 0.5, pa.y * TILE_SIZE + TILE_SIZE * 0.16)
+				var b_top: Vector2 = Vector2(pb.x * TILE_SIZE + TILE_SIZE * 0.5, pb.y * TILE_SIZE + TILE_SIZE * 0.16)
+				draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
