@@ -1629,23 +1629,30 @@ func _draw_power_wires() -> void:
 		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
 		var poles: Array = poles_by_comp[cid]
 		# For each pole, find its single nearest in-range neighbor in this
-		# same component. Dedup pairs via canonical (lex-smaller-first) key.
+		# same component. TWO distance metrics: Chebyshev for the in-range
+		# CHECK (matches the BFS connectivity rule in PowerNetwork), but
+		# Euclidean-squared for the nearest SELECTION (so visually-closer
+		# always wins when Chebyshev ties — e.g., a diagonal-4 pole and a
+		# horizontal-4 pole both have Chebyshev 4, but Euclidean√32 vs √16
+		# correctly picks the horizontal one).
+		# Dedup pairs via canonical (lex-smaller-first) key.
 		var drawn: Dictionary = {}
 		for a in poles:
 			var nearest: Vector2i = Vector2i.ZERO
-			var nearest_dist: int = -1
+			var nearest_sq: int = -1
 			for b in poles:
 				if b == a:
 					continue
 				var dx: int = abs(b.x - a.x)
 				var dy: int = abs(b.y - a.y)
-				var d: int = max(dx, dy)
-				if d > PowerNetwork.POLE_RANGE:
+				var cheb: int = max(dx, dy)
+				if cheb > PowerNetwork.POLE_RANGE:
 					continue
-				if nearest_dist < 0 or d < nearest_dist:
+				var sq: int = dx * dx + dy * dy
+				if nearest_sq < 0 or sq < nearest_sq:
 					nearest = b
-					nearest_dist = d
-			if nearest_dist < 0:
+					nearest_sq = sq
+			if nearest_sq < 0:
 				continue   # isolated pole (no in-range neighbor)
 			# Canonical pair key — smaller anchor first. Dedup so A→B and
 			# B→A (if B's nearest is A) only draws one wire.
