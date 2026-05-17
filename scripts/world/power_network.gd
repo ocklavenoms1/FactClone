@@ -33,6 +33,17 @@ extends RefCounted
 # intermediate poles.
 const POLE_RANGE: int = 3
 
+# Pole's supply-area Chebyshev radius for CONSUMERS (Factorio-style).
+# A consumer at any cell within SUPPLY_RADIUS Chebyshev distance of a
+# pole receives power from that pole's component. Radius 1 = 3×3 area
+# centered on pole (8 surrounding cells + the pole's own cell). Lamps,
+# future electric processors, etc. all use this. GENERATORS
+# (WATER_WHEEL, etc.) intentionally use strict cardinal adjacency
+# instead — see _adjacent_component_id. Asymmetric by design (PAUSE 1
+# user decision): consumers powered wirelessly within radius, generators
+# must touch a pole.
+const SUPPLY_RADIUS: int = 1
+
 # 4-directional adjacency for building-to-pole association. Local copy —
 # grid_world.gd has its own `_CARDINALS` at line 471; kept separate so
 # PowerNetwork stays self-contained and doesn't need to reach into
@@ -105,17 +116,22 @@ static func update_supply_demand(world) -> void:
 	for comp_id in world._pole_component.values():
 		world._component_supply[comp_id] = 0
 		world._component_demand[comp_id] = 0
-	# Walk all buildings. Generators contribute supply; consumers contribute demand.
+	# Walk all buildings. Generators use STRICT cardinal-adjacency to find
+	# their pole; consumers use the wider SUPPLY_RADIUS scan (Factorio-
+	# style wireless supply). Asymmetric by PAUSE 1 user decision.
 	for anchor in world.buildings:
 		var b: Building = world.buildings[anchor]
-		var comp_id: int = _adjacent_component_id(world, b)
-		if comp_id < 0:
-			continue
 		if b.type == Buildings.Type.WATER_WHEEL:
+			var gen_comp: int = _adjacent_component_id(world, b)
+			if gen_comp < 0:
+				continue
 			if bool(b.state.get("output_active", false)):
-				world._component_supply[comp_id] = int(world._component_supply.get(comp_id, 0)) + WaterWheel.MAX_OUTPUT
+				world._component_supply[gen_comp] = int(world._component_supply.get(gen_comp, 0)) + WaterWheel.MAX_OUTPUT
 		elif b.type == Buildings.Type.ELECTRIC_LAMP:
-			world._component_demand[comp_id] = int(world._component_demand.get(comp_id, 0)) + ElectricLamp.DEMAND
+			var con_comp: int = _supply_component_id(world, b)
+			if con_comp < 0:
+				continue
+			world._component_demand[con_comp] = int(world._component_demand.get(con_comp, 0)) + ElectricLamp.DEMAND
 	# Compute satisfaction per component. Formula is semantically equivalent
 	# to the spec's `min(1.0, supply / max(1, demand))` for dem >= 1 (the
 	# consequential range). For dem == 0 (network has no consumers) this
@@ -130,10 +146,14 @@ static func update_supply_demand(world) -> void:
 		var sat: float = 1.0 if dem == 0 else min(1.0, float(sup) / float(dem))
 		world._component_satisfaction[comp_id] = sat
 
-## Find the component ID of any pole adjacent to building `b`. Returns -1
-## if no adjacent pole. Used by generators (supply) and consumers (demand)
-## once they exist. Lex-first iteration order resolves the ambiguity when
-## a building borders TWO different networks (documented v1 simplification).
+## Find the component ID of any pole CARDINALLY ADJACENT (4-direction,
+## 1-tile) to building `b`. Returns -1 if no adjacent pole. Used by
+## GENERATORS (water wheel etc.) which must touch a pole to feed the
+## network. Lex-first iteration order resolves the ambiguity when a
+## building borders TWO different networks (documented v1 simplification).
+##
+## Consumers should use _supply_component_id instead — Factorio-style
+## wireless supply area (PAUSE 1 user decision).
 static func _adjacent_component_id(world, b: Building) -> int:
 	for cell in Buildings.all_edge_cells(b.type, b.anchor):
 		if not world.has_building_at(cell):
@@ -145,25 +165,65 @@ static func _adjacent_component_id(world, b: Building) -> int:
 			return int(world._pole_component[nb.anchor])
 	return -1
 
-## Public query: is the position adjacent to a pole in a powered (sat > 0)
-## network? Used for boolean checks. Most consumers should use
-## power_satisfaction_at() instead.
+## Find the component ID of any pole within SUPPLY_RADIUS Chebyshev
+## distance of any cell of building `b`'s footprint. Returns -1 if no
+## pole in supply area. Used by CONSUMERS (lamps etc.) — Factorio-style
+## wireless supply. Pole at (5,5) with SUPPLY_RADIUS=1 covers consumers
+## anywhere in the 3×3 area (4,4)..(6,6).
+##
+## First pole found wins (lex iteration order of pole positions).
+## Defensive verification: only counts cells that are confirmed POWER_POLE
+## buildings (in case _pole_component has stale entries during a rebuild).
+static func _supply_component_id(world, b: Building) -> int:
+	var radius: int = SUPPLY_RADIUS
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	# Iterate the consumer's full footprint. For each footprint cell,
+	# scan the (2*radius+1)² area around it for a pole. 1×1 consumers
+	# (lamps) iterate 1 cell × 9 checks = 9; 2×2 future consumers would
+	# do 4 × 9 = 36 (with overlap, but the early-return on first pole
+	# found makes worst case rare).
+	for fy in range(fp.y):
+		for fx in range(fp.x):
+			var footprint_cell: Vector2i = b.anchor + Vector2i(fx, fy)
+			for dy in range(-radius, radius + 1):
+				for dx in range(-radius, radius + 1):
+					var check_pos: Vector2i = footprint_cell + Vector2i(dx, dy)
+					if not world._pole_component.has(check_pos):
+						continue
+					# Defensive: confirm it's actually a pole.
+					if not world.has_building_at(check_pos):
+						continue
+					var nb: Building = world.building_at(check_pos)
+					if nb == null or nb.type != Buildings.Type.POWER_POLE:
+						continue
+					return int(world._pole_component[check_pos])
+	return -1
+
+## Public query: is the position within SUPPLY_RADIUS of a pole in a
+## powered (sat > 0) network? Used for boolean checks. Most consumers
+## should use power_satisfaction_at() instead.
 static func is_powered_at(world, pos: Vector2i) -> bool:
 	return power_satisfaction_at(world, pos) > 0.0
 
-## Public query: per-tile satisfaction. Returns 0.0 if no adjacent pole or
-## no network. Returns [0.0, 1.0] otherwise. Consumers call this from their
-## tick to drive brightness / throughput.
+## Public query: per-tile satisfaction for consumers. Returns 0.0 if no
+## pole within SUPPLY_RADIUS Chebyshev. Returns [0.0, 1.0] otherwise.
+## Consumers call this from their tick to drive brightness / throughput.
+##
+## Scans the (2*SUPPLY_RADIUS+1)² area around pos for any pole. First
+## pole found wins. This is the per-position equivalent of
+## _supply_component_id for 1×1 callers — lamps mostly. Multi-cell
+## consumers should use _supply_component_id with their Building.
 static func power_satisfaction_at(world, pos: Vector2i) -> float:
 	if world._power_network_dirty:
 		rebuild_topology(world)
-	# Look for an adjacent pole.
-	for dir_vec in _CARDINALS:
-		var n: Vector2i = pos + dir_vec
-		if not world._pole_component.has(n):
-			continue
-		var comp_id: int = int(world._pole_component[n])
-		return float(world._component_satisfaction.get(comp_id, 0.0))
+	var radius: int = SUPPLY_RADIUS
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var n: Vector2i = pos + Vector2i(dx, dy)
+			if not world._pole_component.has(n):
+				continue
+			var comp_id: int = int(world._pole_component[n])
+			return float(world._component_satisfaction.get(comp_id, 0.0))
 	return 0.0
 
 ## Public query: network ID (component ID) of the pole at `pos`, or -1

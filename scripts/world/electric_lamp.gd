@@ -53,9 +53,12 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 static func info_lines(b: Building, world) -> Array:
 	var lines: Array = []
 	lines.append("Demand: %d unit" % DEMAND)
-	var comp_id: int = PowerNetwork._adjacent_component_id(world, b)
+	# Consumers use the wireless supply-area scan (Factorio-style), not
+	# strict cardinal adjacency. Pole within SUPPLY_RADIUS Chebyshev of
+	# any cell of lamp's footprint = network match.
+	var comp_id: int = PowerNetwork._supply_component_id(world, b)
 	if comp_id < 0:
-		lines.append("Network: (not adjacent to a pole)")
+		lines.append("Network: (no pole within supply range)")
 		lines.append("Satisfaction: 0%% (NO POWER)")
 		return lines
 	var sat: float = PowerNetwork.satisfaction_for(world, comp_id)
