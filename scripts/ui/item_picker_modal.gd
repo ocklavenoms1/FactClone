@@ -14,6 +14,10 @@ extends PopupPanel
 ## Used by FastInserterPanel filter slot (Task 7 wires it). Complements
 ## drop-to-set (both paths set filter; user choice).
 
+# Picker dimensions — shared constant so script + scene + modal call
+# all read from one place.
+const PICKER_SIZE: Vector2i = Vector2i(280, 320)
+
 @onready var _list_container: VBoxContainer = $ScrollContainer/VBox if has_node("ScrollContainer/VBox") else null
 
 var _confirm_cb: Callable = Callable()
@@ -33,12 +37,12 @@ func open(anchor: Vector2, current_filter: int, confirm_cb: Callable) -> void:
 	_populate_list()
 	# Hard modal — Esc + click-outside cancel handled by PopupPanel.
 	position = Vector2i(anchor)
-	size = Vector2i(280, 320)
+	size = PICKER_SIZE
 	# Headless test path: get_parent() may be the test_runner Node, not a
 	# valid Window for popup_exclusive_on_parent. Guard the modal call.
 	var p = get_parent()
 	if p != null and p is Window:
-		popup_exclusive_on_parent(p, Rect2i(Vector2i(anchor), Vector2i(280, 320)))
+		popup_exclusive_on_parent(p, Rect2i(Vector2i(anchor), PICKER_SIZE))
 	visible = true
 
 func _populate_list() -> void:
@@ -56,8 +60,10 @@ func _populate_list() -> void:
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		btn.custom_minimum_size = Vector2(0, 28)
 		if type_value == _current_filter:
-			# Highlight current selection via modulate (cheap, no theme override).
-			btn.modulate = Color(1.0, 1.0, 0.4)   # warm yellow
+			# Highlight current selection via modulate. Reuse SlotWidget's
+			# established hover-yellow color for visual consistency across
+			# the project's "current/active" affordance.
+			btn.modulate = SlotWidget.BORDER_HOVER
 		btn.pressed.connect(func(): _on_item_selected(type_value))
 		_list_container.add_child(btn)
 
