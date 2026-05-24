@@ -1023,19 +1023,57 @@ static func _is_adjacent_to_building(b: Building, player_tile: Vector2i) -> bool
 				return true
 	return false
 
+## Static helper (QoL Cluster B Item 4): test-isolatable E-key dispatch.
+##
+## Rule: if mouse_tile is on the player's adjacent cells (Manhattan
+## distance ≤ 1 = player_tile OR a cardinal neighbor) AND has an
+## interactable building, return that building. Else fall back to
+## existing scan order (player_tile → E → W → S → N).
+##
+## Preserves tap-E-without-aiming UX (no mouse intent → scan as before)
+## while letting players target a specific building when they want to.
+static func find_interactable_for_e_key(player_tile: Vector2i, mouse_tile: Vector2i, world) -> Building:
+	var dx: int = abs(mouse_tile.x - player_tile.x)
+	var dy: int = abs(mouse_tile.y - player_tile.y)
+	if (dx + dy) <= 1:   # Manhattan dist ≤ 1 = on player or cardinal neighbor
+		if world.has_building_at(mouse_tile):
+			var b: Building = world.building_at(mouse_tile)
+			if b != null and Buildings.has_interaction_ui(b.type):
+				return b
+	return _find_adjacent_interactable_static(player_tile, world)
+
+## Static mirror of _find_adjacent_interactable instance method, for
+## test-isolation. Scans player_tile → E → W → S → N for first
+## interactable building.
+static func _find_adjacent_interactable_static(player_tile: Vector2i, world) -> Building:
+	var scan: Array = [
+		player_tile,
+		player_tile + Vector2i(1, 0),
+		player_tile + Vector2i(-1, 0),
+		player_tile + Vector2i(0, 1),
+		player_tile + Vector2i(0, -1),
+	]
+	for cell in scan:
+		if world.has_building_at(cell):
+			var b: Building = world.building_at(cell)
+			if b != null and Buildings.has_interaction_ui(b.type):
+				return b
+	return null
+
 func _try_interact(player_tile: Vector2i) -> void:
-	# E-key unified dispatch (session-building-ui-2):
-	#   1. Adjacent building with interaction UI → open its panel
-	#      (same as click-to-open in NEUTRAL cursor mode, but E ignores
-	#       hotbar state — works whether holding an item or not).
-	#   2. Adjacent drainable building (no UI) → drain into player inventory
-	#      (legacy harvester behavior; preserved until Session 4 adds its UI).
-	#   3. Else → silent no-op (don't toast on E with no target; players
-	#      tap E speculatively).
-	var b: Building = _find_adjacent_interactable(player_tile)
+	# E-key unified dispatch (session-building-ui-2 + QoL Cluster B Item 4
+	# hover-aware update):
+	#   1. Mouse over an adjacent interactable building → open THAT one.
+	#   2. Else: scan player_tile → E → W → S → N → first interactable.
+	#   3. Else: legacy drainable harvester fallback.
+	#   4. Else: silent no-op.
+	var mouse_world: Vector2 = get_global_mouse_position()
+	var mouse_tile: Vector2i = grid_world.world_to_tile(mouse_world)
+	var b: Building = find_interactable_for_e_key(player_tile, mouse_tile, grid_world)
 	if b != null:
 		_try_open_building_ui(b.anchor, player_tile)
 		return
+	# Drainable fallback (existing behavior unchanged).
 	var d: Building = grid_world.find_adjacent_drainable(player_tile)
 	if d == null:
 		return
@@ -1046,22 +1084,10 @@ func _try_interact(player_tile: Vector2i) -> void:
 		_show_toast("%s is empty" % Buildings.name_of(d.type))
 
 ## Scan the player's 4-adjacent cells (including own tile) for a building
-## with `has_interaction_ui` registered. Returns null if none. Used by
-## E-key dispatch to find what to open.
+## with `has_interaction_ui` registered. Returns null if none. Thin
+## wrapper around static helper for backward compatibility.
 func _find_adjacent_interactable(player_tile: Vector2i) -> Building:
-	var scan: Array = [
-		player_tile,
-		player_tile + Vector2i(1, 0),
-		player_tile + Vector2i(-1, 0),
-		player_tile + Vector2i(0, 1),
-		player_tile + Vector2i(0, -1),
-	]
-	for cell in scan:
-		if grid_world.has_building_at(cell):
-			var b: Building = grid_world.building_at(cell)
-			if b != null and Buildings.has_interaction_ui(b.type):
-				return b
-	return null
+	return _find_adjacent_interactable_static(player_tile, grid_world)
 
 ## Debug-only: spawns four minimal chains east of the player.
 ##

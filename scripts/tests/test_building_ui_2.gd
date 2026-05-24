@@ -209,6 +209,35 @@ static func run(parent: Node) -> Dictionary:
 
 	_disconnect(world); world.queue_free()
 
+	# ===========================================================================
+	# (NEW — QoL Cluster B Item 4) E-KEY HOVER-AWARE DISPATCH — mouse over an
+	# adjacent interactable building wins over the default scan order.
+	#
+	# Headless caveat: we can't drive Input.mouse_position from a test
+	# directly. Test the underlying static helper find_interactable_for_e_key
+	# which takes player_tile + explicit mouse_tile + world.
+	# ===========================================================================
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		for y in range(0, 15):
+			world.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
+	# Layout: player at (10, 10). Inserter east at (11, 10). Chest south at
+	# (10, 11). Default scan order is player_tile → E → W → S → N, so the
+	# inserter (E) wins by default.
+	world.place_building(Buildings.Type.INSERTER, Vector2i(11, 10), Belt.DIR_E)
+	world.place_building(Buildings.Type.CHEST, Vector2i(10, 11), Belt.DIR_E)
+	var MainScript = load("res://scripts/main.gd")
+	# Scenario A: mouse over chest tile (10, 11) → chest wins.
+	var b_hover_chest: Building = MainScript.find_interactable_for_e_key(Vector2i(10, 10), Vector2i(10, 11), world)
+	_check(failures, b_hover_chest != null and b_hover_chest.type == Buildings.Type.CHEST,
+		"E-key hover (A): mouse over chest → chest opens (not inserter), got %s" % (Buildings.name_of(b_hover_chest.type) if b_hover_chest else "null"))
+	# Scenario B: mouse far from player ((5, 5)) → fallback scan, inserter wins.
+	var b_no_hover: Building = MainScript.find_interactable_for_e_key(Vector2i(10, 10), Vector2i(5, 5), world)
+	_check(failures, b_no_hover != null and b_no_hover.type == Buildings.Type.INSERTER,
+		"E-key hover (B): mouse far from player → scan returns inserter, got %s" % (Buildings.name_of(b_no_hover.type) if b_no_hover else "null"))
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all session 2 panel invariants hold" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
