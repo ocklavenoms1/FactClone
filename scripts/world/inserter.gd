@@ -446,6 +446,44 @@ static func _is_processor_with_input(b: Building) -> bool:
 			return true
 	return false
 
+## Read-only mirror of _try_pickup's source-scanning logic, filtered to a
+## SPECIFIC item type. Returns true if any cell of the source tile's
+## building contains at least one item of `item_type`. Used by info_lines
+## to surface the "no items match filter" diagnostic.
+##
+## Source types covered: BELT, CHEST, recipe-driven Processor (out_buffer).
+## Same dispatch as _try_pickup. Returns false for unrecognized source
+## types (which is correct — IDLE status line will appear, hinting that
+## the source isn't a valid item source).
+static func _source_has_matching_item(world, src_pos: Vector2i, item_type: int) -> bool:
+	if not world.has_building_at(src_pos):
+		return false
+	var src_b: Building = world.building_at(src_pos)
+	if src_b == null:
+		return false
+	# Belt: scan slots for matching item.
+	if src_b.type == Buildings.Type.BELT:
+		var slots: Array = src_b.state.get("slots", [])
+		for s in slots:
+			if int(s) == item_type:
+				return true
+		return false
+	# Chest: scan bag for matching item with count > 0.
+	if src_b.type == Buildings.Type.CHEST:
+		var bag: Array = src_b.state.get("bag", [])
+		for entry in bag:
+			if int(entry[0]) == item_type and int(entry[1]) > 0:
+				return true
+		return false
+	# Recipe-driven Processor: scan out_buffer.
+	if _is_processor_with_output(src_b):
+		var out_buf: Array = src_b.state.get("out_buffer", [])
+		for entry in out_buf:
+			if int(entry[0]) == item_type and int(entry[1]) > 0:
+				return true
+		return false
+	return false
+
 # ---------- info_lines (Q-inspect) ----------
 
 static func info_lines(b: Building, world) -> Array:
@@ -475,6 +513,12 @@ static func info_lines(b: Building, world) -> Array:
 		var filter: int = int(b.state.get("filter_item_type", -1))
 		if filter >= 0:
 			lines.append("Filter: %s" % Items.name_of(filter))
+			# QoL Cluster B Item 3: if filter set AND source has no matching
+			# items, surface diagnostic line so players know WHY the inserter
+			# is idle. Without this, "IDLE" + "Filter: X" requires manual
+			# source-inspection to find the empty-supply cause.
+			if world != null and not _source_has_matching_item(world, source_tile(b), filter):
+				lines.append("Status: IDLE (no items match filter)")
 		else:
 			lines.append("Filter: (none — picks any item)")
 	# Burner fuel display.

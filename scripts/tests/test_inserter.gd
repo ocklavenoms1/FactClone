@@ -577,8 +577,52 @@ static func run(parent: Node) -> Dictionary:
 			"(15) loaded held_item_buffer should be [[WHEAT,1]], got %s" % str(held_buf_15))
 	_cleanup(world, player_a_15, world_b_15, player_b_15, orig_path_15)
 
+	# ===========================================================================
+	# (16 — QoL Cluster B Item 3) FILTER STATUS DIAGNOSTIC LINE — when fast
+	# inserter has filter set but no matching items in source, info_lines
+	# includes "Status: IDLE (no items match filter)". When filter unset OR
+	# source has matching items, line is absent.
+	# ===========================================================================
+	world = _make_world(parent)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.FAST_INSERTER, Vector2i(10, 5), Belt.DIR_E)
+	world.place_building(Buildings.Type.CHEST, Vector2i(9, 5), Belt.DIR_E)
+	var fast_b_fs: Building = world.building_at(Vector2i(10, 5))
+	var src_chest_fs: Building = world.building_at(Vector2i(9, 5))
+	# Scenario A: filter set to WHEAT, source has FLAX → status line present.
+	fast_b_fs.state["filter_item_type"] = Items.Type.WHEAT
+	src_chest_fs.state["bag"] = [[Items.Type.FLAX, 5]]
+	var info_a: Array = Inserter.info_lines(fast_b_fs, world)
+	var has_status_a: bool = false
+	for line in info_a:
+		if str(line).find("no items match filter") >= 0:
+			has_status_a = true
+			break
+	_check(failures, has_status_a, "(16-A) filter status: source has only FLAX while filter=WHEAT, should show 'no items match filter' line")
+	# Scenario B: filter set to WHEAT, source has WHEAT → status line absent.
+	src_chest_fs.state["bag"] = [[Items.Type.WHEAT, 5]]
+	var info_b: Array = Inserter.info_lines(fast_b_fs, world)
+	var has_status_b: bool = false
+	for line in info_b:
+		if str(line).find("no items match filter") >= 0:
+			has_status_b = true
+			break
+	_check(failures, not has_status_b, "(16-B) filter status: source has matching WHEAT, status line should be ABSENT")
+	# Scenario C: filter UNSET, source has any items → status line absent.
+	fast_b_fs.state["filter_item_type"] = -1
+	src_chest_fs.state["bag"] = [[Items.Type.FLAX, 5]]
+	var info_c: Array = Inserter.info_lines(fast_b_fs, world)
+	var has_status_c: bool = false
+	for line in info_c:
+		if str(line).find("no items match filter") >= 0:
+			has_status_c = true
+			break
+	_check(failures, not has_status_c, "(16-C) filter status: filter unset, status line should be ABSENT regardless of source")
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
-		return { "ok": true, "message": "15 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach + long-reach cross-tile transport + long-reach save round-trip" }
+		return { "ok": true, "message": "16 sub-cases pass: basic cycle + fast cycle + filter unset + filter chest + filter belt match + filter belt mismatch + drop-to-set + RMB clear + save round-trip + fuel-port fix + parametric refactor regression + long-reach tier + long-reach 2-tile reach + long-reach cross-tile transport + long-reach save round-trip + filter status diagnostic line" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
