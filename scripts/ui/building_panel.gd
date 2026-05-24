@@ -278,8 +278,10 @@ func _hover_item_type(hit: Variant) -> int:
 				return Items.Type.WOOD
 			"filter":
 				# Filter slot: scalar int field (NOT a buffer). -1 = unset.
-				var ft: int = int(building.state.get(field, -1))
-				return ft if ft >= 0 else -1
+				# .get(field, -1) already returns -1 default; tooltip's
+				# start_hover null-treats item_type < 0, so passing -1
+				# through is correct behavior (no tooltip on unset filter).
+				return int(building.state.get(field, -1))
 		return -1
 	return -1
 
