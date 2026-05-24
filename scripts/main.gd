@@ -118,6 +118,14 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # _unhandled_input to suppress polled inputs while open.
 @onready var quantity_picker: QuantityPickerModal = $HUD/QuantityPickerModal
 
+# Shared tooltip widget (Task 5 of qol-cluster-b). Hovering a slot for 500ms
+# on any slot-owning Control shows item name + description. TooltipManager is
+# the last child of $HUD so its tooltip floats above other panels. Reference
+# is passed to inventory_grid + chest_panel + every BuildingPanel subclass
+# (filter slot on fast_inserter included) in _ready, following the same
+# reference-passing pattern as quantity_picker.
+@onready var tooltip_manager: TooltipManager = $HUD/TooltipManager if has_node("HUD/TooltipManager") else null
+
 var player_inventory: Inventory
 var toast_timer: float = 0.0
 var _last_failed_place_tick: int = -1
@@ -180,6 +188,10 @@ func _ready() -> void:
 	# computes max via SlotClickHandler.ctrl_click_max and opens the picker
 	# with a confirm Callable that runs ctrl_click_transfer.
 	inventory_grid.quantity_picker = quantity_picker
+	# Shared tooltip ref — defensive null-check; tests may instantiate without
+	# the scene-tree node present.
+	if tooltip_manager != null:
+		inventory_grid.tooltip_manager = tooltip_manager
 	# Hotbar gets a player_inventory ref so item_apply slots dim when the
 	# player has 0 of the item (session-soil-exhaustion-3). Optional —
 	# slots fall back to never-dim if ref is null.
@@ -209,6 +221,10 @@ func _ready() -> void:
 			# so ctrl+LMB on player-side slots (and chest-bag slots in
 			# chest_panel) can route to it.
 			panel.quantity_picker = quantity_picker
+			# Shared tooltip (Task 5 qol-cluster-b). Null-treated by panel
+			# wrappers when missing — safe under headless tests.
+			if tooltip_manager != null:
+				panel.tooltip_manager = tooltip_manager
 	# Player gates movement on any building panel being open.
 	player.building_panels = all_panels
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.

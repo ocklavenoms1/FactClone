@@ -92,6 +92,7 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var hit = _hit_test_chest(event.position)
 		_hover = hit
+		_handle_hover(hit)
 		queue_redraw()
 		return
 	if event is InputEventMouseButton:
@@ -125,6 +126,25 @@ func _hit_test_chest(pos: Vector2) -> Variant:
 		if _chest_slot_rect(i).has_point(pos):
 			return {"chest_idx": i}
 	return -1
+
+## Tooltip override (Task 5 qol-cluster-b). Chest grid slots are
+## Dictionary {chest_idx} — distinct from slot_def-keyed building slots.
+## Player slot (int) falls through to base behavior.
+func _handle_hover(hit: Variant) -> void:
+	if tooltip_manager == null:
+		return
+	if hit is Dictionary and hit.has("chest_idx"):
+		var idx: int = int(hit["chest_idx"])
+		var bag: Array = building.state.get("bag", []) if building != null else []
+		var views: Array = SlotWidget.chest_bag_to_slot_views(bag)
+		if idx < 0 or idx >= views.size():
+			tooltip_manager.end_hover()
+			return
+		var item_type: int = int(views[idx]["item_type"])
+		tooltip_manager.start_hover(item_type, get_global_mouse_position())
+		return
+	# Player slot (int) or no-hit — defer to base which handles both.
+	super(hit)
 
 ## Rect for chest-bag slot index `i`. Shared between _hit_test_chest and
 ## the ctrl-picker anchor in _handle_chest_slot_click (Task 20).

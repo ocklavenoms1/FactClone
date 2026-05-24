@@ -33,6 +33,7 @@
 [ext_resource type="Script" path="res://scripts/ui/inserter_panel.gd" id="31_inspanel"]
 [ext_resource type="Script" path="res://scripts/ui/fast_inserter_panel.gd" id="32_fastinspanel"]
 [ext_resource type="PackedScene" path="res://scenes/quantity_picker_modal.tscn" id="33_qpicker"]
+[ext_resource type="PackedScene" path="res://scenes/tooltip_manager.tscn" id="34_tooltip"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
@@ -303,3 +304,5 @@ visible = false
 
 [node name="QuantityPickerModal" parent="HUD" instance=ExtResource("33_qpicker")]
 visible = false
+
+[node name="TooltipManager" parent="HUD" instance=ExtResource("34_tooltip")]

@@ -46,6 +46,12 @@ var toast_callback: Callable = Callable()
 # Plain LMB / shift+LMB unaffected — they still delegate to SlotClickHandler.
 var quantity_picker: QuantityPickerModal = null
 
+# Shared TooltipManager (Task 5 qol-cluster-b). Set by main.gd post-_ready
+# on every BuildingPanel subclass. Hovering a slot (player or building) for
+# 500ms shows item name + description. Null in headless test paths — all
+# wrapper helpers null-check before calling.
+var tooltip_manager: Node = null
+
 # Building this panel is currently bound to. Set by open(); cleared by close().
 var building: Building = null
 var world: Node = null
@@ -83,6 +89,8 @@ func close() -> void:
 	building = null
 	world = null
 	_hover = -1
+	if tooltip_manager != null:
+		tooltip_manager.end_hover()
 
 func is_open() -> bool:
 	return visible
@@ -184,6 +192,7 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_hover = _hit_test(event.position)
+		_handle_hover(_hover)
 		queue_redraw()
 		return
 	if event is InputEventMouseButton:
@@ -211,6 +220,67 @@ func _hit_test(pos: Vector2) -> Variant:
 	for entry in _building_slot_rects():
 		if (entry["rect"] as Rect2).has_point(pos):
 			return entry
+	return -1
+
+# ---------- tooltip hover (Task 5 qol-cluster-b) ----------
+#
+# Maps the _hit_test Variant result → item type, then defers to TooltipManager.
+# Subclasses with their own grids (chest_panel) override _handle_hover with a
+# wider Variant arm.
+
+func _handle_hover(hit: Variant) -> void:
+	if tooltip_manager == null:
+		return
+	var item_type: int = _hover_item_type(hit)
+	if item_type < 0:
+		tooltip_manager.end_hover()
+		return
+	tooltip_manager.start_hover(item_type, get_global_mouse_position())
+
+## Returns the item type currently under the cursor, or -1 if none/empty.
+## Mirrors the lookup logic in _draw_slots for each slot kind.
+func _hover_item_type(hit: Variant) -> int:
+	if hit is int:
+		var slot_idx: int = int(hit)
+		if slot_idx < 0 or inventory == null or slot_idx >= inventory.slots.size():
+			return -1
+		var s: ItemStack = inventory.slots[slot_idx]
+		if s.count <= 0:
+			return -1
+		return s.item_type
+	if hit is Dictionary and hit.has("slot_def"):
+		var slot_def: Dictionary = hit["slot_def"]
+		var sub_idx: int = int(hit.get("sub_idx", -1))
+		var kind: String = str(slot_def.get("kind", ""))
+		var field: String = str(slot_def.get("state_field", ""))
+		if building == null:
+			return -1
+		match kind:
+			"input", "output":
+				var buf: Array = building.state.get(field, [])
+				if buf.is_empty():
+					return -1
+				return int(buf[0][0])
+			"output_multi":
+				var buf2: Array = building.state.get(field, [])
+				if sub_idx < 0 or sub_idx >= buf2.size():
+					return -1
+				return int(buf2[sub_idx][0])
+			"fuel":
+				# Mirror _draw_slots fuel arm: last_fuel_item if valid, else
+				# defensive WOOD fallback if buffer non-empty.
+				var units: int = int(building.state.get(field, 0))
+				if units <= 0:
+					return -1
+				var last: int = int(building.state.get("last_fuel_item", -1))
+				if last >= 0 and Burner.FUEL_VALUES.has(last):
+					return last
+				return Items.Type.WOOD
+			"filter":
+				# Filter slot: scalar int field (NOT a buffer). -1 = unset.
+				var ft: int = int(building.state.get(field, -1))
+				return ft if ft >= 0 else -1
+		return -1
 	return -1
 
 # ---------- click: player inventory slot ----------

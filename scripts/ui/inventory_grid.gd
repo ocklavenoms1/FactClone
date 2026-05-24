@@ -61,6 +61,10 @@ var toast_callback: Callable = Callable()
 # Plain LMB / shift+LMB paths are unaffected and still delegate to handle_player_slot.
 var quantity_picker: QuantityPickerModal = null
 
+# Shared TooltipManager (Task 5 qol-cluster-b). Set by main.gd post-_ready.
+# Null in headless test paths — wrapper null-checks before any call.
+var tooltip_manager: Node = null
+
 func _ready() -> void:
 	# Modal: full-screen overlay so clicks outside the grid don't leak to
 	# the world. mouse_filter STOP catches clicks at the root.
@@ -94,6 +98,8 @@ func _close() -> void:
 	# Cursor stack persists across modal close (session-building-ui-1).
 	visible = false
 	_hover_slot = -1
+	if tooltip_manager != null:
+		tooltip_manager.end_hover()
 
 func _toast(msg: String) -> void:
 	if toast_callback.is_valid():
@@ -106,6 +112,7 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_hover_slot = _slot_under(event.position)
+		_handle_hover(event.position)
 		queue_redraw()
 		return
 	if event is InputEventMouseButton:
@@ -176,6 +183,24 @@ func _slot_under(pos: Vector2) -> int:
 		if _slot_rect(i).has_point(pos):
 			return i
 	return -1
+
+## Tooltip wrapper (Task 5 qol-cluster-b). Maps mouse pos → slot → item
+## type, then defers to TooltipManager. Empty/no-slot → end_hover.
+## tooltip_manager nullable for headless tests.
+func _handle_hover(local_pos: Vector2) -> void:
+	if tooltip_manager == null:
+		return
+	var slot_idx: int = _slot_under(local_pos)
+	if slot_idx < 0 or slot_idx >= inventory.slots.size():
+		tooltip_manager.end_hover()
+		return
+	var slot: ItemStack = inventory.slots[slot_idx]
+	# Empty slot → no tooltip (item_type < 0 already treated as end_hover by
+	# TooltipManager, but pre-check keeps intent explicit).
+	if slot.count <= 0 or slot.item_type < 0:
+		tooltip_manager.end_hover()
+		return
+	tooltip_manager.start_hover(slot.item_type, get_global_mouse_position())
 
 # ---------- rendering ----------
 

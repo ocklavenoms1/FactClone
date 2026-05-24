@@ -98,6 +98,14 @@ func _draw_filter_section(area: Rect2, font: Font) -> void:
 ## And RMB outside the panel doesn't reach _gui_input at all (Control's
 ## MOUSE_FILTER_STOP absorbs it; main.gd's _process gates on
 ## _any_building_panel_open() to suppress world-level RMB removal too).
+##
+## Tooltip hover (Task 5 qol-cluster-b): the filter slot is part of
+## slot_layout with kind="filter", so BuildingPanel's `_handle_hover` already
+## resolves the slot_def → filter_item_type → tooltip via the "filter" arm in
+## `_hover_item_type`. MouseMotion events flow through super(event) here and
+## land in BuildingPanel._gui_input which invokes _handle_hover. No filter-
+## specific code needed in this subclass — the only requirement is that
+## tooltip_manager is set on `self` (handled by main.gd panel-init loop).
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		var hit = _hit_test(event.position)
