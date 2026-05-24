@@ -129,7 +129,8 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # Item picker modal (Task 7 of qol-cluster-b). Used by FastInserterPanel's
 # filter slot — plain-LMB with empty cursor opens the picker. Same scene-file
 # child pattern as TooltipManager. Reference passed to fast_inserter_panel
-# in the all_panels init loop, gated on null for headless tests.
+# AFTER the all_panels init loop (it uniquely owns the filter slot among
+# panels), gated on null for headless tests.
 @onready var item_picker_modal: ItemPickerModal = $HUD/ItemPickerModal if has_node("HUD/ItemPickerModal") else null
 
 var player_inventory: Inventory

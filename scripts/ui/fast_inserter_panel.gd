@@ -1,8 +1,9 @@
 extends InserterPanel
 
 ## Item picker modal reference (Task 7 of qol-cluster-b). Assigned by main.gd
-## during the all_panels init loop, gated on null. Plain-LMB on filter slot
-## with empty cursor opens the picker; callback sets filter_item_type and
+## AFTER the all_panels init loop (FastInserterPanel uniquely owns the
+## filter slot among panels), gated on null. Plain-LMB on filter slot with
+## empty cursor opens the picker; callback sets filter_item_type and
 ## redraws. Drop-to-set (cursor with item) and RMB-clear paths unchanged —
 ## picker complements drop-to-set per spec section 5.
 var item_picker_modal: Node = null
