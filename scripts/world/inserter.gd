@@ -452,16 +452,24 @@ static func _is_processor_with_input(b: Building) -> bool:
 ## to surface the "no items match filter" diagnostic.
 ##
 ## Source types covered: BELT, CHEST, recipe-driven Processor (out_buffer).
-## Same dispatch as _try_pickup. Returns false for unrecognized source
-## types (which is correct — IDLE status line will appear, hinting that
-## the source isn't a valid item source).
+## Same TYPE dispatch as _try_pickup (BELT/CHEST/Processor); BELT body
+## diverges intentionally — see comment on the BELT branch below.
+## Returns false for unrecognized source types (which is correct — IDLE
+## status line will appear, hinting that the source isn't a valid item
+## source).
 static func _source_has_matching_item(world, src_pos: Vector2i, item_type: int) -> bool:
 	if not world.has_building_at(src_pos):
 		return false
 	var src_b: Building = world.building_at(src_pos)
 	if src_b == null:
 		return false
-	# Belt: scan slots for matching item.
+	# Belt: scan ALL slots for the matching item, not just the facing
+	# slot (which is what _try_pickup does via Belt.slot_facing_external).
+	# Intentional divergence: this is a diagnostic, not a pickup. A
+	# matching item ANYWHERE on the source belt means the filter is
+	# correctly configured and items will flow through eventually — no
+	# need to nag the player with "no items match filter" during transient
+	# belt flow. Avoids false-positive IDLE-status flicker.
 	if src_b.type == Buildings.Type.BELT:
 		var slots: Array = src_b.state.get("slots", [])
 		for s in slots:
