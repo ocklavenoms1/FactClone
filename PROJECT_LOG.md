@@ -9,6 +9,57 @@ Each entry has three sections:
 
 ---
 
+## QoL Cluster B — UX polish (5 items)
+
+**Date:** 2026-05-15
+**Tag:** `session-qol-cluster-b`
+**Save schema:** v18 unchanged (all UI-layer)
+**Test count:** 35 → 37 (2 new test files: `test_tooltip_manager` + `test_item_picker_modal`; sub-cases also appended to `test_inserter` + `test_building_ui_2`)
+
+Five backlog items from `NOTES.md` shipped in a single session: item hover tooltips, filter dropdown picker, filter status diagnostic, E-key hover-aware dispatch, chest silent-merge on same-type. All UI-layer; no save schema impact. **NOTES.md Cluster B backlog now empty.**
+
+### What shipped
+
+- **Item 1 — Tooltips**: NEW `TooltipManager extends Control` (single shared widget in `$HUD/TooltipManager`, 500ms hover delay, edge-flip placement on viewport overflow). `Items.gd` `description` field added to all 27 entries with code-citation-grounded text (~13-17 words each, references actual recipe chains / fuel values / building names). Slot-owning Controls (`inventory_grid`, `chest_panel`, `building_panel`, `fast_inserter_panel`) call `start_hover` / `end_hover` from `_gui_input` mouse-motion handlers. **`_hover_item_type` placed on `BuildingPanel` base class** so all 20+ building panels (Mill, Mixer, Smelter, etc.) gain tooltips for free — proper OOP polymorphism, not duplicated in subclasses.
+- **Item 2 — Filter picker**: NEW `ItemPickerModal extends PopupPanel` cloning `QuantityPickerModal` pattern (`popup_exclusive_on_parent` for hard modal, Callable-based result). Plain-LMB on fast inserter's filter slot with empty cursor → opens scrollable list of all 27 items with current filter highlighted in `SlotWidget.BORDER_HOVER` (project hover-yellow). Click → sets filter. Esc/click-outside cancels. Drop-to-set preserved as alternate path.
+- **Item 3 — Filter status**: `Inserter.info_lines` appends `Status: IDLE (no items match filter)` when filter set AND source has no matching items. New static helper `_source_has_matching_item(world, src_pos, item_type)` mirrors `_try_pickup`'s TYPE dispatch (BELT/CHEST/Processor) read-only. BELT branch intentionally scans ALL slots (not facing-only) to avoid false-positive IDLE-status flicker during transient belt flow — documented inline.
+- **Item 4 — E-key hover**: `main.gd._try_interact` checks mouse tile first via `grid_world.world_to_tile(get_global_mouse_position())`. If mouse is on player's adjacent cells (Manhattan dist ≤ 1) AND has an interactable building → open that. Else falls back to existing scan order (player → E → W → S → N). Static helpers `find_interactable_for_e_key` + `_find_adjacent_interactable_static` extracted for test isolation. Original `_find_adjacent_interactable` instance method kept as thin wrapper for API stability. Preserves tap-E-without-aiming UX.
+- **Item 5 — Chest silent-merge**: `chest_panel.gd` plain-LMB drop adds silent-merge branch BEFORE swap-pickup. When cursor type matches existing view's type, `_bag_add` + `cursor.clear` + return (no swap). Different types still swap. 5 production lines + new test sub-case.
+
+### Decisions
+
+- **Tooltip approach (a)**: single `TooltipManager` Control in `$HUD`, called by slot-owning Controls. Per-slot embedded logic (option b) rejected as duplicative.
+- **Description authoring approach (c)**: implementer drafted all 27 with code-citation grounding from `Recipes.gd` + `Burner.FUEL_VALUES` + processor module names; user reviewed and approved batch before tooltip widget integration (Task 3 user-review gate). User Q1-Q4 all "Recommended" (fuel-only for WOOD, dual-use for crops/foods, "Reserved for future X chain" framing for 4 future items, approve all 27 as-drafted).
+- **ItemPickerModal cloned not shared** with `QuantityPickerModal` — UI shape diverges (list vs spinbox). Same `popup_exclusive_on_parent` hard-modal pattern; new `PICKER_SIZE` constant + `SlotWidget.BORDER_HOVER` reuse for highlight (DRY with project conventions).
+- **E-key rule**: hover-with-fallback (option a). Pure-mouse-closest (option b) and inserter-deprioritized (option c) rejected per session-start poll.
+- **Chest UX**: silent merge on same type, swap on different type (Factorio convention).
+- **`_hover_item_type` placement in `BuildingPanel` base class** (not `fast_inserter_panel`): unanticipated by spec, judged correct by code reviewer ("proper polymorphism"). Mill/Mixer/Smelter/all building panels get hover for free.
+
+### Lessons
+
+- **Design Brief Verification at 6 catches** across multi-session run:
+  1. Cluster A Task 14: refuse-clamp semantic conflation
+  2. Inserter Session 3 Q4: REACH belongs in accessors not tick
+  3. Inserter Session 3 Task 6: 5 API mismatches in save_system / state field
+  4. Electricity Foundation Q1: per-pole field vs graph+dirty-flag pattern
+  5. Electricity Foundation Q3: consumer adjacency vs supply-radius semantics
+  6. Cluster B spec→plan: 3 corrections in one pass (`world_to_tile` exists, `SlotWidget` render-only, NOTES item 9 line ref stale)
+  Protocol earning compound value — 100% of conceptual errors caught by code-citation verification.
+- **NOTES line references can go stale**: NOTES item 9 cited `test_building_ui_2.gd:122` — actual relevant assertion was at line 127 AND was for a different code path entirely. Plan correctly directed implementer to ADD a new test rather than flip an existing assertion. Trust the code search, not the line number in legacy notes.
+- **Visual-feature integration test gap acknowledged**: tooltip and picker tests cover state-tracking APIs (start_hover lifecycle, callback firing) but not actual rendered display. Visual verification still requires PAUSE 1 manual smoke. Acceptable for v1 — headless rendering tests would require Godot CI/visual-regression infrastructure not in scope.
+- **Architectural improvements during implementation**: Task 5 implementer placed `_hover_item_type` in `BuildingPanel` base class rather than `fast_inserter_panel` subclass (where spec implied). This is a scope expansion (positive — Mill/Mixer/etc. get free tooltips) flagged honestly. Reviewers approved. Lesson: when implementer spots a DRY opportunity that aligns with project polymorphism, flag-and-expand is the right call.
+- **UX iteration trap protocol** carried over cleanly from session-electricity-foundation: no visual features required >2 iterations this session (tooltips and picker both worked first time per PAUSE 1).
+
+### Cluster B status
+
+All 4 NOTES backlog items (4 + 5 + 7 + 9) shipped this session. E-key item (Cluster B candidate from `session-electricity-foundation` cross-cutting note) also shipped. **Cluster B backlog now empty.** Future polish items go to a new Cluster C / D as they accumulate.
+
+### Commit chain (compact)
+
+`1c1c2f1` spec → `ab9c40d` plan → `4693e70` Task 2 (Items.gd description field) → `3b8a779` Task 3 (27 descriptions, user-approved) → `0fcec4c` Task 4 (TooltipManager) → `360cb33` T4 fix-up (stale docstring) → `094914a` Task 5 (wire TooltipManager into 4 Controls) → `dbefa67` T5 fix-up (no-op ternary) → `5c5a47b` Task 6 (ItemPickerModal) → `cd8a809` T6 fix-up (PICKER_SIZE const + SlotWidget.BORDER_HOVER reuse) → `4c5409c` Task 7 (wire ItemPickerModal into FastInserterPanel) → `bf909d6` T7 fix-up (doc drift) → `c9ca089` Task 8 (filter status diagnostic) → `24b8107` T8 fix-up (BELT-scan-all divergence docstring) → `7493897` Task 9 (E-key hover dispatch) → `a4c9ad3` Task 10 (chest silent-merge) → ship.
+
+---
+
 ## Electricity Arc Session 1 — Foundation
 
 **Tag:** `session-electricity-foundation`

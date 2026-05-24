@@ -76,15 +76,18 @@ Static-analysis-by-reading catches a lot but doesn't catch "this script doesn't 
 
 ## Working protocol: Design Brief Verification (validated session-inserter-long-reach)
 
-Senior dev briefs describe code changes at conceptual level; implementation agents should ALWAYS verify against actual current code shape via code search + line citations before accepting brief assumptions. **Five data points** across Cluster A + Inserter Arc + Electricity Arc:
+Senior dev briefs describe code changes at conceptual level; implementation agents should ALWAYS verify against actual current code shape via code search + line citations before accepting brief assumptions. **Six data points** across Cluster A + Inserter Arc + Electricity Arc + Cluster B:
 
 - **Cluster A Task 14:** refuse-clamp semantic conflation caught by spec re-read before code.
 - **Inserter Session 3 Q4:** brief said "modify tick to use REACH lookup"; verification against `inserter.gd:134-190` revealed tick is already accessor-driven. REACH belongs in `source_tile()` / `dest_tile()` accessors, NOT in tick. Tick stays tier-agnostic.
 - **Inserter Session 3 Task 6:** brief template contained 5 stale API references (SaveSystem `save_game(world, save_path)` signature — actually `(world, player, inventory)`; state field `current_fuel_item` — actually `last_fuel_item`; LoadResult shape; placement coordinate `(5,5)` outside stone overlay; standalone save path — should reuse `TEST_SAVE_PATH` + `_cleanup` helper). Implementer caught all five by comparing against sub-case (9) precedent + checking actual `save_system.gd` / `burner.gd` signatures.
 - **Electricity Foundation Q1:** brief said "per-pole `network_id` field, recompute on changes." Code search at `grid_world.gd:475-565` revealed the codebase precedent is graph + dirty-flag with grid_world-level state maps (no per-instance field). Mirror that exactly. Saves stay flat — only pole positions persist; network rebuilt on load. Controller (planner) wrote the wrong brief; implementer correctly refused to scope-deviate and reported BLOCKED.
 - **Electricity Foundation Task 2 (forward references):** original brief had `update_supply_demand` reference `Buildings.Type.WATER_WHEEL` / `ElectricLamp.DEMAND` etc. before those existed. GDScript 4 resolves class_name globals and enum members at PARSE time (not lazily). Implementer caught the parse-error precondition before any commit. Defer forward-referencing functions to the task that introduces their dependencies.
+- **Cluster B spec→plan (3 corrections in one pass):** (a) Spec referenced `grid_world.world_pos_to_tile` as "existing helper or similar" — DBV found actual name is `world_to_tile(world_pos: Vector2) -> Vector2i` at `grid_world.gd:230` (already used by main.gd:434). (b) Spec implied SlotWidget could host hover-detection — DBV found it's `extends RefCounted` (render-only); hover must live in slot-owning Controls. (c) NOTES item 9 claimed `test_building_ui_2.gd:122` locked the chest-bug behavior — DBV found line at 127 asserts a DIFFERENT path (drop into empty slot). Plan added a NEW test sub-case rather than flipping a non-existent assertion. **All three caught at plan-writing time before any code touched.**
 
-**Pattern:** brief assumptions about code structure are approximate; verification against current code is cheap and catches imprecision before it propagates. **100% of conceptual errors caught by code-citation verification across 5 incidents.** Bake into all implementer-subagent briefs: "before accepting a brief's description of an existing API or code shape, verify by grep + line citation. If the brief and code disagree, the code wins; flag the discrepancy in your DONE report."
+**Pattern:** brief assumptions about code structure are approximate; verification against current code is cheap and catches imprecision before it propagates. **100% of conceptual errors caught by code-citation verification across 6 incidents.** Bake into all implementer-subagent briefs: "before accepting a brief's description of an existing API or code shape, verify by grep + line citation. If the brief and code disagree, the code wins; flag the discrepancy in your DONE report."
+
+**Corollary:** NOTES line references go stale as code evolves. Always grep for the asserted content rather than trusting a line number from legacy notes. Cluster B item 9 was the canonical example: NOTES authored months earlier cited line 122; the relevant code had moved to 127 AND changed code paths.
 
 ---
 
@@ -239,9 +242,9 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 ---
 
-## QoL Polish Session — Clusters A+C SHIPPED, B queued (3 items)
+## QoL Polish Session — Clusters A+B+C ALL SHIPPED, backlog empty
 
-**Status:** Cluster A (click extraction + stack-split + quantity picker) shipped as `session-qol-cluster-a` (2026-05-15). Cluster C (building-blocks-movement) shipped earlier as a small post-session fix. Cluster B (items 4 + 5 + 7 + 9 — UI feedback / discoverability + chest swap UX) remains queued. Item 8 (close-on-padding) was shipped as a Cluster A PAUSE 2 fix. **3 items remain in Cluster B.**
+**Status:** All three clusters shipped. Cluster A (`session-qol-cluster-a`) — click extraction + stack-split + quantity picker. Cluster B (`session-qol-cluster-b`) — item tooltips, filter picker, filter status, E-key hover, chest silent-merge. Cluster C — building-blocks-movement (small post-session fix). Item 8 (close-on-padding) shipped as Cluster A PAUSE 2 fix. **NOTES.md QoL backlog is now empty.** Future polish items go to a new Cluster D / E as they accumulate.
 
 **Items (ordered by architectural dependency, NOT priority):**
 
@@ -251,15 +254,15 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 3. **Ctrl+click quantity picker modal.** **SHIPPED** (Cluster A). `QuantityPickerModal extends PopupPanel` at `scripts/ui/quantity_picker_modal.gd`, hard-modal via `popup_exclusive_on_parent`, edge-flip placement, asymmetric fuel labels per direction. Pre-open gate suppresses picker for no-op cells (different-type, full same-type, etc.).
 
-4. **Item hover tooltips with descriptions.** Hover any slot (inventory or panel) for ~500ms → tooltip with item name + description. Requires `Items.gd` description field per item type (~30 items × ~50-char descriptions). Tooltip widget is shared component. Estimated ~150 lines for the tooltip rendering + ~30 lines for description field plumbing. Per-item description text is content authoring (~1 hour).
+4. **Item hover tooltips with descriptions.** **SHIPPED** (Cluster B — `session-qol-cluster-b`). NEW `TooltipManager extends Control` (single shared widget in `$HUD`, 500ms hover delay, edge-flip placement). `Items.gd` `description` field added to all 27 entries with code-citation-grounded text (~13-17 words each). Slot-owning Controls (inventory_grid + 3 panel types) call `start_hover` / `end_hover` from mouse-motion handlers. `_hover_item_type` placed on `BuildingPanel` base class so all 20+ building panels get hover for free.
 
-5. **Filter dropdown picker (complementing drop-to-set).** Clicking the filter slot opens a scrollable item picker overlay; click an item to set the filter. Drop-to-set still works as alternative path (Factorio-style — click OR drop both work). Estimated ~120 lines: picker widget + close-on-click-outside + item-list scrolling.
+5. **Filter dropdown picker (complementing drop-to-set).** **SHIPPED** (Cluster B). NEW `ItemPickerModal extends PopupPanel` cloning QuantityPickerModal pattern. Plain-LMB on fast inserter filter slot with empty cursor opens scrollable list of all 27 items; current filter highlighted in `SlotWidget.BORDER_HOVER`. Drop-to-set preserved as alternate path.
 
 6. **Building-blocks-movement with per-building `walkable` flag.** **SHIPPED** (Cluster C, immediately post-session-inserter-fast-filter). PROJECT_LOG entry "Cluster C — Building-blocks-movement (small post-session fix)" has the details. Walkable: BELT + INSERTER + FAST_INSERTER (thin devices). Blocked: everything else including PIPE (per locked Q4). Player-on-tile placement rejected with toast. 33/33 tests passing.
 
 **One smaller follow-up captured during Session 2 PAUSE 2:**
 
-7. **Filter status diagnostic.** When fast inserter has filter set but no matching items in source, panel shows `Status: IDLE` with no hint why. Add a `Status: IDLE (no items match filter)` line. ~5 lines. Tag it onto whichever QoL sub-session ships #5 (filter dropdown).
+7. **Filter status diagnostic.** **SHIPPED** (Cluster B). `Inserter.info_lines` appends `Status: IDLE (no items match filter)` when filter set AND source has no matching items. New static helper `_source_has_matching_item` mirrors `_try_pickup`'s TYPE dispatch (BELT/CHEST/Processor) read-only — BELT branch intentionally scans ALL slots (not facing-only) to avoid false-positive flicker during transient flow.
 
 **One follow-up captured during session-qol-cluster-a GATE 1 smoke (since SHIPPED):**
 
@@ -267,18 +270,20 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 **One UX wart captured during session-qol-cluster-a GATE 2 smoke:**
 
-9. **Chest deposit-on-same-type-slot triggers deposit-and-take-back.** Clicking a chest bag slot that already has the SAME item type as the cursor triggers the swap-pickup branch at `chest_panel.gd:152-162` unconditionally: `_bag_add` cursor's items into the bag (merging with the existing entry), then because `view_present` is true, immediately `_bag_remove` the (now-combined) entry and `cursor.pick` it back. Net effect: cursor's 5 wheat + chest's 3 wheat → cursor ends with 8 wheat, chest empty. Player intent ("deposit my 5 wheat into the existing 3 wheat") produces the unintended outcome ("now I have 8 wheat in cursor and the chest is empty"). Factorio convention is "click to deposit (merge silently into matching slot), cursor decrements to 0; only swap when types differ." Pre-existing pre-Cluster-A; behavior also LOCKED IN by `test_building_ui_2.gd:122` assertion (`Chest._bag_count(... WHEAT) == 50` after deposit). Decision: defer to Cluster B UX polish session — not blocking Cluster A ship. Fix is ~5 lines: add `if item_type2 == cursor.item_type: cursor.clear(); return` before the swap-pickup, plus update `test_building_ui_2.gd:122` assertion to reflect the new clean-deposit semantic.
+9. **Chest deposit-on-same-type-slot triggers deposit-and-take-back.** **SHIPPED** (Cluster B). 5-line silent-merge branch at `chest_panel.gd` plain-LMB drop logic: when cursor type matches existing view's type, `_bag_add` + `cursor.clear` + return (no swap). DBV during Cluster B planning revealed NOTES item-9's claim that `test_building_ui_2.gd:122` locked the buggy behavior was incorrect — actual line at 127 asserts a DIFFERENT path (drop into empty slot). Plan correctly added NEW test sub-case covering both merge (same type) and swap (different type) rather than flipping a non-existent assertion.
 
 **Architectural notes:**
 - ~~Items 1+2+3 form a cluster (click-handling). Land together.~~ **SHIPPED** as Cluster A.
-- Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — item 9 (chest swap UX) may bundle in.
+- ~~Items 4+5+7 form a cluster (UI feedback / discoverability). Land together — item 9 (chest swap UX) may bundle in.~~ **SHIPPED** as Cluster B (`session-qol-cluster-b`) along with the E-key item from session-electricity-foundation Cluster B candidate. All 5 items shipped together as planned.
 - ~~Item 6 is standalone (player movement / placement).~~ **SHIPPED** as Cluster C.
 - ~~Item 8 (close-on-padding)~~ **SHIPPED** as Cluster A PAUSE 2 fix.
-- **Cluster B remaining:** items 4 + 5 + 7 + 9. Estimated 2-3 hours.
+- **All QoL backlog items shipped.** Cluster B took ~3 hours (matching estimate). Add new items here as they accumulate from future-session smoke gates.
 
-**Save schema impact:** none across Cluster A (UI-layer only). Cluster B's items also UI-only.
+**Save schema impact:** none across Cluster A or Cluster B (both UI-layer only).
 
 **Cluster A actual:** 13 internal sub-suites added (target: 6-8 — exceeded for thorough ctrl-picker orchestration coverage). Runner pass count 33 → 34 (one new test file: `test_slot_click_handler.gd`).
+
+**Cluster B actual:** 5 items + ~10 sub-cases across 4 test files. Runner pass count 35 → 37 (two new test files: `test_tooltip_manager.gd`, `test_item_picker_modal.gd`; sub-cases also appended to `test_inserter.gd` + `test_building_ui_2.gd`).
 
 ---
 
