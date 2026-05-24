@@ -6,7 +6,6 @@ extends RefCounted
 ##   1. Items.description_of(WHEAT) returns a string (empty or real).
 ##   2. Items.description_of(-1) returns "" (safe fallback for unknown).
 ##   3. TooltipManager hover-start sets pending target; end_hover clears.
-##       (Sub-case 3 lands in Task 4 when TooltipManager exists.)
 
 static func test_name() -> String:
 	return "tooltip manager (accessor + hover lifecycle)"
