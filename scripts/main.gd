@@ -126,6 +126,12 @@ var _last_harvest_full_inv_tick: int = -100   # rate-limit "Inventory full" toas
 # reference-passing pattern as quantity_picker.
 @onready var tooltip_manager: TooltipManager = $HUD/TooltipManager if has_node("HUD/TooltipManager") else null
 
+# Item picker modal (Task 7 of qol-cluster-b). Used by FastInserterPanel's
+# filter slot — plain-LMB with empty cursor opens the picker. Same scene-file
+# child pattern as TooltipManager. Reference passed to fast_inserter_panel
+# in the all_panels init loop, gated on null for headless tests.
+@onready var item_picker_modal: ItemPickerModal = $HUD/ItemPickerModal if has_node("HUD/ItemPickerModal") else null
+
 var player_inventory: Inventory
 var toast_timer: float = 0.0
 var _last_failed_place_tick: int = -1
@@ -225,6 +231,11 @@ func _ready() -> void:
 			# wrappers when missing — safe under headless tests.
 			if tooltip_manager != null:
 				panel.tooltip_manager = tooltip_manager
+	# Task 7 (qol-cluster-b): fast_inserter_panel uniquely owns the filter
+	# slot, so the item picker ref is wired only here (not in the loop). Gated
+	# on both refs to stay safe under headless tests that lack the scene tree.
+	if fast_inserter_panel != null and item_picker_modal != null:
+		fast_inserter_panel.item_picker_modal = item_picker_modal
 	# Player gates movement on any building panel being open.
 	player.building_panels = all_panels
 	# Player gates its movement on inventory_grid.is_open() — wire the ref.

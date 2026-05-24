@@ -1,5 +1,12 @@
 extends InserterPanel
 
+## Item picker modal reference (Task 7 of qol-cluster-b). Assigned by main.gd
+## during the all_panels init loop, gated on null. Plain-LMB on filter slot
+## with empty cursor opens the picker; callback sets filter_item_type and
+## redraws. Drop-to-set (cursor with item) and RMB-clear paths unchanged —
+## picker complements drop-to-set per spec section 5.
+var item_picker_modal: Node = null
+
 ## Fast Inserter panel — extends InserterPanel with the filter slot row
 ## (session-inserter-fast-filter, Inserter Arc Session 2).
 ##
@@ -114,4 +121,31 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			accept_event()
 			return
+	# Task 7 (qol-cluster-b): plain-LMB on filter slot with empty cursor →
+	# open ItemPickerModal. Drop-to-set (cursor with item) flows through
+	# super(event) → BuildingPanel._handle_building_slot_click → _drop_into_filter.
+	# Modifier-key clicks (shift/ctrl) also flow through to super(event) which
+	# no-ops on filter per spec §5.2 / §6.3.
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT \
+			and not event.shift_pressed and not event.ctrl_pressed and not event.alt_pressed \
+			and cursor != null and not cursor.has_item() and item_picker_modal != null:
+		var hit2 = _hit_test(event.position)
+		if hit2 is Dictionary and str(hit2["slot_def"].get("kind", "")) == "filter":
+			var slot_def: Dictionary = hit2["slot_def"]
+			var slot_center: Vector2 = _building_slot_anchor(slot_def, -1)
+			# Anchor: drop below the slot. _building_slot_anchor returns the slot
+			# CENTER in viewport-global coords; offset down by half-slot to land
+			# just under the slot's bottom edge.
+			var anchor: Vector2 = slot_center + Vector2(0, SlotWidget.SIZE / 2)
+			var current_filter: int = int(building.state.get("filter_item_type", -1))
+			item_picker_modal.open(anchor, current_filter,
+				func(item_type: int): _apply_filter_from_picker(item_type))
+			accept_event()
+			return
 	super(event)
+
+## Picker callback (Task 7). Sets filter_item_type and triggers redraw so
+## the filter section reflects the new selection immediately.
+func _apply_filter_from_picker(item_type: int) -> void:
+	building.state["filter_item_type"] = item_type
+	queue_redraw()
