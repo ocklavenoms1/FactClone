@@ -235,6 +235,14 @@ func _handle_chest_slot_click(slot_idx: int, mods: int) -> void:
 	if Chest.free_capacity(building) < cursor.count:
 		_toast("Chest full — cannot deposit (need %d more capacity)" % (cursor.count - Chest.free_capacity(building)))
 		return
+	# QoL Cluster B Item 5: silent-merge when types match — Factorio
+	# convention. Without this branch, _bag_add merges into the existing
+	# same-type entry, then the swap-pickup branch below picks the merged
+	# entry back, leaving the chest empty (deposit-and-take-back bug).
+	if view_present and int(views[slot_idx]["item_type"]) == cursor.item_type:
+		Chest._bag_add(bag, cursor.item_type, cursor.count)
+		cursor.clear()
+		return
 	Chest._bag_add(bag, cursor.item_type, cursor.count)
 	if view_present:
 		# Swap path: pick up the view's stack onto the now-empty cursor.

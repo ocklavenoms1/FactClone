@@ -238,6 +238,51 @@ static func run(parent: Node) -> Dictionary:
 		"E-key hover (B): mouse far from player → scan returns inserter, got %s" % (Buildings.name_of(b_no_hover.type) if b_no_hover else "null"))
 	_disconnect(world); world.queue_free()
 
+	# ===========================================================================
+	# (NEW — QoL Cluster B Item 5) CHEST DEPOSIT ON SAME-TYPE SLOT — silent merge.
+	# Previously: cursor with N wheat + clicking chest slot with M wheat would
+	# _bag_add then swap-pickup the combined (N+M) wheat back → chest empty,
+	# cursor has N+M. Player intent ("deposit my wheat") gave wrong outcome.
+	#
+	# Fixed: when types match, silently merge (cursor empties, chest gains).
+	# Swap only when types differ.
+	# ===========================================================================
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 5):
+		world.set_overlay(Vector2i(x, 0), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.CHEST, Vector2i(0, 0), Belt.DIR_E)
+	var chest_sm: Building = world.building_at(Vector2i(0, 0))
+	chest_sm.state["bag"] = [[Items.Type.WHEAT, 10]]
+	cursor.pick(Items.Type.WHEAT, 5)
+	# Build a panel and click slot 0 (wheat view).
+	var panel_sm = preload("res://scripts/ui/chest_panel.gd").new()
+	parent.add_child(panel_sm)
+	panel_sm.building = chest_sm
+	panel_sm.cursor = cursor
+	panel_sm.toast_callback = func(_m): pass
+	panel_sm._handle_chest_slot_click(0, SlotClickHandler.MOD_NONE)
+	# Expected: silent merge — chest has 15 wheat, cursor empty.
+	var wheat_count_sm: int = Chest._bag_count(chest_sm.state["bag"], Items.Type.WHEAT)
+	_check(failures, wheat_count_sm == 15,
+		"same-type silent merge: chest should have 15 wheat (5 + 10), got %d" % wheat_count_sm)
+	_check(failures, not cursor.has_item(),
+		"same-type silent merge: cursor should be empty, got %s ×%d" % [Items.name_of(cursor.item_type) if cursor.has_item() else "none", cursor.count])
+	# Verify swap still works for DIFFERENT type.
+	cursor.clear()
+	chest_sm.state["bag"] = [[Items.Type.FLAX, 7]]
+	cursor.pick(Items.Type.WHEAT, 5)
+	panel_sm._handle_chest_slot_click(0, SlotClickHandler.MOD_NONE)
+	# Expected: swap — chest has WHEAT 5, cursor has FLAX 7.
+	var wheat_in_chest: int = Chest._bag_count(chest_sm.state["bag"], Items.Type.WHEAT)
+	var flax_in_chest: int = Chest._bag_count(chest_sm.state["bag"], Items.Type.FLAX)
+	_check(failures, wheat_in_chest == 5 and flax_in_chest == 0,
+		"different-type swap: chest should have WHEAT 5 + FLAX 0, got W%d F%d" % [wheat_in_chest, flax_in_chest])
+	_check(failures, cursor.has_item() and cursor.item_type == Items.Type.FLAX and cursor.count == 7,
+		"different-type swap: cursor should hold FLAX ×7, got %s ×%d" % [Items.name_of(cursor.item_type) if cursor.has_item() else "none", cursor.count])
+	panel_sm.queue_free()
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
 		return { "ok": true, "message": "all session 2 panel invariants hold" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 6))] }
