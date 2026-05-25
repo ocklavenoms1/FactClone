@@ -105,20 +105,55 @@ static func rebuild_topology(world) -> void:
 
 	world._power_network_dirty = false
 
-## Walks generators (water wheels → supply) and consumers (lamps → demand)
-## adjacent to poles. Computes satisfaction per component.
+## Per-tick orchestrator. Called from grid_world._on_tick BEFORE the
+## building tick loop. 3-stage flow (extended at Electricity Session 2):
 ##
-## Task 7 wires this into grid_world._on_tick.
+## Stage 1: walk all buildings. Classify by type:
+##   - Generators (WATER_WHEEL, WINDMILL, STEAM_GENERATOR) → sum MAX_OUTPUT
+##     into _component_raw_supply when output_active.
+##   - Consumers (ELECTRIC_LAMP) → sum DEMAND into _component_demand.
+##   - Accumulators (ACCUMULATOR) → register in _component_accumulators
+##     list per component (no supply/demand contribution yet).
+##
+## Stage 2: per component, compute excess = raw_supply - demand. For each
+## accumulator in the component:
+##   - excess > 0: charge by min(excess_per_acc, MAX_CHARGE_RATE,
+##     MAX_CAPACITY - acc.charge). Mutate acc.state.charge.
+##     Track total _component_accumulator_drain (acts as additional
+##     "consumption" — units siphoned from the network into storage).
+##   - excess < 0: discharge by min(deficit_per_acc, MAX_DISCHARGE_RATE,
+##     acc.charge). Mutate acc.state.charge. Track total
+##     _component_accumulator_supply (acts as additional "supply" —
+##     units fed from storage into the network).
+##   - excess == 0: no-op.
+##
+## Stage 3: effective_supply = raw_supply + accumulator_supply -
+## accumulator_drain. satisfaction = min(1.0, effective_supply / max(1, demand)).
+##
+## State mutation in pre-pass justified: accumulator charge IS network
+## state. Consumer interface contract unchanged — world.power_satisfaction_at
+## returns post-accumulator satisfaction; lamps modulate brightness identically;
+## future Session 4+ processors apply 1.0 / max(0.1, satisfaction) identically.
 static func update_supply_demand(world) -> void:
 	if world._power_network_dirty:
 		rebuild_topology(world)
-	# Reset accumulators.
+	# Deduplicate component IDs — _pole_component.values() yields per-pole,
+	# so a component with N poles would otherwise be visited N times, which
+	# would multiply accumulator charge/discharge mutations in Stage 2. Use a
+	# Dictionary-as-set keyed by comp_id to iterate each component exactly once.
+	var unique_comps: Dictionary = {}
 	for comp_id in world._pole_component.values():
+		unique_comps[comp_id] = true
+	# Reset all per-component accumulators.
+	for comp_id in unique_comps:
 		world._component_supply[comp_id] = 0
 		world._component_demand[comp_id] = 0
-	# Walk all buildings. Generators use STRICT cardinal-adjacency to find
-	# their pole; consumers use the wider SUPPLY_RADIUS scan (Factorio-
-	# style wireless supply). Asymmetric by PAUSE 1 user decision.
+		world._component_raw_supply[comp_id] = 0
+		world._component_accumulators[comp_id] = []
+		world._component_accumulator_supply[comp_id] = 0.0
+		world._component_accumulator_drain[comp_id] = 0.0
+
+	# ----- Stage 1: classify and sum raw_supply + demand -----
 	for anchor in world.buildings:
 		var b: Building = world.buildings[anchor]
 		if b.type == Buildings.Type.WATER_WHEEL:
@@ -126,36 +161,76 @@ static func update_supply_demand(world) -> void:
 			if gen_comp < 0:
 				continue
 			if bool(b.state.get("output_active", false)):
-				world._component_supply[gen_comp] = int(world._component_supply.get(gen_comp, 0)) + WaterWheel.MAX_OUTPUT
+				world._component_raw_supply[gen_comp] = int(world._component_raw_supply.get(gen_comp, 0)) + WaterWheel.MAX_OUTPUT
 		elif b.type == Buildings.Type.WINDMILL:
 			var gen_comp_w: int = _adjacent_component_id(world, b)
 			if gen_comp_w < 0:
 				continue
 			if bool(b.state.get("output_active", true)):
-				world._component_supply[gen_comp_w] = int(world._component_supply.get(gen_comp_w, 0)) + Windmill.MAX_OUTPUT
+				world._component_raw_supply[gen_comp_w] = int(world._component_raw_supply.get(gen_comp_w, 0)) + Windmill.MAX_OUTPUT
 		elif b.type == Buildings.Type.STEAM_GENERATOR:
 			var gen_comp_s: int = _adjacent_component_id(world, b)
 			if gen_comp_s < 0:
 				continue
 			if bool(b.state.get("output_active", false)):
-				world._component_supply[gen_comp_s] = int(world._component_supply.get(gen_comp_s, 0)) + SteamGenerator.MAX_OUTPUT
+				world._component_raw_supply[gen_comp_s] = int(world._component_raw_supply.get(gen_comp_s, 0)) + SteamGenerator.MAX_OUTPUT
 		elif b.type == Buildings.Type.ELECTRIC_LAMP:
 			var con_comp: int = _supply_component_id(world, b)
 			if con_comp < 0:
 				continue
 			world._component_demand[con_comp] = int(world._component_demand.get(con_comp, 0)) + ElectricLamp.DEMAND
-	# Compute satisfaction per component. Formula is semantically equivalent
-	# to the spec's `min(1.0, supply / max(1, demand))` for dem >= 1 (the
-	# consequential range). For dem == 0 (network has no consumers) this
-	# returns 1.0 unconditionally — diverges from the spec's literal
-	# `min(1.0, sup/1)` (which would be 0 when sup == 0). Benign because no
-	# consumer is reading satisfaction on a network with no consumers; the
-	# cycle-multiplier contract `1.0 / max(0.1, sat)` is never evaluated
-	# either. Reaffirmed at Task 7 review.
-	for comp_id in world._pole_component.values():
-		var sup: int = int(world._component_supply.get(comp_id, 0))
+		elif b.type == Buildings.Type.ACCUMULATOR:
+			var acc_comp: int = _adjacent_component_id(world, b)
+			if acc_comp < 0:
+				continue
+			world._component_accumulators[acc_comp].append(b)
+
+	# ----- Stage 2: accumulator charge/discharge per component -----
+	for comp_id in unique_comps:
+		var raw_supply: int = int(world._component_raw_supply.get(comp_id, 0))
+		var demand: int = int(world._component_demand.get(comp_id, 0))
+		var accumulators: Array = world._component_accumulators.get(comp_id, [])
+		if accumulators.is_empty():
+			continue
+		var excess: int = raw_supply - demand
+		var acc_count: int = accumulators.size()
+		if excess > 0:
+			# Charge: distribute excess evenly across accumulators.
+			var excess_per_acc: float = float(excess) / float(acc_count)
+			for acc in accumulators:
+				var current_charge: float = float(acc.state.get("charge", 0.0))
+				var capacity_remaining: float = float(Accumulator.MAX_CAPACITY) - current_charge
+				var delta: float = min(excess_per_acc, float(Accumulator.MAX_CHARGE_RATE), capacity_remaining)
+				if delta <= 0.0:
+					continue
+				acc.state["charge"] = current_charge + delta
+				world._component_accumulator_drain[comp_id] = float(world._component_accumulator_drain.get(comp_id, 0.0)) + delta
+		elif excess < 0:
+			# Discharge: distribute deficit evenly across accumulators.
+			var deficit: int = -excess
+			var deficit_per_acc: float = float(deficit) / float(acc_count)
+			for acc in accumulators:
+				var current_charge_d: float = float(acc.state.get("charge", 0.0))
+				var delta_d: float = min(deficit_per_acc, float(Accumulator.MAX_DISCHARGE_RATE), current_charge_d)
+				if delta_d <= 0.0:
+					continue
+				acc.state["charge"] = current_charge_d - delta_d
+				world._component_accumulator_supply[comp_id] = float(world._component_accumulator_supply.get(comp_id, 0.0)) + delta_d
+
+	# ----- Stage 3: effective_supply + satisfaction -----
+	# Per Foundation comment block: dem == 0 → satisfaction 1.0 (benign;
+	# no consumer reads sat when no consumer exists). Reaffirmed at Task 7
+	# Cluster B review.
+	for comp_id in unique_comps:
+		var raw: int = int(world._component_raw_supply.get(comp_id, 0))
+		var acc_sup: float = float(world._component_accumulator_supply.get(comp_id, 0.0))
+		var acc_drain: float = float(world._component_accumulator_drain.get(comp_id, 0.0))
+		var effective_supply: float = float(raw) + acc_sup - acc_drain
+		# _component_supply exposes effective supply for Q-inspect and existing
+		# supply_for() API — preserves Foundation contract for consumers.
+		world._component_supply[comp_id] = int(round(effective_supply))
 		var dem: int = int(world._component_demand.get(comp_id, 0))
-		var sat: float = 1.0 if dem == 0 else min(1.0, float(sup) / float(dem))
+		var sat: float = 1.0 if dem == 0 else min(1.0, effective_supply / float(dem))
 		world._component_satisfaction[comp_id] = sat
 
 ## Find the component ID of any pole CARDINALLY ADJACENT (4-direction,

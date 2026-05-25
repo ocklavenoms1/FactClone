@@ -15,7 +15,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_power_network.json"
 
 static func test_name() -> String:
-	return "power network (topology + generator + consumer + linear satisfaction + save + windmill + steam)"
+	return "power network (topology + generator + consumer + linear satisfaction + save + windmill + steam + accumulator)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -437,10 +437,122 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, not bool(steam_b.state.get("output_active", true)),
 		"(15) steam generator fuel exhaustion: output_active should be false after fuel runs out")
 
+	# ===========================================================================
+	# (16) ACCUMULATOR CHARGES FROM EXCESS — wheel (10) + 0 lamps + 1 accumulator
+	# → excess 10, accumulator gains MAX_CHARGE_RATE (5) per tick. After 11 ticks
+	# (50 / 5 = 10 ticks to fill from 0), charge caps at MAX_CAPACITY (50).
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(7, 5))
+	# Tick wheel to set output_active.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	# Now update_supply_demand 11 times to fully charge accumulator (50 / 5 = 10
+	# ticks + 1 to verify cap behavior).
+	for _i in 11:
+		PowerNetwork.update_supply_demand(world)
+	var acc_b: Building = world.building_at(Vector2i(7, 5))
+	var charge_after_11: float = float(acc_b.state.get("charge", 0.0))
+	_check(failures, charge_after_11 == float(Accumulator.MAX_CAPACITY),
+		"(16) accumulator should be at MAX_CAPACITY (%d) after 11 charge ticks, got %f" % [Accumulator.MAX_CAPACITY, charge_after_11])
+
+	# ===========================================================================
+	# (17) ACCUMULATOR DISCHARGES INTO DEFICIT — pre-charged accumulator (50),
+	# 0 generators + 1 lamp (demand 1). Accumulator discharges to meet demand.
+	# Satisfaction should be 1.0 since accumulator can fully cover.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(6, 5))
+	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(4, 5))
+	var acc_b_17: Building = world.building_at(Vector2i(6, 5))
+	acc_b_17.state["charge"] = 10.0   # pre-charge
+	PowerNetwork.update_supply_demand(world)
+	var comp_17: int = PowerNetwork.network_id_at(world, Vector2i(5, 5))
+	if comp_17 >= 0:
+		var sat_17: float = PowerNetwork.satisfaction_for(world, comp_17)
+		_check(failures, abs(sat_17 - 1.0) < 0.001,
+			"(17) accumulator discharge: satisfaction should be 1.0 (demand met by storage), got %f" % sat_17)
+		# Accumulator should have discharged 1 unit (matched demand).
+		var charge_post_17: float = float(acc_b_17.state.get("charge", 0.0))
+		_check(failures, abs(charge_post_17 - 9.0) < 0.001,
+			"(17) accumulator should have discharged 1 unit (10 - 1 = 9), got charge %f" % charge_post_17)
+
+	# ===========================================================================
+	# (18) ACCUMULATOR CAPACITY CAP — accumulator at full (50), generator
+	# producing 100 excess. Charge stays at 50, no overflow.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
+	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(7, 5))
+	var acc_b_18: Building = world.building_at(Vector2i(7, 5))
+	acc_b_18.state["charge"] = 50.0   # pre-fill to cap
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	var charge_post_18: float = float(acc_b_18.state.get("charge", 0.0))
+	_check(failures, charge_post_18 == 50.0,
+		"(18) accumulator at cap with excess: charge should stay at MAX_CAPACITY (50), got %f" % charge_post_18)
+
+	# ===========================================================================
+	# (19) MULTI-ACCUMULATOR EVEN DISTRIBUTION — 2 accumulators, generator with
+	# excess 6 → each gains 3 per tick (even split).
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 7), Terrain.Overlay.STONE)
+	# Place windmill (output 6, no resource dep — simplest) + pole + 2 accumulators.
+	# Both accumulators must be CARDINALLY ADJACENT to a pole in the same network
+	# (PowerNetwork uses strict cardinal adjacency for accumulators, same as
+	# generators). Layout: windmill (4,5)+(5,5)+(4,6)+(5,6); pole (6,5); pole (6,7);
+	# acc A (7,5) cardinally adjacent to pole (6,5); acc B (7,7) cardinally
+	# adjacent to pole (6,7). Poles (6,5) and (6,7) are Chebyshev 2 → same
+	# component (POLE_RANGE=3).
+	world.place_building(Buildings.Type.WINDMILL, Vector2i(4, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 7))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(7, 5))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(7, 7))
+	# Windmill is always active; no tick needed for output_active.
+	# Both accumulators at 0, excess = 6 (windmill) - 0 (demand) = 6.
+	# Even split: 3 per accumulator.
+	PowerNetwork.update_supply_demand(world)
+	var acc_a_19: Building = world.building_at(Vector2i(7, 5))
+	var acc_b_19: Building = world.building_at(Vector2i(7, 7))
+	var charge_a: float = float(acc_a_19.state.get("charge", 0.0))
+	var charge_b: float = float(acc_b_19.state.get("charge", 0.0))
+	_check(failures, abs(charge_a - 3.0) < 0.001,
+		"(19) multi-accumulator even split: accumulator A should gain 3 (6 / 2), got %f" % charge_a)
+	_check(failures, abs(charge_b - 3.0) < 0.001,
+		"(19) multi-accumulator even split: accumulator B should gain 3 (6 / 2), got %f" % charge_b)
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "15 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply + steam generator no fuel idle + steam generator with fuel active + steam generator fuel exhaustion" }
+		return { "ok": true, "message": "19 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply + steam generator no fuel idle + steam generator with fuel active + steam generator fuel exhaustion + accumulator charge/discharge/cap/multi" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
