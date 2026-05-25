@@ -101,6 +101,17 @@ enum Type {
 	# is intentionally binary-visual (on/off threshold at sat>0.05 + alpha
 	# scaling); future processors will scale throughput linearly.
 	ELECTRIC_LAMP,
+	# Electricity Arc Session 2 (session-electricity-generators-storage):
+	# More generators + storage.
+	# Windmill — 2x2, no resource dependency, always output_active=true,
+	# MAX_OUTPUT=6 (60% of WaterWheel — placement flexibility tradeoff).
+	# Steam Generator — 2x2, fuel-powered via Burner (5th consumer),
+	# MAX_OUTPUT=20 when active, cycle-based fuel (1 unit per 20 ticks).
+	# Accumulator — 1x1, battery storage. Capacity 50, ±5/tick. Charge
+	# state in pre-pass via PowerNetwork 3-stage update_supply_demand.
+	WINDMILL,
+	STEAM_GENERATOR,
+	ACCUMULATOR,
 }
 
 const DATA: Dictionary = {
@@ -690,6 +701,16 @@ const DATA: Dictionary = {
 		"player_drainable": false,
 		"walkable": false,
 	},
+	Type.WINDMILL: {
+		"name": "Windmill",
+		"swatch_color": Color(0.85, 0.85, 0.75),    # bone-white / canvas-sail
+		"footprint": Vector2i(2, 2),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,                 # wind comes from anywhere; visual is rotating blades
+		"player_drainable": false,
+		"walkable": false,
+		# No slot_layout — windmill has no items. Info via Q-inspect.
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -881,6 +902,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return WaterWheel.make(pos, dir)
 		Type.ELECTRIC_LAMP:
 			return ElectricLamp.make(pos)
+		Type.WINDMILL:
+			return Windmill.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -925,6 +948,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			WaterWheel.tick(b, world)
 		Type.ELECTRIC_LAMP:
 			ElectricLamp.tick(b, world)
+		Type.WINDMILL:
+			Windmill.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -986,6 +1011,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			WaterWheel.draw(b, canvas, world_pos, tile_size)
 		Type.ELECTRIC_LAMP:
 			ElectricLamp.draw(b, canvas, world_pos, tile_size)
+		Type.WINDMILL:
+			Windmill.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1196,6 +1223,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return WaterWheel.info_lines(b, world)
 		Type.ELECTRIC_LAMP:
 			return ElectricLamp.info_lines(b, world)
+		Type.WINDMILL:
+			return Windmill.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

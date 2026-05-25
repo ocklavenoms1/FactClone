@@ -15,7 +15,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_power_network.json"
 
 static func test_name() -> String:
-	return "power network (topology + generator + consumer + linear satisfaction + save)"
+	return "power network (topology + generator + consumer + linear satisfaction + save + windmill)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -348,10 +348,40 @@ static func run(parent: Node) -> Dictionary:
 	player_a_10.queue_free()
 	player_b_10.queue_free()
 
+
+	# ===========================================================================
+	# (11) WINDMILL ALWAYS ACTIVE — no resource dependency. output_active=true
+	# from initialization (no tick required to "warm up").
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.WINDMILL, Vector2i(4, 5))
+	var wind_b: Building = world.building_at(Vector2i(4, 5))
+	_check(failures, bool(wind_b.state.get("output_active", false)),
+		"(11) windmill should be output_active=true from placement, got %s" % str(wind_b.state.get("output_active", false)))
+
+	# ===========================================================================
+	# (12) WINDMILL JOINS NETWORK SUPPLY — windmill adjacent to pole contributes
+	# MAX_OUTPUT (6) to supply pool.
+	# ===========================================================================
+	# Pole east of the windmill at (6, 5). Adjacent to windmill's (5, 5) cell.
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	PowerNetwork.update_supply_demand(world)
+	var comp_wind: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	_check(failures, comp_wind >= 0, "(12) pole should be in a network, got comp_id %d" % comp_wind)
+	if comp_wind >= 0:
+		var supply_wind: int = PowerNetwork.supply_for(world, comp_wind)
+		_check(failures, supply_wind == Windmill.MAX_OUTPUT,
+			"(12) windmill supply should equal MAX_OUTPUT (%d), got %d" % [Windmill.MAX_OUTPUT, supply_wind])
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "10 sub-cases pass: + save round-trip (network rebuilt on load)" }
+		return { "ok": true, "message": "12 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
