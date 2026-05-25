@@ -549,10 +549,66 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, abs(charge_b - 3.0) < 0.001,
 		"(19) multi-accumulator even split: accumulator B should gain 3 (6 / 2), got %f" % charge_b)
 
+	# ===========================================================================
+	# (20) ACCUMULATOR SAVE ROUND-TRIP — accumulator with charge=25, save,
+	# reload, verify charge preserved. Validates that float state field
+	# survives save schema v18 serialization unchanged.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5))
+	world.place_building(Buildings.Type.ACCUMULATOR, Vector2i(6, 5))
+	var acc_b_20: Building = world.building_at(Vector2i(6, 5))
+	acc_b_20.state["charge"] = 25.0   # mid-range value to validate save
+	# Save.
+	var orig_path_20: String = SaveSystem.save_path
+	SaveSystem.save_path = TEST_SAVE_PATH
+	var player_a_20 := Node2D.new()
+	parent.add_child(player_a_20)
+	if not SaveSystem.save_game(world, player_a_20, Inventory.new(16)):
+		SaveSystem.save_path = orig_path_20
+		_disconnect(world)
+		player_a_20.queue_free()
+		if FileAccess.file_exists(TEST_SAVE_PATH):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+		return { "ok": false, "message": "(20) save_game failed for accumulator round-trip" }
+	# Load into a fresh world.
+	_disconnect(world)
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var player_b_20 := Node2D.new()
+	parent.add_child(player_b_20)
+	var result_20: LoadResult = SaveSystem.load_game(world, player_b_20, Inventory.new(16))
+	if not result_20.success:
+		SaveSystem.save_path = orig_path_20
+		_disconnect(world)
+		player_a_20.queue_free()
+		player_b_20.queue_free()
+		if FileAccess.file_exists(TEST_SAVE_PATH):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+		return { "ok": false, "message": "(20) load_game failed: %s" % result_20.error_message }
+	# Verify charge preserved.
+	var acc_after_20: Building = world.building_at(Vector2i(6, 5))
+	_check(failures, acc_after_20 != null and acc_after_20.type == Buildings.Type.ACCUMULATOR,
+		"(20) loaded building at (6,5) should be ACCUMULATOR")
+	if acc_after_20 != null:
+		var charge_post_load: float = float(acc_after_20.state.get("charge", -1.0))
+		_check(failures, abs(charge_post_load - 25.0) < 0.001,
+			"(20) loaded accumulator charge should be 25.0, got %f" % charge_post_load)
+	# Cleanup.
+	SaveSystem.save_path = orig_path_20
+	if FileAccess.file_exists(TEST_SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+	player_a_20.queue_free()
+	player_b_20.queue_free()
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "19 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply + steam generator no fuel idle + steam generator with fuel active + steam generator fuel exhaustion + accumulator charge/discharge/cap/multi" }
+		return { "ok": true, "message": "20 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply + steam generator no fuel idle + steam generator with fuel active + steam generator fuel exhaustion + accumulator charge/discharge/cap/multi + accumulator save round-trip" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
