@@ -727,6 +727,16 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.ACCUMULATOR: {
+		"name": "Accumulator",
+		"swatch_color": Color(0.30, 0.30, 0.40),    # dark slate
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+		"walkable": false,
+		# No slot_layout — accumulator has no items; charge state is internal.
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -922,6 +932,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Windmill.make(pos)
 		Type.STEAM_GENERATOR:
 			return SteamGenerator.make(pos, dir)
+		Type.ACCUMULATOR:
+			return Accumulator.make(pos)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1035,6 +1047,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Windmill.draw(b, canvas, world_pos, tile_size)
 		Type.STEAM_GENERATOR:
 			SteamGenerator.draw(b, canvas, world_pos, tile_size)
+		Type.ACCUMULATOR:
+			Accumulator.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1249,6 +1263,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Windmill.info_lines(b, world)
 		Type.STEAM_GENERATOR:
 			return SteamGenerator.info_lines(b, world)
+		Type.ACCUMULATOR:
+			return Accumulator.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

@@ -221,6 +221,13 @@ var _component_supply: Dictionary = {}            # int (comp_id) → int (units
 var _component_demand: Dictionary = {}            # int (comp_id) → int (units)
 var _component_satisfaction: Dictionary = {}      # int (comp_id) → float in [0, 1]
 var _power_network_dirty: bool = true
+# Electricity Session 2 (session-electricity-generators-storage) — accumulator
+# 3-stage update_supply_demand needs additional per-component intermediate
+# state. Populated by PowerNetwork.update_supply_demand each tick.
+var _component_raw_supply: Dictionary = {}            # int (comp_id) → int (units; generators only, before accumulator effects)
+var _component_accumulators: Dictionary = {}          # int (comp_id) → Array[Building] (accumulator buildings per component)
+var _component_accumulator_supply: Dictionary = {}    # int (comp_id) → float (total discharge contribution)
+var _component_accumulator_drain: Dictionary = {}     # int (comp_id) → float (total charge consumption)
 
 @export var camera: Camera2D
 
@@ -464,7 +471,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 		occupied[cell] = pos
 	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
-	if t == Buildings.Type.POWER_POLE or t == Buildings.Type.WATER_WHEEL or t == Buildings.Type.ELECTRIC_LAMP or t == Buildings.Type.WINDMILL or t == Buildings.Type.STEAM_GENERATOR:
+	if t == Buildings.Type.POWER_POLE or t == Buildings.Type.WATER_WHEEL or t == Buildings.Type.ELECTRIC_LAMP or t == Buildings.Type.WINDMILL or t == Buildings.Type.STEAM_GENERATOR or t == Buildings.Type.ACCUMULATOR:
 		_power_network_dirty = true
 	# Post-make placement hooks: building types that need world context to
 	# finish their initial state populate it here. (make() runs before the
@@ -485,7 +492,7 @@ func remove_building_at(pos: Vector2i) -> bool:
 	buildings.erase(anchor)
 	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
-	if b.type == Buildings.Type.POWER_POLE or b.type == Buildings.Type.WATER_WHEEL or b.type == Buildings.Type.ELECTRIC_LAMP or b.type == Buildings.Type.WINDMILL or b.type == Buildings.Type.STEAM_GENERATOR:
+	if b.type == Buildings.Type.POWER_POLE or b.type == Buildings.Type.WATER_WHEEL or b.type == Buildings.Type.ELECTRIC_LAMP or b.type == Buildings.Type.WINDMILL or b.type == Buildings.Type.STEAM_GENERATOR or b.type == Buildings.Type.ACCUMULATOR:
 		_power_network_dirty = true
 	return true
 
