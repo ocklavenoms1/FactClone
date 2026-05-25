@@ -15,7 +15,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_power_network.json"
 
 static func test_name() -> String:
-	return "power network (topology + generator + consumer + linear satisfaction + save + windmill)"
+	return "power network (topology + generator + consumer + linear satisfaction + save + windmill + steam)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -378,10 +378,69 @@ static func run(parent: Node) -> Dictionary:
 		_check(failures, supply_wind == Windmill.MAX_OUTPUT,
 			"(12) windmill supply should equal MAX_OUTPUT (%d), got %d" % [Windmill.MAX_OUTPUT, supply_wind])
 
+	# ===========================================================================
+	# (13) STEAM GENERATOR NO FUEL — empty fuel_buffer → output_active=false,
+	# component supply contribution = 0.
+	# ===========================================================================
+	world.queue_free()
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 15):
+		world.set_overlay(Vector2i(x, 5), Terrain.Overlay.STONE)
+		world.set_overlay(Vector2i(x, 6), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.STEAM_GENERATOR, Vector2i(4, 5), Belt.DIR_E)
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
+	var steam_b: Building = world.building_at(Vector2i(4, 5))
+	# fuel_buffer starts at 0 from Burner.make_state()
+	# Tick to attempt fuel pull (no source, fails) and update output_active.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	_check(failures, not bool(steam_b.state.get("output_active", true)),
+		"(13) steam generator no fuel: output_active should be false, got %s" % str(steam_b.state.get("output_active", false)))
+	var comp_steam: int = PowerNetwork.network_id_at(world, Vector2i(6, 5))
+	if comp_steam >= 0:
+		var supply_steam_no_fuel: int = PowerNetwork.supply_for(world, comp_steam)
+		_check(failures, supply_steam_no_fuel == 0,
+			"(13) steam generator no fuel: network supply should be 0, got %d" % supply_steam_no_fuel)
+
+	# ===========================================================================
+	# (14) STEAM GENERATOR WITH FUEL — manually set fuel_buffer=100, tick →
+	# output_active=true, component supply += MAX_OUTPUT (20).
+	# ===========================================================================
+	steam_b.state["fuel_buffer"] = 100
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	PowerNetwork.update_supply_demand(world)
+	_check(failures, bool(steam_b.state.get("output_active", false)),
+		"(14) steam generator with fuel: output_active should be true, got %s" % str(steam_b.state.get("output_active", false)))
+	if comp_steam >= 0:
+		var supply_steam_with_fuel: int = PowerNetwork.supply_for(world, comp_steam)
+		_check(failures, supply_steam_with_fuel == SteamGenerator.MAX_OUTPUT,
+			"(14) steam generator with fuel: network supply should equal MAX_OUTPUT (%d), got %d" % [SteamGenerator.MAX_OUTPUT, supply_steam_with_fuel])
+
+	# ===========================================================================
+	# (15) STEAM GENERATOR FUEL EXHAUSTION — set fuel_buffer=2, tick 41 cycles
+	# (CYCLE_TICKS=20 → 41 ticks consumes ~2 units).
+	# After exhaustion, fuel_buffer=0, output_active=false.
+	# ===========================================================================
+	steam_b.state["fuel_buffer"] = 2
+	steam_b.state["fuel_burn_progress"] = 0
+	for _i in 41:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	_check(failures, int(steam_b.state.get("fuel_buffer", -1)) == 0,
+		"(15) steam generator fuel exhaustion: fuel_buffer should be 0 after 41 ticks, got %d" % int(steam_b.state.get("fuel_buffer", -1)))
+	# One more tick to flip output_active off (Burner.consume_tick returned false this round).
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	_check(failures, not bool(steam_b.state.get("output_active", true)),
+		"(15) steam generator fuel exhaustion: output_active should be false after fuel runs out")
+
 	_disconnect(world)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "12 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply" }
+		return { "ok": true, "message": "15 sub-cases pass: + save round-trip (network rebuilt on load) + windmill placement + windmill joins network supply + steam generator no fuel idle + steam generator with fuel active + steam generator fuel exhaustion" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------

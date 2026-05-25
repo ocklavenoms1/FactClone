@@ -711,6 +711,22 @@ const DATA: Dictionary = {
 		"walkable": false,
 		# No slot_layout — windmill has no items. Info via Q-inspect.
 	},
+	Type.STEAM_GENERATOR: {
+		"name": "Steam Generator",
+		"swatch_color": Color(0.40, 0.35, 0.32),    # dark iron / industrial
+		"footprint": Vector2i(2, 2),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": true,                  # fuel input port rotates
+		"player_drainable": false,
+		"walkable": false,
+		"slot_layout": [
+			{
+				"id": "fuel", "kind": "fuel",
+				"accepts": [Items.Type.WOOD, Items.Type.COAL, Items.Type.FUEL_BRIQUETTE],
+				"max_stack": 16, "state_field": "fuel_buffer",
+			},
+		],
+	},
 }
 
 static func name_of(t: int) -> String:
@@ -904,6 +920,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return ElectricLamp.make(pos)
 		Type.WINDMILL:
 			return Windmill.make(pos)
+		Type.STEAM_GENERATOR:
+			return SteamGenerator.make(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -950,6 +968,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			ElectricLamp.tick(b, world)
 		Type.WINDMILL:
 			Windmill.tick(b, world)
+		Type.STEAM_GENERATOR:
+			SteamGenerator.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -1013,6 +1033,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			ElectricLamp.draw(b, canvas, world_pos, tile_size)
 		Type.WINDMILL:
 			Windmill.draw(b, canvas, world_pos, tile_size)
+		Type.STEAM_GENERATOR:
+			SteamGenerator.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1225,6 +1247,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return ElectricLamp.info_lines(b, world)
 		Type.WINDMILL:
 			return Windmill.info_lines(b, world)
+		Type.STEAM_GENERATOR:
+			return SteamGenerator.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

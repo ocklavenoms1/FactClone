@@ -133,6 +133,12 @@ static func update_supply_demand(world) -> void:
 				continue
 			if bool(b.state.get("output_active", true)):
 				world._component_supply[gen_comp_w] = int(world._component_supply.get(gen_comp_w, 0)) + Windmill.MAX_OUTPUT
+		elif b.type == Buildings.Type.STEAM_GENERATOR:
+			var gen_comp_s: int = _adjacent_component_id(world, b)
+			if gen_comp_s < 0:
+				continue
+			if bool(b.state.get("output_active", false)):
+				world._component_supply[gen_comp_s] = int(world._component_supply.get(gen_comp_s, 0)) + SteamGenerator.MAX_OUTPUT
 		elif b.type == Buildings.Type.ELECTRIC_LAMP:
 			var con_comp: int = _supply_component_id(world, b)
 			if con_comp < 0:
