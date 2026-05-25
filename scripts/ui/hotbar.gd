@@ -134,6 +134,10 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.POWER_POLE },
 			{ "kind": "building", "value": Buildings.Type.WATER_WHEEL },
 			{ "kind": "building", "value": Buildings.Type.ELECTRIC_LAMP },
+			# Electricity Session 2 — generators + storage.
+			{ "kind": "building", "value": Buildings.Type.WINDMILL },
+			{ "kind": "building", "value": Buildings.Type.STEAM_GENERATOR },
+			{ "kind": "building", "value": Buildings.Type.ACCUMULATOR },
 		],
 		"selected": 0,
 	})
