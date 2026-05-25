@@ -40,10 +40,43 @@ static func make(pos: Vector2i) -> Building:
 	}
 	return Building.new(Buildings.Type.ACCUMULATOR, pos, state)
 
-## STUB draw — placeholder body only. Full fill-bar visual lands in Task 6.
-static func draw(_b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
+## Full visual: body + vertical fill-bar (bottom-up) + frame outline.
+## Bar color lerps from OFF_COLOR (empty) to FULL_COLOR (full).
+##
+## Z-order (bottom to top):
+##   1. Body rect (BASE_COLOR)
+##   2. Bar frame outline (FRAME_COLOR, just the outline of the bar inset)
+##   3. Bar fill (lerped color, scales bottom-up by charge fraction)
+##   4. Body frame outline (FRAME_COLOR, on top of everything)
+##
+## Bar geometry: ~60% of building height (top 20% to bottom 20% are inset
+## frame margin). Bar fills bottom-up: empty bar is just the frame outline;
+## full bar fills the inner rect entirely.
+static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
+	var charge: float = float(b.state.get("charge", 0.0))
+	var fraction: float = clamp(charge / float(MAX_CAPACITY), 0.0, 1.0)
+	# 1. Body rect.
 	var body_rect: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
 	canvas.draw_rect(body_rect, BASE_COLOR, true)
+	# 2. Bar frame outline (inset).
+	var inset: float = float(tile_size) * 0.20
+	var bar_outer: Rect2 = Rect2(
+		world_pos + Vector2(inset, inset),
+		Vector2(float(tile_size) - 2.0 * inset, float(tile_size) - 2.0 * inset)
+	)
+	canvas.draw_rect(bar_outer, FRAME_COLOR, false, 1.5)
+	# 3. Bar fill (bottom-up). Inner rect tracks bar_outer bounds minus 1px
+	# frame width.
+	if fraction > 0.0:
+		var bar_inner_max_height: float = bar_outer.size.y - 2.0
+		var fill_height: float = bar_inner_max_height * fraction
+		var bar_fill: Rect2 = Rect2(
+			bar_outer.position + Vector2(1.0, bar_outer.size.y - 1.0 - fill_height),
+			Vector2(bar_outer.size.x - 2.0, fill_height)
+		)
+		var bar_color: Color = OFF_COLOR.lerp(FULL_COLOR, fraction)
+		canvas.draw_rect(bar_fill, bar_color, true)
+	# 4. Body frame outline (on top).
 	canvas.draw_rect(body_rect, FRAME_COLOR, false, 2.0)
 
 static func info_lines(b: Building, world) -> Array:
