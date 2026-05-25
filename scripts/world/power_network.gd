@@ -74,6 +74,15 @@ static func rebuild_topology(world) -> void:
 	world._component_supply.clear()
 	world._component_demand.clear()
 	world._component_satisfaction.clear()
+	# Electricity Session 2: clear the 3-stage flow's intermediate dicts too.
+	# Currently benign (update_supply_demand only iterates unique_comps built
+	# from current _pole_component, so stale entries are unreachable) but
+	# prevents a class of future bugs if downstream code iterates these dicts
+	# directly. Symmetric with the original 4 dict clears.
+	world._component_raw_supply.clear()
+	world._component_accumulators.clear()
+	world._component_accumulator_supply.clear()
+	world._component_accumulator_drain.clear()
 
 	var pole_anchors: Array = []
 	for anchor in world.buildings:
