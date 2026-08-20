@@ -112,6 +112,32 @@ const ARM_LENGTH_BY_TYPE: Dictionary = {
 }
 const ARM_LENGTH_DEFAULT: float = 0.55
 
+# Per-tier POWER draw, in network units per tick. Introduced at session-
+# inserter-electric (Session 4, Task 5). This table is the SINGLE SOURCE OF
+# TRUTH for "is this tier electric": a tier listed here draws from the power
+# network and runs no Burner logic; a tier absent from it is a burner and
+# keeps the fuel path. Deriving is_electric() from the demand table rather
+# than a parallel list means a future electric tier is exactly one row, and
+# the two facts can never disagree.
+#
+# Balance rationale for 5 units. Reference points on the same network:
+# an ELECTRIC_LAMP draws 1; a WINDMILL supplies 6, a WATER_WHEEL 10, a
+# STEAM_GENERATOR 20. So one windmill runs roughly one electric inserter
+# and little else — the tier is a real infrastructure commitment, which is
+# the intended price for twice the fast tier's speed (5-tick cycle vs 10)
+# with no fuel logistics at all. A water wheel covers two; a steam
+# generator four.
+#
+# The draw is CONSTANT, not duty-cycled — an idle inserter still draws its
+# full 5. PowerNetwork.update_supply_demand runs as a pre-pass BEFORE the
+# building tick loop, so any activity state it sampled would be one tick
+# stale; gating demand on activity would close a delayed-feedback loop and
+# make lamps on the same network flicker. See the ELECTRIC_INSERTER arm in
+# power_network.gd Stage 1.
+const POWER_DEMAND_BY_TYPE: Dictionary = {
+	Buildings.Type.ELECTRIC_INSERTER: 5,
+}
+
 # Fuel input port direction (canonical orientation; rotates with b.dir
 # via Buildings.world_dir). Mirrors the Smelter pattern from session-
 # smelter — restricting fuel intake to ONE specific perpendicular edge
@@ -155,6 +181,19 @@ static func reach(b: Building) -> int:
 static func arm_length(b: Building) -> float:
 	return float(ARM_LENGTH_BY_TYPE.get(b.type, ARM_LENGTH_DEFAULT))
 
+## Power units this inserter draws from its network per tick. 0 for burner
+## tiers (lookup miss). Public API — read by PowerNetwork.update_supply_demand
+## Stage 1 to accumulate component demand.
+static func power_demand(b: Building) -> int:
+	return int(POWER_DEMAND_BY_TYPE.get(b.type, 0))
+
+## True if this tier is power-driven rather than fuel-driven. Derived from
+## POWER_DEMAND_BY_TYPE membership on purpose — see that table's docstring:
+## one source of truth, so "draws power" and "is not a burner" cannot drift
+## apart. Gates the Burner fuel path in tick().
+static func is_electric(b: Building) -> bool:
+	return POWER_DEMAND_BY_TYPE.has(b.type)
+
 ## Build initial state. dir defaults to canonical east (DIR_E = 0).
 ## b_type defaults to INSERTER; pass FAST_INSERTER (or future tiers) for
 ## tier-specific buildings. State shape is uniform across tiers — the
@@ -180,18 +219,31 @@ static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.INSER
 ## cycle_ticks(b) lookup.
 ##
 ## Order of operations:
-##   1. Try to refuel if buffer empty.
-##   2. If no fuel after refuel attempt → STATE_NO_FUEL, return.
+##   1. Try to refuel if buffer empty.        — BURNER tiers only
+##   2. If no fuel after refuel attempt → STATE_NO_FUEL, return.  — ditto
 ##   3. Run state machine based on current state.
+##
+## Steps 1-2 (and the consume_tick calls inside step 3's arms) are skipped
+## entirely for POWER-driven tiers — see is_electric / POWER_DEMAND_BY_TYPE.
 static func tick(b: Building, world) -> void:
+	# Electric tiers are not burners: they have no fuel slot in DATA, so they
+	# could never satisfy the fuel check below and would park in
+	# STATE_NO_FUEL forever. Skip the whole fuel path for them (both the
+	# pull attempt here and the consume_tick calls in the state arms), and
+	# let the state machine run unconditionally. Power CONSEQUENCES —
+	# satisfaction scaling and STATE_NO_POWER — are deliberately NOT here;
+	# they land in Tasks 6-7. After Task 5 an electric inserter simply runs
+	# at its full 5-tick cycle whether or not power exists.
+	var electric: bool = is_electric(b)
 	# (1 + 2) Fuel check + pull. Restricted to FUEL_PORT_DIR (rotated by
 	# building dir) — see constant docstring for the source-tile-as-fuel
 	# bug rationale (caught at session-inserter-fast-filter PAUSE 1).
-	var fuel_units: int = int(b.state.get("fuel_buffer", 0))
-	if fuel_units <= 0:
-		if not Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR)):
-			b.state["state"] = STATE_NO_FUEL
-			return
+	if not electric:
+		var fuel_units: int = int(b.state.get("fuel_buffer", 0))
+		if fuel_units <= 0:
+			if not Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR)):
+				b.state["state"] = STATE_NO_FUEL
+				return
 	# (3) State machine.
 	var s: int = int(b.state.get("state", STATE_IDLE))
 	var ticks: int = cycle_ticks(b)
@@ -252,8 +304,10 @@ static func tick(b: Building, world) -> void:
 				_set_held(b, picked)
 				b.state["cycle_progress"] = 0.0
 				b.state["state"] = STATE_WORKING_OUT
-				# Consume one fuel-burn tick this cycle.
-				Burner.consume_tick(b, ticks)
+				# Consume one fuel-burn tick this cycle. Burner tiers
+				# only — an electric tier has no fuel buffer to burn.
+				if not electric:
+					Burner.consume_tick(b, ticks)
 		STATE_WORKING_OUT:
 			# Advance toward destination. cycle_progress 0 → 0.5.
 			var p: float = float(b.state.get("cycle_progress", 0.0)) + inc
@@ -268,7 +322,8 @@ static func tick(b: Building, world) -> void:
 				else:
 					b.state["state"] = STATE_BLOCKED_AT_DEST
 			b.state["cycle_progress"] = p
-			Burner.consume_tick(b, ticks)
+			if not electric:
+				Burner.consume_tick(b, ticks)
 		STATE_BLOCKED_AT_DEST:
 			# Held item, arm pinned at destination. Try to drop every tick.
 			# NO fuel consumption while blocked (arm isn't moving).
@@ -284,7 +339,8 @@ static func tick(b: Building, world) -> void:
 				p2 = 0.0
 				b.state["state"] = STATE_IDLE
 			b.state["cycle_progress"] = p2
-			Burner.consume_tick(b, ticks)
+			if not electric:
+				Burner.consume_tick(b, ticks)
 
 # ---------- helpers ----------
 

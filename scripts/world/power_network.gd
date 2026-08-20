@@ -120,7 +120,9 @@ static func rebuild_topology(world) -> void:
 ## Stage 1: walk all buildings. Classify by type:
 ##   - Generators (WATER_WHEEL, WINDMILL, STEAM_GENERATOR) → sum MAX_OUTPUT
 ##     into _component_raw_supply when output_active.
-##   - Consumers (ELECTRIC_LAMP) → sum DEMAND into _component_demand.
+##   - Consumers (ELECTRIC_LAMP, ELECTRIC_INSERTER) → sum DEMAND into
+##     _component_demand. Consumer draw is CONSTANT (never activity-gated)
+##     — see the ELECTRIC_INSERTER arm below for why.
 ##   - Accumulators (ACCUMULATOR) → register in _component_accumulators
 ##     list per component (no supply/demand contribution yet).
 ##
@@ -188,6 +190,23 @@ static func update_supply_demand(world) -> void:
 			if con_comp < 0:
 				continue
 			world._component_demand[con_comp] = int(world._component_demand.get(con_comp, 0)) + ElectricLamp.DEMAND
+		elif b.type == Buildings.Type.ELECTRIC_INSERTER:
+			# CONSUMER rule (_supply_component_id — Chebyshev SUPPLY_RADIUS
+			# around every footprint cell), same as lamps. NOT the generator/
+			# accumulator rule (_adjacent_component_id), which demands a
+			# touching pole.
+			var ins_comp: int = _supply_component_id(world, b)
+			if ins_comp < 0:
+				continue
+			# UNCONDITIONAL — no activity gate. This is the constant-demand
+			# decision, locked at Inserter Arc Session 4 Task 5, not an
+			# oversight: update_supply_demand is a PRE-PASS that runs BEFORE
+			# grid_world's building tick loop, so any activity state sampled
+			# here is one tick stale. Duty-cycling on it would close a
+			# delayed-feedback loop — the network sizing itself to last
+			# tick's activity — and lamps sharing the component would
+			# visibly flicker. An idle electric inserter draws full power.
+			world._component_demand[ins_comp] = int(world._component_demand.get(ins_comp, 0)) + Inserter.power_demand(b)
 		elif b.type == Buildings.Type.ACCUMULATOR:
 			var acc_comp: int = _adjacent_component_id(world, b)
 			if acc_comp < 0:
