@@ -50,12 +50,14 @@ const STATE_NO_FUEL: int         = 4
 # Per-tier cycle duration (ticks @ 20 TPS). Add a row when a new inserter
 # tier ships; tick logic reads via `cycle_ticks(b)` lookup. Default
 # fallback (lookup miss) = 20, matching the basic tier.
-#   INSERTER:      20 ticks = 1.0s — basic (Session 1)
-#   FAST_INSERTER: row added at session-inserter-fast-filter (Session 2)
+#   INSERTER:          20 ticks = 1.0s — basic (Session 1)
+#   FAST_INSERTER:     row added at session-inserter-fast-filter (Session 2)
+#   ELECTRIC_INSERTER: row added at session-inserter-electric (Session 4)
 const CYCLE_TICKS_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:             20,    # 1.0s — basic
 	Buildings.Type.FAST_INSERTER:        10,    # 0.5s — twice as fast
 	Buildings.Type.LONG_REACH_INSERTER:  30,    # 1.5s — slower, balances reach
+	Buildings.Type.ELECTRIC_INSERTER:    5,     # 0.25s at full power — twice the fast tier
 }
 const CYCLE_TICKS_DEFAULT: int = 20
 
@@ -65,10 +67,12 @@ const CYCLE_TICKS_DEFAULT: int = 20
 #   INSERTER:            bronze (basic — Session 1)
 #   FAST_INSERTER:       row added at session-inserter-fast-filter (Session 2)
 #   LONG_REACH_INSERTER: row added at session-inserter-long-reach (Session 3)
+#   ELECTRIC_INSERTER:   row added at session-inserter-electric (Session 4)
 const BODY_COLOR_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:             Color(0.55, 0.45, 0.30),    # bronze
 	Buildings.Type.FAST_INSERTER:        Color(0.45, 0.55, 0.70),    # cool blue-grey
 	Buildings.Type.LONG_REACH_INSERTER:  Color(0.65, 0.30, 0.22),    # rust-red — "reach" tier
+	Buildings.Type.ELECTRIC_INSERTER:    Color(0.25, 0.75, 0.80),    # electric cyan — matches DATA swatch
 }
 const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
 
@@ -79,10 +83,15 @@ const BODY_COLOR_DEFAULT: Color = Color(0.55, 0.45, 0.30)
 #   INSERTER:             1 — basic (Session 1)
 #   FAST_INSERTER:        1 — fast (Session 2)
 #   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
+#   ELECTRIC_INSERTER:    1 — added at session-inserter-electric (Session 4).
+#     Equals REACH_DEFAULT, but listed explicitly like every other tier:
+#     the row documents intent, and stops a future default change from
+#     silently moving the electric tier along with it.
 const REACH_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:             1,
 	Buildings.Type.FAST_INSERTER:        1,
 	Buildings.Type.LONG_REACH_INSERTER:  2,
+	Buildings.Type.ELECTRIC_INSERTER:    1,
 }
 const REACH_DEFAULT: int = 1
 
@@ -93,10 +102,13 @@ const REACH_DEFAULT: int = 1
 #   INSERTER:             0.55 — basic
 #   FAST_INSERTER:        0.55 — fast (visually identical to basic)
 #   LONG_REACH_INSERTER:  added at session-inserter-long-reach (Session 3)
+#   ELECTRIC_INSERTER:    0.55 — added at session-inserter-electric (Session 4).
+#     Same explicit-over-fallback rationale as REACH_BY_TYPE above.
 const ARM_LENGTH_BY_TYPE: Dictionary = {
 	Buildings.Type.INSERTER:             0.55,
 	Buildings.Type.FAST_INSERTER:        0.55,
 	Buildings.Type.LONG_REACH_INSERTER:  2.00,    # physically reaches 2-tile-away source/dest
+	Buildings.Type.ELECTRIC_INSERTER:    0.55,    # visually identical to basic / fast
 }
 const ARM_LENGTH_DEFAULT: float = 0.55
 

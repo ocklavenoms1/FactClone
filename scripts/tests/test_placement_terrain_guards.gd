@@ -36,6 +36,11 @@ const GUARDED: Array = [
 	# Electricity Session 2 — both accept Overlay.NONE, so both need the guard.
 	Buildings.Type.WINDMILL,
 	Buildings.Type.ACCUMULATOR,
+	# Inserter Session 4 — the guard in can_place_building is generic (every
+	# type except MINING_DRILL is rejected on a resource node), so this tier
+	# was already protected on registration; this line makes the COVERAGE
+	# match the protection instead of asserting it by absence.
+	Buildings.Type.ELECTRIC_INSERTER,
 ]
 
 static func test_name() -> String:

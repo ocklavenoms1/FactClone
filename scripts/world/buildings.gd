@@ -112,6 +112,13 @@ enum Type {
 	WINDMILL,
 	STEAM_GENERATOR,
 	ACCUMULATOR,
+	# Inserter Arc Session 4 (session-inserter-electric): ELECTRIC tier — the
+	# first inserter that is NOT a Burner. No fuel slot; draws from the power
+	# network instead, so throughput degrades under brownout rather than
+	# stopping dead at fuel exhaustion. Filter slot (fast-tier capability) is
+	# bundled in. Same parametric code path as the other tiers via the
+	# *_BY_TYPE tables in inserter.gd.
+	ELECTRIC_INSERTER,
 }
 
 const DATA: Dictionary = {
@@ -646,6 +653,42 @@ const DATA: Dictionary = {
 			},
 		],
 	},
+	Type.ELECTRIC_INSERTER: {
+		"name": "Electric Inserter",
+		# Electric cyan — unambiguous against bronze (basic), cool blue-grey
+		# (fast), and rust-red (long-reach).
+		"swatch_color": Color(0.25, 0.75, 0.80),
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,                  # source/dest rotate together
+		"player_drainable": false,
+		# Walkable like every other inserter tier (thin device, arm overhead).
+		"walkable": true,
+		# Inserter UI (session-inserter-electric):
+		# Two slots — held_item (read-only display) + filter. DELIBERATELY NO
+		# fuel slot: the electric tier is not a Burner, it draws from the power
+		# network. Filter shape is copied verbatim from FAST_INSERTER (same
+		# 'filter' kind, same scalar state_field).
+		#
+		# NOTE (Task 3, registration only): Inserter.tick still runs the Burner
+		# fuel check, so a placed electric inserter parks in STATE_NO_FUEL until
+		# the power gating lands. That is expected at this stage, not a defect.
+		"slot_layout": [
+			{
+				"id": "held_item", "kind": "output",
+				"accepts": [],                       # informational; any item can be held
+				"max_stack": 1, "state_field": "held_item_buffer",
+			},
+			{
+				# 'filter' kind — METADATA, not buffer. Drop-to-set,
+				# right-click-to-clear, no take semantics. state_field points
+				# to a scalar int (Items.Type or -1), NOT an Array.
+				"id": "filter", "kind": "filter",
+				"accepts": [],
+				"max_stack": 1, "state_field": "filter_item_type",
+			},
+		],
+	},
 	Type.FERTILIZER_APPLICATOR: {
 		"name": "Fertilizer Applicator",
 		"swatch_color": Color(0.55, 0.70, 0.55),    # sage / sprinkler-green
@@ -922,6 +965,8 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Inserter.make(pos, dir, Type.FAST_INSERTER)
 		Type.LONG_REACH_INSERTER:
 			return Inserter.make(pos, dir, Type.LONG_REACH_INSERTER)
+		Type.ELECTRIC_INSERTER:
+			return Inserter.make(pos, dir, Type.ELECTRIC_INSERTER)
 		Type.POWER_POLE:
 			return PowerPole.make(pos)
 		Type.WATER_WHEEL:
@@ -964,7 +1009,8 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Custom tick (no recipe — applies fertilizer directly to
 			# tile_fertilizer_state via GridWorld.try_apply_fertilizer).
 			FertilizerApplicator.tick(b, world)
-		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER, \
+		Type.ELECTRIC_INSERTER:
 			# Custom tick — phase machine + parametric cycle speed via
 			# Inserter.cycle_ticks(b) lookup. Same code path across all
 			# tiers: basic (1.0s cycle), fast (0.5s cycle, filter slot),
@@ -1035,7 +1081,8 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Composter.draw(b, canvas, world_pos, tile_size)
 		Type.FERTILIZER_APPLICATOR:
 			FertilizerApplicator.draw(b, canvas, world_pos, tile_size)
-		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER, \
+		Type.ELECTRIC_INSERTER:
 			Inserter.draw(b, canvas, world_pos, tile_size)
 		Type.POWER_POLE:
 			PowerPole.draw(b, canvas, world_pos, tile_size)
@@ -1247,7 +1294,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Processor.info_lines(b, world)
 		Type.FERTILIZER_APPLICATOR:
 			return FertilizerApplicator.info_lines(b, world)
-		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER:
+		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER, \
+		Type.ELECTRIC_INSERTER:
 			return Inserter.info_lines(b, world)
 		Type.MINING_DRILL:
 			return MiningDrill.info_lines(b, world)
