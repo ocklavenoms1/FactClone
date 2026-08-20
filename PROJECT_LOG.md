@@ -9,6 +9,38 @@ Each entry has three sections:
 
 ---
 
+## Electricity Arc Session 2 — More Generators + Accumulator
+
+**Date:** 2026-08-20
+**Tag:** `session-electricity-2`
+**Save:** v18 (no schema bump — accumulator `charge` is a new state field on a new building type; existing saves load unchanged)
+
+Second of the Electricity Arc. Adds two generators and the arc's first storage device, and refactors `PowerNetwork` into a 3-stage update so storage can participate in the supply/demand settle. Authored across Tasks 1-8 on a feature branch; finished, rebased, and shipped from the analysis machine after the original worktree became unavailable.
+
+### What shipped
+
+- **`windmill.gd`** — 2×2, `MAX_OUTPUT = 6`. No resource dependency: `output_active` is true from placement, so it's the "place anywhere" generator. 60% of the Water Wheel's 10 output, priced as the tradeoff for needing no water adjacency.
+- **`steam_generator.gd`** — 2×2, `MAX_OUTPUT = 20`, Burner-powered (the 5th Burner consumer after drill / smelter / inserter / fast inserter). `CYCLE_TICKS = 20` → 1 fuel unit per second, so one FUEL_BRIQUETTE (8 units) yields 8 seconds at 20 power. Keeps the `FUEL_PORT_DIR = Belt.DIR_S` convention so fuel intake can't cannibalise adjacent item ports.
+- **`accumulator.gd`** — 1×1 battery. `MAX_CAPACITY = 50`, `MAX_CHARGE_RATE` / `MAX_DISCHARGE_RATE = 5` per tick. Charges from surplus, discharges into deficit, smoothing the intermittent generators.
+- **`power_network.gd` — 3-stage `update_supply_demand`.** Storage can't be settled in a single pass: the network must total generator supply and consumer demand *before* deciding whether accumulators charge or discharge, then fold storage back into satisfaction. Task 5 split the update accordingly; the Task 5 fix clears the intermediate dicts in `rebuild_topology` so a stale pass can't leak across a topology change.
+- **Accumulator fill-bar** (Task 6) replacing the Task 4 stub — charge state is legible at a glance on the map, not only in the panel.
+- **Hotbar Power category: 3 → 6 slots** (Task 7).
+- **Tests:** `test_power_network.gd` extended with sub-cases 16-19 (accumulator math) and sub-case 20 (save round-trip preserving `charge`). Suite: **39 passed, 0 failed**, zero error lines.
+
+### Decisions
+
+- **Windmill trades output for placement freedom.** 6 vs the Water Wheel's 10 is the whole design: the wheel is stronger but shoreline-bound, the windmill is weaker but goes anywhere. Keeps both generators meaningful instead of one dominating.
+- **Steam generator is cycle-based, not continuous-burn.** 1 fuel unit per 20 ticks reuses the Burner cadence the other four consumers already use, so fuel economy reads consistently across the game rather than the generator having bespoke maths.
+- **Storage forced the 3-stage refactor rather than a special case.** An accumulator is simultaneously a consumer (charging) and a supplier (discharging), which a single-pass model can't express without ordering bugs. Staging the update is the honest fix and generalises to any future storage tier.
+- **No save-schema bump.** The accumulator's `charge` lives in its own building state, and pre-Session-2 saves simply contain no accumulators. Sub-case 20 locks the round-trip.
+
+### Lessons
+
+- **A feature branch that never lands is a single point of failure.** This session sat unpushed on one machine for weeks while `origin/main` stayed 94 commits stale; a full-codebase audit was then run against a fresh clone and produced findings against code that had already moved on. Push early even mid-session — the cost is nothing, the cost of not doing it was a re-verification pass over every HIGH finding.
+- **Rebase conflicts from `git add -A` are self-inflicted.** The only conflicts in a 10-commit rebase were two `.uid` files swept into an unrelated commit by a blanket add. Stage deliberately.
+
+---
+
 ## QoL Cluster B — UX polish (5 items)
 
 **Date:** 2026-05-15

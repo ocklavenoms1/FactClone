@@ -191,9 +191,9 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 ---
 
-## Electricity Arc — 1 of N sessions shipped
+## Electricity Arc — 2 of N sessions shipped
 
-**Status:** Session 1 (foundation) shipped. Linear-satisfaction model locked as arc-wide consumer interface contract. Asymmetric generator-vs-consumer pole rules locked (see "Electricity Network Design Decision" above). Future sessions extend.
+**Status:** Sessions 1 (foundation) + 2 (generators + storage) shipped. Linear-satisfaction model locked as arc-wide consumer interface contract. Asymmetric generator-vs-consumer pole rules locked (see "Electricity Network Design Decision" above). `PowerNetwork.update_supply_demand` is now a 3-stage settle (supply → storage decision → satisfaction) — any future storage tier plugs into that, don't special-case it. Future sessions extend.
 
 **Shipped:**
 
@@ -201,9 +201,12 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
   - `POLE_RANGE = 3` (pole-to-pole connectivity, Chebyshev)
   - `SUPPLY_RADIUS = 1` (consumer-to-pole, Chebyshev)
 
+- **Session 2 (`session-electricity-2`)** — WINDMILL (2×2, no resource dependency, always active, MAX_OUTPUT=6 — 60% of Water Wheel, traded for placement freedom) + STEAM_GENERATOR (2×2, Burner-powered as the 5th consumer, MAX_OUTPUT=20, 1 fuel unit per 20 ticks, `FUEL_PORT_DIR = Belt.DIR_S`) + ACCUMULATOR (1×1 storage, MAX_CAPACITY=50, ±5/tick). `PowerNetwork.update_supply_demand` refactored to 3 stages so storage can be settled after supply/demand are totalled; `rebuild_topology` clears the intermediate dicts. Accumulator fill-bar visual. Hotbar Power 3 → 6 slots. `test_power_network.gd` sub-cases 16-20. Save v18 unchanged (accumulator `charge` is per-building state).
+  - Solar (daylight-dependent) was scoped out of Session 2 and remains unbuilt.
+
 **Queued (re-plan each at session start):**
 
-- **Session 2 — More Generators + Storage.** Windmill (wind direction adjacency), Steam Engine (fuel-powered via Burner), Solar (daylight-dependent), Accumulator (battery smooths supply/demand). DATA entries + per-generator tick logic. All use strict cardinal adjacency.
+- **Session 3 — TBD.** Candidates: Solar generator (daylight cycle — needs a day/night system first), medium pole / substation tiers, electric-powered processors (the linear-satisfaction contract already supports throughput scaling; no consumer uses it yet beyond the lamp's brightness).
 - **Session 3 — Power Pole Tiers.** Medium pole + substation with wider connection range AND wider supply area. `RANGE_BY_TYPE` + `SUPPLY_RADIUS_BY_TYPE` parametric tables on `power_network.gd`. Reuses BFS — only lookups change.
 - **Session 4 — Electric Processors.** Electric variants of smelter, drill. First consumers using the `1.0 / max(0.1, satisfaction)` cycle-multiplier arc-wide contract.
 - **Session 5 — Electric Inserters (closes Inserter Arc).** Combines reach + speed + electric power. Reuses Inserter parametric tables. Last session of both arcs.
