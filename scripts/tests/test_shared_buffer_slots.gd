@@ -112,14 +112,14 @@ static func run(parent: Node) -> Dictionary:
 	var hover_yeast: int = panel._hover_item_type({ "slot_def": yeast_slot, "sub_idx": -1 })
 	var hover_flour: int = panel._hover_item_type({ "slot_def": flour_slot, "sub_idx": -1 })
 	_check(failures, hover_yeast == Items.Type.YEAST,
-		"(4) tooltip over the YEAST slot must say YEAST, says %s" % Items.name_of(hover_yeast))
+		"(4) tooltip over the YEAST slot must say YEAST, says %s" % _item_label(hover_yeast))
 	_check(failures, hover_flour == Items.Type.FLOUR,
-		"(4) tooltip over the FLOUR slot must say FLOUR, says %s" % Items.name_of(hover_flour))
+		"(4) tooltip over the FLOUR slot must say FLOUR, says %s" % _item_label(hover_flour))
 	# A slot whose type isn't buffered should read empty, not a sibling's item.
 	mixer.state["in_buffer"] = [[Items.Type.FLOUR, 2]]
 	var hover_absent: int = panel._hover_item_type({ "slot_def": yeast_slot, "sub_idx": -1 })
 	_check(failures, hover_absent == -1,
-		"(4) tooltip over an empty YEAST slot must read empty (-1), says %s" % Items.name_of(hover_absent))
+		"(4) tooltip over an empty YEAST slot must read empty (-1), says %s" % _item_label(hover_absent))
 
 	# =========================================================================
 	# (5) CTRL-PICKER PATH — _input_output_ctrl_take is a SECOND copy of the
@@ -141,6 +141,12 @@ static func run(parent: Node) -> Dictionary:
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 8))] }
 
 # ---------- helpers ----------
+
+## Safe item label for assertion messages. Items.name_of(-1) throws, and
+## GDScript evaluates a format argument even when the assertion passes —
+## an unguarded call sprays script errors into an otherwise-clean log.
+static func _item_label(t: int) -> String:
+	return "(empty)" if t < 0 else Items.name_of(t)
 
 static func _slot_by_id(b_type: int, slot_id: String) -> Dictionary:
 	for slot in Buildings.slot_layout_for(b_type):
