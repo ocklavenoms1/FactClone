@@ -138,6 +138,21 @@ const POWER_DEMAND_BY_TYPE: Dictionary = {
 	Buildings.Type.ELECTRIC_INSERTER: 5,
 }
 
+# Floor on the satisfaction divisor in effective_cycle_ticks. Below this,
+# a network is not browning out, it is off.
+#
+# 0.05 is not arbitrary: it is the ELECTRIC_LAMP's documented on/off
+# threshold (electric_lamp.gd draw() — the glow halo appears at
+# `sat > 0.05`). Sharing the number means "too dark to bother" and "too
+# weak to run" are the SAME point on the dial, so a player watching lamps
+# die can read the moment their inserters give up. Task 7 reuses this
+# constant as the STATE_NO_POWER cutoff for exactly that reason.
+#
+# As a divisor floor it caps the worst case: the electric tier's 5-tick
+# cycle stretches to at most ceil(5 / 0.05) = 100 ticks, a 20x slowdown.
+# Without the floor a satisfaction of 0.0 would divide by zero.
+const POWER_EPSILON: float = 0.05
+
 # Fuel input port direction (canonical orientation; rotates with b.dir
 # via Buildings.world_dir). Mirrors the Smelter pattern from session-
 # smelter — restricting fuel intake to ONE specific perpendicular edge
@@ -194,6 +209,32 @@ static func power_demand(b: Building) -> int:
 static func is_electric(b: Building) -> bool:
 	return POWER_DEMAND_BY_TYPE.has(b.type)
 
+## Cycle ticks AFTER power-satisfaction scaling — the brownout rule.
+## Public API — tick() derives its per-tick cycle increment from this.
+##
+##   effective = ceil(cycle_ticks(b) / max(POWER_EPSILON, satisfaction))
+##
+##   sat 1.00 ->  5 ticks (full speed)   sat 0.25 -> 20 ticks
+##   sat 0.50 -> 10 ticks (half speed)   sat 0.05 -> 100 ticks (the floor)
+##
+## BURNER tiers are returned UNCHANGED, and return BEFORE the satisfaction
+## lookup runs. That early return is load-bearing, not a micro-optimisation:
+## a world with no power network reports satisfaction 0.0 everywhere, so a
+## burner that fell through would divide by POWER_EPSILON and crawl at
+## ceil(20 / 0.05) = 400 ticks — every fuel inserter in the game frozen by a
+## feature that was never meant to reach them.
+##
+## Deliberately SEPARATE from cycle_ticks(b), which stays pure and
+## world-free: InserterPanel reads it for the "Cycle: Xs" display and has no
+## world reference to hand in. cycle_ticks is the tier's rating; this is what
+## the tier actually manages on the network it happens to be standing on.
+static func effective_cycle_ticks(b: Building, world) -> int:
+	var base_ticks: int = cycle_ticks(b)
+	if not is_electric(b):
+		return base_ticks
+	var sat: float = world.power_satisfaction_at(b.anchor)
+	return int(ceil(float(base_ticks) / maxf(POWER_EPSILON, sat)))
+
 ## Build initial state. dir defaults to canonical east (DIR_E = 0).
 ## b_type defaults to INSERTER; pass FAST_INSERTER (or future tiers) for
 ## tier-specific buildings. State shape is uniform across tiers — the
@@ -216,7 +257,8 @@ static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.INSER
 
 ## Tick logic. Dispatched from Buildings.tick_one. Both INSERTER and
 ## FAST_INSERTER (and future tiers) route here; differences resolved via
-## cycle_ticks(b) lookup.
+## the effective_cycle_ticks(b, world) lookup — the tier's rated
+## cycle_ticks(b), scaled by network satisfaction for electric tiers.
 ##
 ## Order of operations:
 ##   1. Try to refuel if buffer empty.        — BURNER tiers only
@@ -230,10 +272,12 @@ static func tick(b: Building, world) -> void:
 	# could never satisfy the fuel check below and would park in
 	# STATE_NO_FUEL forever. Skip the whole fuel path for them (both the
 	# pull attempt here and the consume_tick calls in the state arms), and
-	# let the state machine run unconditionally. Power CONSEQUENCES —
-	# satisfaction scaling and STATE_NO_POWER — are deliberately NOT here;
-	# they land in Tasks 6-7. After Task 5 an electric inserter simply runs
-	# at its full 5-tick cycle whether or not power exists.
+	# let the state machine run unconditionally. The power CONSEQUENCE lives
+	# further down, in the `ticks` computation: since Task 6 an electric
+	# inserter's cycle STRETCHES with network satisfaction (see
+	# effective_cycle_ticks). STATE_NO_POWER — the hard cutoff below
+	# POWER_EPSILON — is still Task 7; until then a starved inserter crawls
+	# at the 100-tick worst case rather than stopping.
 	var electric: bool = is_electric(b)
 	# (1 + 2) Fuel check + pull. Restricted to FUEL_PORT_DIR (rotated by
 	# building dir) — see constant docstring for the source-tile-as-fuel
@@ -246,9 +290,18 @@ static func tick(b: Building, world) -> void:
 				return
 	# (3) State machine.
 	var s: int = int(b.state.get("state", STATE_IDLE))
-	var ticks: int = cycle_ticks(b)
+	# EFFECTIVE, not rated. For electric tiers this is cycle_ticks(b)
+	# stretched by network satisfaction (Task 6 brownout); burner tiers get
+	# their rated cycle_ticks(b) back unchanged, so the
+	# `Burner.consume_tick(b, ticks)` calls in the arms below still burn one
+	# fuel unit per rated cycle exactly as they did before.
+	var ticks: int = effective_cycle_ticks(b, world)
 	# Per-tick cycle increment. One full cycle (0→1) spans `ticks` ticks;
-	# each half-cycle (swing-out OR swing-in) is ticks/2 ticks.
+	# each half-cycle (swing-out OR swing-in) is ticks/2 ticks. Every state
+	# arm advances cycle_progress by this ONE value, so a stretched cycle
+	# interpolates smoothly across its longer span for free — the arm sweeps
+	# slower rather than stalling and then leaping. That is why the brownout
+	# needed no new interpolation code.
 	var inc: float = 1.0 / float(ticks)
 
 	match s:
