@@ -403,6 +403,25 @@ func can_place_building(t: int, pos: Vector2i) -> bool:
 		if has_building_at(cell):
 			last_building_place_error = "%s: tile already occupied" % Buildings.name_of(t)
 			return false
+		# Water / deposits / trees all carry Overlay.NONE (overlays are
+		# forbidden on them), so the overlay check below reads their
+		# PROTECTED status as permission. Guard them explicitly, or every
+		# Overlay.NONE-accepting building (smelter, composter, inserters,
+		# applicator, power pole, lamp) places mid-lake or buries a
+		# deposit. Same invariant set_overlay enforces, same messaging.
+		if base_at(cell) == Terrain.Base.WATER:
+			last_building_place_error = "%s can't be placed on water" % Buildings.name_of(t)
+			return false
+		# MINING_DRILL is exempt — it must sit on ore. Its own
+		# validate_placement rejects water and trees in-footprint.
+		if t != Buildings.Type.MINING_DRILL and tiles.has(cell) \
+				and tiles[cell].resource_node != ResourceNodes.Type.NONE:
+			var rname: String = ResourceNodes.name_of(tiles[cell].resource_node)
+			if ResourceNodes.is_ore(tiles[cell].resource_node):
+				last_building_place_error = "Mine the %s first." % rname.to_lower()
+			else:
+				last_building_place_error = "Can't build over %s." % rname.to_lower()
+			return false
 		if not (overlay_at(cell) in allowed_overlays):
 			var names: Array = []
 			for o in allowed_overlays:

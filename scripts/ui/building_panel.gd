@@ -258,9 +258,10 @@ func _hover_item_type(hit: Variant) -> int:
 		match kind:
 			"input", "output":
 				var buf: Array = building.state.get(field, [])
-				if buf.is_empty():
+				var idx: int = _buffer_index_for_slot(buf, slot_def)
+				if idx < 0:
 					return -1
-				return int(buf[0][0])
+				return int(buf[idx][0])
 			"output_multi":
 				var buf2: Array = building.state.get(field, [])
 				if sub_idx < 0 or sub_idx >= buf2.size():
@@ -462,10 +463,13 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 	match kind:
 		"input", "output":
 			var buf: Array = building.state.get(field, [])
-			if buf.is_empty():
+			# Resolve THIS slot's entry — a shared-field buffer (Mixer /
+			# Oven / Thresher) holds a sibling slot's items too.
+			var idx: int = _buffer_index_for_slot(buf, slot_def)
+			if idx < 0:
 				return
-			var entry = buf[0]
-			# Ctrl+LMB → picker (spec §6.1). Inline max — input/output buf has single entry.
+			var entry = buf[idx]
+			# Ctrl+LMB → picker (spec §6.1).
 			if (mods & SlotClickHandler.MOD_CTRL) != 0 and quantity_picker != null:
 				var max_n: int = int(entry[1])
 				if max_n <= 0:
@@ -473,14 +477,14 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 				var anchor: Vector2 = _building_slot_anchor(slot_def, sub_idx)
 				quantity_picker.open(anchor, "Take", Items.name_of(int(entry[0])), max_n, max_n,
 					func(n: int):
-						_input_output_ctrl_take(field, sub_idx, n, kind)
+						_input_output_ctrl_take(slot_def, field, sub_idx, n, kind)
 						queue_redraw())
 				return
 			var take: int = SlotClickHandler.split_half(int(entry[1])) if shift else int(entry[1])
 			cursor.pick(int(entry[0]), take)
 			entry[1] = int(entry[1]) - take
 			if int(entry[1]) <= 0:
-				buf.clear()
+				buf.remove_at(idx)
 			building.state[field] = buf
 		"output_multi":
 			var buf2: Array = building.state.get(field, [])
@@ -495,7 +499,7 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 				var anchor2: Vector2 = _building_slot_anchor(slot_def, sub_idx)
 				quantity_picker.open(anchor2, "Take", Items.name_of(int(entry2[0])), max_n2, max_n2,
 					func(n: int):
-						_input_output_ctrl_take(field, sub_idx, n, "output_multi")
+						_input_output_ctrl_take(slot_def, field, sub_idx, n, "output_multi")
 						queue_redraw())
 				return
 			var take2: int = SlotClickHandler.split_half(int(entry2[1])) if shift else int(entry2[1])
@@ -544,8 +548,12 @@ func _take_from_slot(slot_def: Dictionary, sub_idx: int, mods: int = SlotClickHa
 # ---------- ctrl picker confirm helpers (Task 21) ----------
 
 ## Ctrl picker confirm helper for input/output/output_multi TAKE direction.
-## Removes n items from buf[sub_idx if multi else 0] and picks to cursor.
-func _input_output_ctrl_take(field: String, sub_idx: int, n: int, kind: String) -> void:
+## Removes n items from the entry THIS slot addresses and picks to cursor.
+##
+## Takes slot_def (not just field) because a shared-field buffer needs the
+## slot's `accepts` list to identify its own entry — field alone cannot
+## distinguish the Mixer's flour slot from its yeast slot.
+func _input_output_ctrl_take(slot_def: Dictionary, field: String, sub_idx: int, n: int, kind: String) -> void:
 	if n <= 0:
 		return
 	var buf: Array = building.state.get(field, [])
@@ -558,13 +566,14 @@ func _input_output_ctrl_take(field: String, sub_idx: int, n: int, kind: String) 
 		if int(e[1]) <= 0:
 			buf.remove_at(sub_idx)
 	else:
-		if buf.is_empty():
+		var idx: int = _buffer_index_for_slot(buf, slot_def)
+		if idx < 0:
 			return
-		var e2 = buf[0]
+		var e2 = buf[idx]
 		cursor.pick(int(e2[0]), n)
 		e2[1] = int(e2[1]) - n
 		if int(e2[1]) <= 0:
-			buf.clear()
+			buf.remove_at(idx)
 	building.state[field] = buf
 
 ## Returns the item type to use when taking from the fuel buffer. Uses
@@ -635,6 +644,36 @@ func _building_slot_anchor(slot_def: Dictionary, sub_idx: int) -> Vector2:
 	return global_position + _panel_rect().get_center()
 
 # ---------- buffer helpers (Array of [type, count]) ----------
+
+## Index of the buffer entry that a given input/output slot_def addresses,
+## or -1 when this slot's item type isn't present.
+##
+## Three buildings bind TWO panel slots to ONE state_field — Mixer
+## (flour + yeast), Oven (dough + fuel), Thresher (grain + straw) — and the
+## simulation fills those buffers with both types as a matter of course:
+## Processor._emit_outputs adds every recipe output, _try_pull_inputs adds
+## every pulled input type. Addressing such a buffer as buf[0] makes the
+## two slots indistinguishable: the panel renders the wrong item and a take
+## destroys the sibling entry.
+##
+## Resolution is by the slot's `accepts` list; every shared-field slot_def
+## carries a single-type accepts. A slot with an empty accepts list is
+## unconstrained and addresses entry 0, which preserves the behavior of the
+## ~20 single-slot buildings exactly.
+##
+## This is the input/output counterpart of `sub_idx` for "output_multi":
+## once an index is resolved, all four call sites use the identical
+## buf[idx] / remove_at(idx) form their output_multi siblings already use.
+static func _buffer_index_for_slot(buf: Array, slot_def: Dictionary) -> int:
+	if buf.is_empty():
+		return -1
+	var accepts: Array = slot_def.get("accepts", [])
+	if accepts.is_empty():
+		return 0
+	for i in buf.size():
+		if int(buf[i][0]) in accepts:
+			return i
+	return -1
 
 static func _buffer_count(buf: Array, item_type: int) -> int:
 	for entry in buf:
@@ -749,9 +788,10 @@ func _draw_slots(font: Font) -> void:
 		match kind:
 			"input", "output":
 				var buf: Array = building.state.get(field, [])
-				if not buf.is_empty():
-					item_type = int(buf[0][0])
-					count = int(buf[0][1])
+				var idx: int = _buffer_index_for_slot(buf, slot_def)
+				if idx >= 0:
+					item_type = int(buf[idx][0])
+					count = int(buf[idx][1])
 			"output_multi":
 				var buf2: Array = building.state.get(field, [])
 				if sub_idx >= 0 and sub_idx < buf2.size():
