@@ -33,6 +33,9 @@ const GUARDED: Array = [
 	Buildings.Type.FERTILIZER_APPLICATOR,
 	Buildings.Type.POWER_POLE,
 	Buildings.Type.ELECTRIC_LAMP,
+	# Electricity Session 2 — both accept Overlay.NONE, so both need the guard.
+	Buildings.Type.WINDMILL,
+	Buildings.Type.ACCUMULATOR,
 ]
 
 static func test_name() -> String:
@@ -111,6 +114,15 @@ static func run(parent: Node) -> Dictionary:
 	# =========================================================================
 	_check(failures, not world.can_place_building(Buildings.Type.WATER_WHEEL, water_pos),
 		"(5) water wheel must not sit ON water (overlay list blocks it)")
+	# Steam Generator has the same posture: STONE/PATH only, so the overlay
+	# list already excludes water/ore/tree and it needs no explicit guard.
+	# (Confirmed from DATA, not inferred — it does NOT accept Overlay.NONE.)
+	_check(failures, not world.can_place_building(Buildings.Type.STEAM_GENERATOR, water_pos),
+		"(5) steam generator must not sit on water")
+	_check(failures, not world.can_place_building(Buildings.Type.STEAM_GENERATOR, ore_pos),
+		"(5) steam generator must not bury an ore deposit")
+	_check(failures, world.can_place_building(Buildings.Type.STEAM_GENERATOR, Vector2i(8, 2)),
+		"(5) steam generator on plain stone must still place: %s" % world.last_building_place_error)
 	_check(failures, world.can_place_building(Buildings.Type.WATER_WHEEL, Vector2i(6, 2)),
 		"(5) water wheel on stone with NO adjacent water must still PLACE (idle, not illegal): %s"
 			% world.last_building_place_error)
