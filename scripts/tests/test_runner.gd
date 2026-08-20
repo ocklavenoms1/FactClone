@@ -51,6 +51,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_item_picker_modal.gd"),
 	preload("res://scripts/tests/test_shared_buffer_slots.gd"),
 	preload("res://scripts/tests/test_placement_terrain_guards.gd"),
+	preload("res://scripts/tests/test_inserter_fuel_conservation.gd"),
 ]
 
 func _ready() -> void:

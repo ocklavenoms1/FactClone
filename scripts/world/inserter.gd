@@ -189,6 +189,51 @@ static func tick(b: Building, world) -> void:
 
 	match s:
 		STATE_IDLE, STATE_NO_FUEL:
+			# RESUME GUARD — item-conservation fix (Inserter Arc Session 4,
+			# audit findings #2 / #6).
+			#
+			# An inserter that runs dry MID-SWING reports STATE_NO_FUEL while
+			# still holding its item: the fuel check above writes NO_FUEL and
+			# returns BEFORE touching held_item_buffer / cycle_progress. That
+			# write is deliberate — a stalled machine must read "NO FUEL", not
+			# "Working". But it means the refuel tick lands HERE, in the
+			# start-a-NEW-cycle arm, where _set_held() below does an
+			# unconditional overwrite of held_item_buffer — silently destroying
+			# the item already in hand. At most one item per outage: the
+			# destruction needs the refuel-tick _try_pickup to SUCCEED, so an
+			# empty source merely defers it until the next item arrives.
+			#
+			# FORWARD-COMPAT (Task 7 / STATE_NO_POWER): any future stall state
+			# that holds its item must be added to THIS arm header, never given
+			# an arm of its own — a separate arm re-creates the destruction bug,
+			# and NO arm at all freezes the machine permanently, because this
+			# match has no `_:` default and nothing outside the arms writes
+			# b.state["state"]. Note this "extend, don't add" rule is specific
+			# to the two multi-state arms (here and draw()'s arm-angle match);
+			# info_lines and the draw tint DO want their own NO_POWER entries,
+			# since that state needs distinct text and colour.
+			#
+			# A full hand means there is an interrupted DELIVERY to resume, not
+			# a new pickup to start. Deliberately progress-INDEPENDENT: the
+			# outage can be taken anywhere across the swing-out half (0.0 at
+			# pickup .. 0.5 parked at a blocked destination), so gating on a
+			# particular progress value would leave the rest of the band broken.
+			#
+			# The clamp is DEFENSIVE, not corrective — cycle_progress already
+			# survives the outage untouched, and WORKING_OUT re-clamps on the
+			# next tick anyway. Its one unique job is externally-supplied
+			# state: cycle_progress arrives from JSON.parse_string on a
+			# player-editable save file (and from an 18-version migration
+			# chain), so a save carrying progress 0.9 with a full hand would
+			# otherwise render the arm at a nonsensical angle for one tick
+			# before WORKING_OUT corrects it. Resuming at WORKING_OUT (rather than jumping straight
+			# to BLOCKED_AT_DEST) lets the existing WORKING_OUT arm re-attempt
+			# the drop on the next tick, which settles a still-blocked
+			# destination back into BLOCKED_AT_DEST on its own.
+			if held_item_type(b) >= 0:
+				b.state["cycle_progress"] = clampf(float(b.state.get("cycle_progress", 0.0)), 0.0, 0.5)
+				b.state["state"] = STATE_WORKING_OUT
+				return
 			# Try to start a new cycle: source has item AND destination accepts.
 			var picked: int = _try_pickup(b, world)
 			if picked >= 0:
