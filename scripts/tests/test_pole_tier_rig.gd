@@ -21,12 +21,16 @@ extends RefCounted
 ##       of 2. The two new tiers are invisible to BFS, so the bridge does not
 ##       exist and cluster A / cluster B / the control block are three islands.
 ##   (4a) total raw supply is 40 .............. PASSES, and must keep passing.
-##       See its own header — this is the assertion that catches a generator
-##       that does not touch a pole, which is a defect this layout has already
-##       had once and which NOTHING else in this file would notice.
+##       Catches a generator that does not touch a pole — a defect this layout
+##       has already had once. Sub-case (2) cannot see that defect, because
+##       demand is 40 whether or not any generator is connected; (1)'s edge-ring
+##       check sees it too, and the two are complementary rather than redundant
+##       (see (1)'s header).
 ##   (4b) all 40 supply and all 40 demand on
 ##        ONE component, satisfaction 1.00 .... FAILS. The bus is split in two
 ##       and each half has 20 supply against a partial demand.
+##   (5) re-spawn adopts ...................... PASSES, and must keep passing.
+##       Pure spawn plumbing, independent of the tier logic.
 ##
 ## Do NOT "fix" (2) or (4b) by moving lamps next to basic poles. Those lamp
 ## positions are what prove the wide supply areas work once Task 5 lands.
@@ -57,7 +61,7 @@ const EXPECTED_DEMAND: int = 40
 const EXPECTED_SUPPLY: int = 40
 
 static func test_name() -> String:
-	return "pole tier rig (layout lands + demand 40 + substation bridges + MST control block stays separate + supply 40 on one bus)"
+	return "pole tier rig (layout lands + demand 40 + substation bridges + MST control block stays separate + supply 40 on one bus + re-spawn adopts)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -65,8 +69,9 @@ static func run(parent: Node) -> Dictionary:
 	_case_demand(parent, failures)
 	_case_bridge(parent, failures)
 	_case_supply(parent, failures)
+	_case_adoption(parent, failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "4 sub-cases pass: layout lands + demand 40 + substation bridges + 40 supply on one bus at satisfaction 1.00" }
+		return { "ok": true, "message": "5 sub-cases pass: layout lands + demand 40 + substation bridges + 40 supply on one bus at satisfaction 1.00 + re-spawn adopts" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -81,8 +86,13 @@ static func run(parent: Node) -> Dictionary:
 # to them. An earlier draft of this layout anchored both generators one row
 # too far south, which put the pole row outside their rings: every placement
 # still succeeded, demand was still exactly 40, and raw supply was silently 0
-# in all three lever positions. This is the only assertion in the file that
-# would have caught it.
+# in all three lever positions.
+#
+# This check and (4a) are COMPLEMENTARY, not redundant — the mutation was run
+# and BOTH fire. Keep both. This one names the offending generator's
+# coordinates, so it says where to look; (4a) reports the supply shortfall, so
+# it also catches a bus that split for some reason having nothing to do with
+# edge rings. Deleting either because the other exists loses real diagnosis.
 # ===========================================================================
 static func _case_layout(parent: Node, failures: Array) -> void:
 	var world = _make_world(parent)
@@ -92,8 +102,15 @@ static func _case_layout(parent: Node, failures: Array) -> void:
 		"(1) the rig skipped %d placements, so the layout is incomplete and every later number is wrong" % int(rig.get("skipped", -1)))
 	_check(failures, int(rig.get("placed", -1)) == EXPECTED_PLACEMENTS,
 		"(1) placed %d buildings, expected exactly %d" % [int(rig.get("placed", -1)), EXPECTED_PLACEMENTS])
-	_check(failures, PoleTierRig._placements().size() == EXPECTED_PLACEMENTS,
-		"(1) the placement plan lists %d entries, expected exactly %d" % [PoleTierRig._placements().size(), EXPECTED_PLACEMENTS])
+	# Cannot fail while the two checks above pass: build() increments exactly
+	# one of placed/skipped per plan entry, so skipped == 0 and placed == 36
+	# already force the plan to hold 36. Kept anyway, because that invariant is
+	# a property of build()'s LOOP, not of the plan — an added `continue` that
+	# skips an entry without counting it would break the chain, and this is the
+	# assertion that would still notice. No single-line mutation reddens it
+	# alone, and that is expected.
+	_check(failures, PoleTierRig.plan().size() == EXPECTED_PLACEMENTS,
+		"(1) the placement plan lists %d entries, expected exactly %d" % [PoleTierRig.plan().size(), EXPECTED_PLACEMENTS])
 
 	var gens: Array = rig.get("gen_anchors", [])
 	_check(failures, gens.size() == 2,
@@ -223,7 +240,7 @@ static func _case_supply(parent: Node, failures: Array) -> void:
 
 	# --- (4a) ---
 	_check(failures, total_supply == EXPECTED_SUPPLY,
-		"(4a) total raw supply across all %d components is %d, expected exactly %d — a generator that does not cardinally touch a pole contributes 0 and nothing else in this file notices" % [comps.size(), total_supply, EXPECTED_SUPPLY])
+		"(4a) total raw supply across all %d components is %d, expected exactly %d — a generator that does not cardinally touch a pole contributes 0, and demand stays 40 either way, so sub-case (2) cannot see this" % [comps.size(), total_supply, EXPECTED_SUPPLY])
 
 	# --- (4b) ---
 	_check(failures, bus_ids.size() == 1,
@@ -243,6 +260,52 @@ static func _case_supply(parent: Node, failures: Array) -> void:
 	var sat: float = PowerNetwork.satisfaction_for(world, bus)
 	_check(failures, sat == 1.0,
 		"(4b) bus satisfaction at POWER_FULL is %f, expected exactly 1.0" % sat)
+	_teardown(world)
+
+# ===========================================================================
+# (5) RE-SPAWNING ONTO THE STANDING RIG ADOPTS IT.
+#
+# GREEN TODAY, and unlike the rest of this file it has nothing to do with the
+# tier logic — it is pure spawn plumbing, so it must stay green through Tasks
+# 4-7 as well.
+#
+# The failure it guards is silent and slow. F7 -> Shift+F7 -> F7 without
+# moving collides on all 36 cells. Without adoption that yields placed == 0 and
+# an EMPTY gen_anchors, main.gd stores the empty array, _sustain_rig_power
+# early-returns on it, and the rig on screen — visibly complete — burns its
+# 16-unit fuel buffers and goes dark about 16 seconds later with F8 refusing to
+# touch it. Nothing about that reads as "the respawn did not take".
+#
+# So the assertion that matters is the THIRD one: adoption has to hand back the
+# generators standing on the ground, not merely report a boolean.
+# ===========================================================================
+static func _case_adoption(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var first: Dictionary = PoleTierRig.build(world, RIG_ORIGIN)
+	var again: Dictionary = PoleTierRig.build(world, RIG_ORIGIN)
+
+	_check(failures, bool(again.get("adopted", false)),
+		"(5) a second build over an intact rig did not report adopted")
+	_check(failures, int(again["placed"]) == 0,
+		"(5) adoption placed %d buildings — it must build nothing" % int(again["placed"]))
+	_check(failures, (again["gen_anchors"] as Array) == (first["gen_anchors"] as Array),
+		"(5) adopted gen_anchors %s do not match the rig on the ground %s — an empty or wrong list is what silently kills the F8 lever" % [str(again["gen_anchors"]), str(first["gen_anchors"])])
+
+	# A PARTIAL overlap must NOT read as adoptable: that is the collision case,
+	# and reporting it as adopted would tell the user the lever re-attached to a
+	# rig that is actually missing pieces. One foreign building on a planned
+	# cell is enough to prove the all-or-nothing rule.
+	var world_c = _make_world(parent)
+	var lamp_cell: Vector2i = RIG_ORIGIN + PoleTierRig.LAMP_OFFSETS[0]
+	world_c.tiles[lamp_cell] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE)
+	world_c.set_overlay(lamp_cell, Terrain.Overlay.STONE)
+	world_c.place_building(Buildings.Type.CHEST, lamp_cell, 0)
+	var partial: Dictionary = PoleTierRig.build(world_c, RIG_ORIGIN)
+	_check(failures, not bool(partial.get("adopted", false)),
+		"(5) a rig with one foreign building on a planned cell must NOT read as adoptable")
+	_check(failures, int(partial["skipped"]) == 1,
+		"(5) expected exactly 1 skipped placement against one foreign building, got %d" % int(partial["skipped"]))
+	_teardown(world_c)
 	_teardown(world)
 
 # ---------- helpers ----------

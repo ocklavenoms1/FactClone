@@ -147,6 +147,18 @@ var placement_direction: int = Belt.DIR_E   # 0=E, 1=S, 2=W, 3=N
 var _demo_spawned: bool = false
 var _demo_origin: Vector2i = Vector2i.ZERO
 
+# Which smoke-test rig the _rig_* block below is currently tracking. The two
+# rigs share every one of those variables and share the F8 lever, so this is
+# the only thing that can tell a user which key re-attaches to what is actually
+# on the ground. Kept as ints rather than a String so a typo is a compile
+# error.
+const RIG_KIND_ELECTRIC: int = 0
+const RIG_KIND_POLE_TIERS: int = 1
+
+# The respawn/re-attach key for each kind, indexed by RIG_KIND_*. Named here so
+# the toast and the key gates cannot drift apart.
+const RIG_RESPAWN_KEY: Array = ["F10", "F7"]
+
 # Electric-rig scenario state (session-inserter-electric, PAUSE 1). Same
 # dedup shape as the F11 demo above — F10 spawns, Shift+F10 clears the flag.
 # The rig can also be spawned at launch via `-- --scenario=electric_rig`;
@@ -163,13 +175,31 @@ var _demo_origin: Vector2i = Vector2i.ZERO
 # NOT PERSISTED, deliberately. The rig's BUILDINGS are ordinary world state and
 # survive a save/load like anything else; this bookkeeping does not, so after
 # F5/F9 (or a relaunch without the scenario flag) the rig is on screen with
-# _rig_spawned false and F8 has nothing to drive. Recovery is a single F10:
-# ElectricRig.build() ADOPTS a rig that is already standing (every planned cell
-# already holding exactly the planned building) and returns its real generator
-# anchors, so the lever re-attaches instead of a second rig being scattered.
-# Persisting these four fields would mean a save-schema bump for a debug
-# scenario, which is a worse trade than one keypress.
+# _rig_spawned false and F8 has nothing to drive. Recovery is a single
+# RESPAWN KEYPRESS — F10 for the electric rig, F7 for the pole-tier rig — from
+# roughly where the rig was spawned: both rigs' build() ADOPTS a rig that is
+# already standing (every planned cell already holding exactly the planned
+# building) and returns its real generator anchors, so the lever re-attaches
+# instead of a second rig being scattered. Persisting these fields would mean a
+# save-schema bump for a debug scenario, which is a worse trade than one
+# keypress.
+#
+# WHICH key is not guessable from these variables alone, which is why
+# _rig_kind exists. Electricity Session 3 added a SECOND consumer of this whole
+# block, and the two rigs' paved rectangles overlap completely when spawned
+# from the same tile (electric spans player-relative x -10..9, pole-tier
+# -16..16), so telling a user to press the wrong one scatters one rig on top of
+# the other and rebinds F8 to the newcomer.
+#
+# _rig_kind is only meaningful once something has spawned in THIS session. On a
+# relaunch it reads its declared default and means nothing, which is why
+# _cycle_rig_power splits the unregistered case in two rather than trusting it
+# unconditionally.
 var _rig_spawned: bool = false
+# Which rig _rig_origin / _rig_gen_anchors currently describe. Drives the
+# recovery instruction in _cycle_rig_power's no-rig toast and nothing else —
+# the lever itself is shared and tier-agnostic by design.
+var _rig_kind: int = RIG_KIND_ELECTRIC
 var _rig_origin: Vector2i = Vector2i.ZERO
 var _rig_gen_anchors: Array = []
 var _rig_source_chest: Vector2i = Vector2i.ZERO
@@ -520,7 +550,7 @@ func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("debug_spawn_pole_tier_rig"):
 		if Input.is_key_pressed(KEY_SHIFT):
 			_rig_spawned = false
-			_show_toast("[rig] Rig flag cleared. Next F7 spawns fresh.")
+			_show_toast("[rig] Rig flag cleared. Next F7 re-attaches if you have not moved, or spawns fresh — clean up the old rig manually if you have.")
 		elif _rig_spawned:
 			_show_toast("[rig] A rig already exists at %s. Shift+F7 to allow respawn." % str(_rig_origin))
 		else:
@@ -1457,6 +1487,7 @@ func _spawn_electric_rig(player_tile: Vector2i) -> void:
 	var rig: Dictionary = ElectricRig.build(grid_world, origin)
 
 	_rig_spawned = true
+	_rig_kind = RIG_KIND_ELECTRIC
 	_rig_origin = origin
 	_rig_gen_anchors = rig["gen_anchors"]
 	_rig_source_chest = rig["source_chest"]
@@ -1498,15 +1529,20 @@ func _spawn_electric_rig(player_tile: Vector2i) -> void:
 ## here is what makes that branch unreachable — verified at _cycle_rig_power,
 ## which guards the refill behind `if _rig_source_seeded`.
 ##
-## There is no ADOPTED branch, unlike _spawn_electric_rig. PoleTierRig.build
-## always reports adopted = false because this rig has no chest to protect from
-## re-seeding, so spawning onto an intact copy of itself is reported as
-## INCOMPLETE — accurate, since nothing was built — and cleared with Shift+F7.
+## The ADOPTED branch is load-bearing, for the reason ElectricRig.build states
+## on its own: adoption's job is to RE-ATTACH THE LEVER — hand back the real
+## generator anchors instead of an empty array. Without it, F7 -> Shift+F7 ->
+## F7 on the same tile collides on all 36 cells, leaves _rig_gen_anchors empty,
+## and _sustain_rig_power early-returns, so the visibly complete rig burns its
+## 16-unit fuel buffers and goes dark ~16 s later with F8 refusing to touch it.
+## Protecting a player's chest from re-seeding is the COLLIDED case's job, and
+## this rig has no chest — but that was never why adoption exists.
 func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 	var origin: Vector2i = player_tile + PoleTierRig.ORIGIN_OFFSET
 	var rig: Dictionary = PoleTierRig.build(grid_world, origin)
 
 	_rig_spawned = true
+	_rig_kind = RIG_KIND_POLE_TIERS
 	_rig_origin = origin
 	_rig_gen_anchors = rig["gen_anchors"]
 	_rig_source_chest = Vector2i.ZERO
@@ -1515,8 +1551,16 @@ func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 
 	var placed: int = int(rig["placed"])
 	var skipped: int = int(rig["skipped"])
+	# ADOPTED: the rig was already standing in full — a save/load, or F7 after
+	# Shift+F7 without moving. build() handed back the generators actually on
+	# the ground, so the lever is live again and nothing was built. Reported
+	# distinctly because "0 placed, 36 skipped" would otherwise read as the
+	# INCOMPLETE failure below and send the user off to build a second rig.
+	if bool(rig.get("adopted", false)):
+		_show_toast("[rig] Re-attached to the pole-tier rig already at %s. F8 cycles power." % str(origin))
+		return
 	if skipped > 0:
-		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F7 for a clean one." % [placed, placed + skipped, skipped])
+		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F7 for a clean one, then clean up the old rig manually." % [placed, placed + skipped, skipped])
 		return
 	_show_toast("[rig] Pole tiers ready — substation at %s bridges two clusters. East block is the basic-pole MST control. F8 cycles power." % str(rig["substation"]))
 
@@ -1534,10 +1578,28 @@ func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 ##
 ## Refuses when there is no rig REGISTERED, which is not the same as no rig on
 ## screen: the registration is session-only (see _rig_spawned's declaration),
-## so after a save/load the rig is visible but unregistered. F10 re-attaches.
+## so after a save/load the rig is visible but unregistered.
+##
+## The recovery key is looked up from _rig_kind rather than hard-coded. Naming
+## the wrong one is not a cosmetic error: the two rigs' paved rectangles
+## overlap completely when spawned from the same tile, so pressing F10 while
+## the POLE-TIER rig is standing scatters a partially-collided electric rig
+## across it and rebinds this lever to the newcomer's generators.
+##
+## Two distinct unregistered cases, and they know different amounts:
+##
+##   NOTHING SPAWNED THIS SESSION — a relaunch onto a save that already holds a
+##     rig. _rig_kind is still its declared default and means nothing, so the
+##     toast must NOT pick a key. It names both, tagged, and lets the user
+##     choose the one matching what they can see.
+##   SPAWNED BUT NO GENERATORS — _rig_kind was set by that spawn and is
+##     accurate, so the toast names the one right key.
 func _cycle_rig_power() -> void:
-	if not _rig_spawned or _rig_gen_anchors.is_empty():
-		_show_toast("[rig] No rig registered. Press F10 — it re-attaches to a rig already on the ground.")
+	if not _rig_spawned:
+		_show_toast("[rig] No rig registered this session. Press F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
+		return
+	if _rig_gen_anchors.is_empty():
+		_show_toast("[rig] The registered rig has no generators. Press %s to re-attach to the one on the ground." % RIG_RESPAWN_KEY[_rig_kind])
 		return
 	_rig_power_state = (_rig_power_state + 1) % ElectricRig.POWER_STATE_COUNT
 	ElectricRig.apply_power_state(grid_world, _rig_gen_anchors, _rig_power_state)
