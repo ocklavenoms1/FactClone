@@ -12,7 +12,8 @@
     "hsv": "optional {hue,saturation,value} correction injected before Base Color",
     "status": "real = generated in Tripo; proxy = placeholder stand-in geometry",
     "glow_at": "furnace/firebox position in tiles, after yaw_correction. Drives the emitter fallback until the magenta mask is validated on a real generation.",
-    "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py."
+    "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py.",
+    "albedo_gain": "per-channel gain measured by art/tools/palette_drift.py (palette -> observed). Normalization applies its INVERSE so every asset lands on a common reference. Tripo's shift is not consistent between generations, so this cannot be fixed by prompting."
   },
   "assets": [
     {
@@ -27,7 +28,12 @@
       },
       "yaws": [],
       "status": "real",
-      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite."
+      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite.",
+      "albedo_gain": [
+        0.417,
+        0.535,
+        0.53
+      ]
     },
     {
       "name": "chest",
@@ -66,7 +72,12 @@
         270
       ],
       "status": "test",
-      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor."
+      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor.",
+      "albedo_gain": [
+        0.417,
+        0.535,
+        0.53
+      ]
     }
   ]
 }

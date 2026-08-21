@@ -172,6 +172,10 @@ imports, normalizes and renders eight turnaround views in **18 seconds**.
 
 - Round, conical, domed, or beehive-shaped
 - Anything projecting outside the footprint
+- Projecting parts not tucked flush inside the corner posts — bellows, chutes,
+  levers and hoods all sit *against* the flank, never standing off it. The
+  approved smelter's bellows measured 10.2% of sprite width and was accepted
+  only because it was marginal; the first kiln's outrigger was 38%
 - Mass not centred in its own footprint
 - More than four stone courses on a face
 - Baked shadows or highlights in the texture

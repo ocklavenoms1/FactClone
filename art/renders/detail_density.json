@@ -5,8 +5,8 @@
     "footprint_tiles": 2.0,
     "features": {
       "thresholds": {
-        "p75": 16,
-        "p85": 24,
+        "p75": 18,
+        "p85": 21,
         "p92": 18
       },
       "occupied_px": 4154,
@@ -14,14 +14,19 @@
       "footprint_area_tiles": 4.0,
       "fill_ratio": 1.014,
       "per_tile": {
-        "p75": 3.94,
-        "p85": 5.92,
+        "p75": 4.44,
+        "p85": 5.18,
         "p92": 4.44
       },
       "per_footprint_tile_legacy": {
-        "p75": 4.0,
-        "p85": 6.0,
+        "p75": 4.5,
+        "p85": 5.25,
         "p92": 4.5
+      },
+      "feature_thickness": {
+        "median_thickness_px": 1.27,
+        "p10_thickness_px": 1.0,
+        "under_2px_pct": 81.0
       }
     },
     "high_frequency": {
@@ -30,16 +35,16 @@
         293
       ],
       "cutoff_norm_freq": 0.25,
-      "energy_lost_pct": 5.2,
+      "energy_lost_pct": 6.1,
       "energy_bands_pct": {
-        "0.000-0.125": 89.9,
-        "0.125-0.250": 4.9,
-        "0.250-0.500": 3.8,
-        "0.500-1.000": 1.3,
+        "0.000-0.125": 88.5,
+        "0.125-0.250": 5.4,
+        "0.250-0.500": 4.5,
+        "0.500-1.000": 1.6,
         "1.000-1.500": 0.0
       }
     },
-    "hf_ratio": 2.21,
+    "hf_ratio": 2.6,
     "hf_verdict": "PASS"
   },
   "chest": {
@@ -63,6 +68,11 @@
         "p75": 1.0,
         "p85": 3.0,
         "p92": 5.0
+      },
+      "feature_thickness": {
+        "median_thickness_px": 1.8,
+        "p10_thickness_px": 1.59,
+        "under_2px_pct": 66.7
       }
     },
     "high_frequency": {
@@ -104,6 +114,11 @@
         "p75": 7.0,
         "p85": 11.0,
         "p92": 6.0
+      },
+      "feature_thickness": {
+        "median_thickness_px": 1.0,
+        "p10_thickness_px": 1.0,
+        "under_2px_pct": 100.0
       }
     },
     "high_frequency": {

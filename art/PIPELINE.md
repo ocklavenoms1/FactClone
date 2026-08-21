@@ -122,6 +122,9 @@ art/
     sheet.py               contact sheets on neutral mid-grey
     rotation_test.py       the 4-renders-vs-2D-rotation comparison
     keymask.py             validates the magenta emission mask on a real texture
+    palette_drift.py       measures Tripo's palette shift; emits the albedo gain
+    glow_layer.py          extracts the fire as a separate additive layer
+    overhang.py            containment: lateral appendages past the body block
     detail_density.py      feature count per tile + high-frequency survival
 ```
 
@@ -218,6 +221,64 @@ elsewhere). It is correctly active but small on this asset — Tripo's `rm` map
 happened to be reasonable. Its cross-asset value cannot be judged from one
 asset.
 
+### 4b. Palette drift — Tripo shifts the whole palette, and not consistently
+
+```bash
+blender -b -P art/blender/dump_texture.py -- --glb art/source/<n>.glb --out-dir art/renders/tex
+python art/tools/palette_drift.py art/renders/tex/<n>_basecolor.png [more...]
+```
+
+The magenta mask came back at roughly half brightness (`#FF00FF` → `#9D009A`),
+which raised the obvious question: was the stone, oak, iron and leather shifted
+too? **Yes.** Measured on the approved smelter's albedo, matching clusters to
+palette members by *chromaticity* (stable under a value shift) rather than by
+absolute colour:
+
+| member | locked | observed | luminance ratio |
+|---|---|---|---|
+| fieldstone | `#5A5E58` | `#4C4D46` | 0.667 |
+| fired clay | `#8A6A4F` | `#443424` | 0.229 |
+| weathered oak | `#6B4E32` | `#584732` | 0.750 |
+| wrought iron | `#46504E` | `#3F3F38` | 0.643 |
+| leather | `#7A5A42` | `#503F2C` | 0.443 |
+| forge brown | `#8C4A32` | `#614F39` | 0.658 |
+
+Best single per-channel gain **R 0.417 / G 0.535 / B 0.530**, explaining 67% of
+the error. The magenta's own ratio is 0.330 — the same phenomenon, hit somewhat
+harder, as saturated extremes tend to be.
+
+**And it is not systematic.** Running the same measurement on the first kiln —
+a second generation — gives gain **R 0.989 / G 1.268 / B 1.167**: near unity,
+even slightly bright. Gain spread across the two generations is **0.57–0.73 per
+channel**, enormous.
+
+> **Caveat, stated plainly.** The two generations differ in modality as well as
+> content — the first kiln was text-to-3D, the approved smelter image-to-3D —
+> so this is strong evidence rather than a controlled experiment. The chest and
+> the power pole come through the *same* flow as the smelter and will settle it
+> definitively. The harness runs on them automatically.
+
+**Consequence: the material pass must own value and exposure.** Prompting
+cannot deliver cross-asset colour consistency when the transform varies per
+generation. `normalize.apply_albedo_gain()` therefore corrects each asset by
+the inverse of its own measured gain, stored per asset in the manifest:
+
+```json
+"albedo_gain": [0.417, 0.535, 0.530]
+```
+
+The goal is not to hit the locked hexes exactly — albedo is not a lit
+appearance — but to put every asset through the **same transform to a common
+reference**, which is what consistency actually requires. Verified on the
+smelter: render-space gain moved from **R 0.378 / G 0.518 / B 0.469** to
+**R 0.781 / G 0.854 / B 0.785** — near-neutral, and the channels now agree with
+each other, so the colour cast is gone. The residual ~0.8 is the lighting rig,
+which is locked and therefore common to every asset.
+
+Albedo is clamped to 1.0 after correction; values above that are unphysical and
+blow out. The correction is skipped by `-NoMaterialNorm`, so its effect stays
+measurable.
+
 ---
 
 ## 5. Framing and the Godot contract
@@ -308,45 +369,47 @@ asset against the budget; it does not need the other assets to exist.
 python art/tools/detail_density.py smelter_idle chest power_pole
 ```
 
-**Feature count per OCCUPIED tile**, against the cap of six. Counted at *final*
-sprite resolution, because that is where "readable" is decided: Sobel edge
-magnitude → threshold → connected components of ≥3 px, at three thresholds so
-the figure is not one lucky cutoff. The denominator is opaque area ÷ 32², not
-footprint area — what the eye reads is the silhouette, not the tile.
+### The gate is ONE number
 
-**High-frequency survival**, as a **ratio against the flat-geometry floor**.
+**High-frequency destruction, as a ratio against the flat-geometry floor. Cap 3×.**
+
 Rendering at 4× and downsampling cannot carry any spatial frequency above one
 quarter of the master's Nyquist limit; the tool measures the 4× master's power
-spectrum and reports the AC energy above that cutoff. The pass mark is **under
-3× the floor**, where the floor is the mean of the flat untextured proxies —
-so the budget recalibrates itself instead of being a magic percentage.
+spectrum and reports the AC energy above that cutoff. The floor is the mean of
+the flat untextured proxies, so the budget recalibrates itself instead of being
+a magic percentage.
+
+It needs no special-casing for shape, and it measures the thing actually cared
+about — whether the detail reaches the screen — rather than a proxy for it.
 
 Measured (floor = **2.35%**, budget = 7.1%):
 
-| asset | features/occupied tile (p85) | HF destroyed | ratio | verdict |
-|---|---|---|---|---|
-| first kiln (rejected) | 8.75 | 14.3% | 6.1× | **FAIL** both |
-| **approved smelter** | **5.92** | **5.2%** | **2.21×** | **PASS** both |
-| chest (proxy) | 3.21 | 2.1% | 0.89× | pass |
-| power_pole (proxy) | 17.77 | 2.6% | 1.11× | see below |
+| asset | HF destroyed | ratio | gate |
+|---|---|---|---|
+| first kiln (rejected) | 14.3% | 6.1× | **FAIL** |
+| **approved smelter** | **6.1%** | **2.60×** | **PASS** |
+| chest (proxy) | 2.1% | 0.89× | pass |
+| power_pole (proxy) | 2.6% | 1.11× | pass |
 
-### The denominator fix did not do what was expected
+The smelter moved from 2.21× to 2.60× when the albedo correction went in
+(see §4b) — a brighter albedo carries more contrast, so more energy sits in the
+high bands. Still comfortably inside the cap, but worth knowing that the
+correction spends some of the detail budget.
 
-Switching from footprint area to occupied area is correct in principle, but it
-made the pole score *worse*, not better — 11.00 → 17.77. The pole occupies only
-0.62 tile-equivalents, so a smaller denominator raises the ratio.
+### Diagnostics — reported, never enforced
 
-The pole's real problem is not the denominator: **a thin object is nearly all
-edge**. A 3 px-wide post has a perimeter-to-area ratio that inflates any
-edge-based feature count regardless of how it is normalized. The honest reading
-is that feature density is meaningful for assets that fill their footprint and
-misleading for ones that do not, so the tool now reports `fill_ratio` alongside
-the count. Judge thin assets on absolute feature count instead: the pole's 11
-features spread over a tall thin silhouette read as one object, not as clutter.
+**Feature count per occupied tile.** Divided by opaque area ÷ 32², not
+footprint area. That is the right denominator, but it does **not** rescue thin
+objects — the flat pole proxy scores *worse* under it (11.0 → 17.8) because it
+occupies only 0.62 tile-equivalents. A thin object is nearly all edge and no
+normalization changes that, which is precisely why this is not a gate.
 
-The smelter fills 101% of its footprint, so both denominators agree on it
-(5.92 vs 6.00) — the fix changes nothing where the metric is trustworthy, which
-is a reasonable sign it is the right denominator.
+**Minimum feature size in FINAL pixels** — the candidate second gate if one is
+ever wanted, since anything under ~2 px at 32 px output is dead regardless of
+shape. Currently: smelter median thickness 1.27 px with 81% under 2 px; chest
+1.80 px with 67% under. Both high, which suggests the eventual threshold wants
+setting against a known-good asset rather than assumed — so it is reported and
+left unenforced.
 
 ---
 

@@ -4,7 +4,7 @@
   "footprint_tiles": 2.0,
   "fit": "footprint",
   "height_tiles": null,
-  "yaw_correction": 45.0,
+  "yaw_correction": 0.0,
   "cell_tiles": [
     2,
     3
@@ -22,18 +22,21 @@
     96.0
   ],
   "overhangs_front_edge": false,
-  "normalized_scale": 1.97545,
+  "normalized_scale": 1.877413,
   "normalized_extent_tiles": [
     1.84,
-    1.7112,
-    1.242
+    1.7531,
+    1.71
   ],
   "material_norm": false,
   "material_report": [
     {
-      "material": "tripo_material_2ad78c50-79de-41cb-bb9d-4eb366a2899d"
+      "material": "tripo_material_302dcdc3-fe90-4aa2-b81e-845d14c2dc6e",
+      "roughness_src": "texture",
+      "metallic_src": "texture"
     }
   ],
+  "albedo_gain_applied": null,
   "masters": [
     {
       "tag": "smelter_idle_nomatnorm",

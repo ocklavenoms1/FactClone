@@ -82,6 +82,14 @@ def main():
     )
     mat_report = normalize.normalize_materials(
         norm["meshes"], enabled=not no_matnorm, hsv=cfg.get("hsv"))
+    # Value/exposure correction. Measured per asset by art/tools/palette_drift.py
+    # and stored in the manifest, because Tripo's palette shift is not consistent
+    # between generations and so cannot be fixed by prompting.
+    albedo_report = None
+    if cfg.get("albedo_gain") and not no_matnorm:
+        albedo_report = normalize.apply_albedo_gain(norm["meshes"], cfg["albedo_gain"])
+        print(f"ALBEDO gain^-1 applied to {albedo_report['materials']} material(s): "
+              f"{[round(v, 3) for v in albedo_report['inverse']]}")
     # Always neutralize the emission mask, in every state. Magenta is a mask
     # and must never reach the screen - an idle firebox has to read as a cold
     # dark opening. The returned sockets let the state hooks light that exact
@@ -180,6 +188,7 @@ def main():
         "normalized_extent_tiles": [round(v, 4) for v in norm["size_tiles"]],
         "material_norm": not no_matnorm,
         "material_report": mat_report,
+        "albedo_gain_applied": albedo_report,
         "masters": masters,
         "lock_stamp": lock.lock_stamp(),
     }

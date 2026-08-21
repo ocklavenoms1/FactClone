@@ -345,6 +345,59 @@ def neutralize_mask(meshes, neutral=(0.055, 0.045, 0.040)):
     return sockets
 
 
+def apply_albedo_gain(meshes, gain, clamp=True):
+    """Correct a whole asset's albedo by the inverse of its measured gain.
+
+    Tripo does not return the palette it was given, and the shift is NOT
+    consistent between generations - measured per-channel gain was
+    R 0.99 / G 1.27 / B 1.17 on one asset and R 0.42 / G 0.54 / B 0.53 on
+    another. Prompting cannot fix that, so the material pass has to own value
+    and exposure rather than only roughness and metallic.
+
+    `gain` is what palette_drift.py measured (palette -> observed), so the
+    correction is its reciprocal. The point is not to hit the locked hexes
+    exactly - albedo is not a lit appearance - but to put every asset through
+    the SAME transform to a common reference, which is what cross-asset
+    consistency actually needs.
+    """
+    inv = [1.0 / max(g, 1e-3) for g in gain]
+    seen, n = set(), 0
+    for ob in meshes:
+        for slot in ob.material_slots:
+            mat = slot.material
+            if not mat or mat.name in seen or not mat.use_nodes:
+                continue
+            seen.add(mat.name)
+            nt = mat.node_tree
+            bsdf = next((x for x in nt.nodes if x.type == "BSDF_PRINCIPLED"), None)
+            if not bsdf:
+                continue
+            base = bsdf.inputs.get("Base Color")
+            if base is None or not base.is_linked:
+                continue
+            src = base.links[0].from_socket
+
+            mul = nt.nodes.new("ShaderNodeVectorMath")
+            mul.operation = "MULTIPLY"
+            mul.label = f"albedo gain^-1 {inv[0]:.2f},{inv[1]:.2f},{inv[2]:.2f}"
+            mul.inputs[1].default_value = inv
+            nt.links.new(src, mul.inputs[0])
+
+            out = mul.outputs["Vector"]
+            if clamp:
+                # albedo above 1.0 is not physical and blows out on the render
+                cl = nt.nodes.new("ShaderNodeVectorMath")
+                cl.operation = "MINIMUM"
+                cl.label = "clamp albedo <= 1"
+                cl.inputs[1].default_value = (1.0, 1.0, 1.0)
+                nt.links.new(out, cl.inputs[0])
+                out = cl.outputs["Vector"]
+
+            nt.links.new(out, base)
+            n += 1
+    return {"gain": list(gain), "inverse": inv, "materials": n}
+
+
 def _remap_socket(mat, socket, lo, hi):
     """Insert a clamped Map Range so a linked 0..1 input lands in [lo, hi]."""
     nt = mat.node_tree
