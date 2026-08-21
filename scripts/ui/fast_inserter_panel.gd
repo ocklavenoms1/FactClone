@@ -30,7 +30,7 @@ var item_picker_modal: Node = null
 ##   ║                                            ║
 ##   ║   ┌──┐                                     ║
 ##   ║   │██│  Fuel: 12 / 16 units                ║
-##   ║   └──┘  Cycle speed: 0.5s (fixed)          ║
+##   ║   └──┘  Cycle speed: 0.50s                 ║
 ##   ║                                            ║
 ##   ║   FILTER                                   ║   ← NEW row (y=240)
 ##   ║   ┌──┐  Wheat                              ║

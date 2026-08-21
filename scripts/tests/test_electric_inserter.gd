@@ -18,6 +18,17 @@ extends RefCounted
 ##      single tick of the stretched swing (Task 6).
 ##   7. Fuel tiers unaffected — the satisfaction lookup must not leak into
 ##      the burner path (Task 6).
+##   8. STATE_NO_POWER stalls and HOLDS — the item in hand survives the
+##      outage, nothing is delivered (Task 7).
+##   9. THE FREEZE TEST — a long MID-SWING outage followed by restored power
+##      must RESUME and DELIVER, with the item AND the swing position intact
+##      and no item destroyed anywhere in the rig (Task 7).
+##  10. The epsilon boundary — satisfaction EXACTLY POWER_EPSILON stalls
+##      (the `<=` decision), one notch above it does not (Task 7).
+##  11. ceil() coverage — the rounding mode is asserted at satisfactions no
+##      integer supply/demand pair produces (Task 7).
+##  12. Stale-status + vestigial-fuel + rated-vs-effective display
+##      regressions (Task 7 items B / C / D).
 ##
 ## Sub-cases 5 and 6 are a PAIR and neither is sufficient alone: correct
 ## duration proves the arithmetic, strictly-increasing progress proves the
@@ -25,7 +36,10 @@ extends RefCounted
 ## stretched cycle that froze for four ticks and jumped on the fifth would
 ## satisfy sub-case 5 while feeling broken to the player.
 ##
-## STATE_NO_POWER (the below-epsilon cutoff) is Task 7, not here.
+## Sub-cases 8 and 9 are the same kind of pair. 8 proves the machine STOPS
+## correctly; 9 proves it can ever START again. 8 passes just as happily on
+## an inserter that is permanently frozen, which is the specific failure
+## mode Task 7 was most at risk of introducing — see 9's own header.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
@@ -142,8 +156,137 @@ const BROWNOUT_INC: float = 0.1
 const FULL_POWER_INC: float = 0.2
 const INC_TOLERANCE: float = 0.02
 
+# ---------------------------------------------------------------------------
+# Task 7 (STATE_NO_POWER) layout + expected numbers.
+# ---------------------------------------------------------------------------
+
+# Sub-case 8's stall window. 120 ticks is 24x the electric tier's 5-tick
+# cycle and comfortably past the 100-tick POWER_EPSILON worst case, so an
+# inserter that merely CRAWLED instead of stopping would have completed a
+# cycle and delivered inside it.
+const NO_POWER_STALL_TICKS: int = 120
+
+# Sub-case 9's outage length. Deliberately far past every plausible cycle:
+# the epsilon-floor worst case is 100 ticks, so 320 is over three full
+# worst-case cycles. Nothing about a correct implementation cares how long
+# the outage runs; the number is large so that a "it eventually times out
+# and recovers on its own" implementation cannot pass by accident.
+const FREEZE_TICKS: int = 320
+
+# Ticks allowed for the post-restoration delivery in sub-case 9. The resume
+# lands mid-swing (the arm kept its item and its progress), so the first
+# delivery arrives within a few ticks; 40 is a wide margin that still
+# reports -1 promptly rather than hanging.
+const RESUME_WATCH_TICKS: int = 40
+
+# Powered ticks run BEFORE the outage in sub-case 9, so that the outage is
+# taken MID-SWING rather than at the cycle boundary. Derived, then VERIFIED
+# by the sub-case itself rather than trusted:
+#   tick 1   STATE_IDLE      -> pickup, cycle_progress = 0.0, WORKING_OUT
+#   tick 2   WORKING_OUT     -> progress 0.0 + 1/5 = 0.2
+#   tick 3   WORKING_OUT     -> progress 0.4
+#   tick 4   progress would reach 0.6, clamps to 0.5, and DROPS
+# So 3 is the last tick that leaves the arm strictly between "just picked
+# up" and "already delivered". Observed value: 0.4.
+#
+# The assertion checks the BAND (0.0, 0.5), not the exact 0.4: what this
+# sub-case needs is that progress is nonzero, and pinning the number would
+# duplicate sub-case 5's timing assertion for no extra coverage.
+const PRE_OUTAGE_TICKS: int = 3
+
+# WHEAT seeded into the source chest by _build_powered_world(stocked=true).
+# Named because sub-case 9's conservation assertion counts against it — the
+# helper and the expectation must not be able to drift apart.
+const SEEDED_WHEAT: int = 3
+
+# --- Sub-case 10: a network sitting EXACTLY on POWER_EPSILON. -------------
+#
+# Integer supply over integer demand cannot land on 0.05 at any sane scale:
+# the smallest generator supplies 6 (Windmill.MAX_OUTPUT), so 6/120 needs
+# 115 ballast lamps and about fifteen poles. An ACCUMULATOR gets there in
+# three buildings, because accumulator discharge is the one FLOAT term in
+# PowerNetwork's supply arithmetic (power_network.gd Stage 2/3):
+#
+#   raw_supply      0     (no generator in this world at all)
+#   demand          5     (the inserter, and nothing else)
+#   deficit         5     -> the single accumulator discharges
+#   discharged      min(deficit 5.0, MAX_DISCHARGE_RATE 5, charge 0.25) = 0.25
+#   satisfaction    0.25 / 5 = 0.05   ← exactly POWER_EPSILON
+#
+# 0.25 and 5 are both exactly representable, and IEEE division is correctly
+# rounded, so the quotient is the same double as the literal 0.05 — the
+# assertion below can and does use exact equality.
+#
+# The accumulator must be CARDINALLY adjacent to the pole (accumulators use
+# _adjacent_component_id, not the consumer supply radius). (8,8) touches the
+# pole at (9,8) and is inside the stone patch. There is no windmill in this
+# world, so the windmill's usual footprint cells are free.
+const EPS_ACC_POS: Vector2i = Vector2i(8, 8)
+
+# Charge that lands satisfaction exactly ON the epsilon boundary, and the
+# charge that lands it just above. 0.30 / 5 = 0.06 = 1.2x epsilon — close
+# enough that the pair pins the comparison as `<=` rather than `<`, and far
+# enough that no rounding argument is needed to tell them apart.
+const EPS_CHARGE_AT: float = 0.25
+const EPS_CHARGE_ABOVE: float = 0.30
+
+# --- Sub-case 11: satisfactions no real network can produce. -------------
+# [satisfaction, expected effective ticks] for the electric tier's 5-tick
+# rating. Two of the rows discriminate a rounding mode; the other three pin
+# claims made in prose elsewhere:
+#
+#   1.00 ->   5   integral control. All three modes agree.
+#   0.30 ->  17   5/0.3 = 16.67. ceil 17, round 17, FLOOR 16.   ← discriminates
+#   0.45 ->  12   5/0.45 = 11.11. ceil 12, ROUND 11, FLOOR 11.  ← discriminates
+#   0.05 -> 100   POWER_EPSILON's documented worst case, asserted rather than
+#                 assumed. (5.0 / 0.05 lands on exactly 100.0 in doubles, so
+#                 this row does NOT tell the rounding modes apart — it pins
+#                 the number, which is a different job.)
+#   0.00 -> 100   the maxf(POWER_EPSILON, sat) divisor floor doing its one job:
+#                 without it this is a division by zero.
+#
+# The 0.45 row is the load-bearing one — it is the only row that separates
+# ceil from round. Both satisfactions this file can build from real buildings
+# are integral ratios (5/1.0 and 5/0.5), so before these rows ceil, round and
+# floor were literally indistinguishable, while POWER_EPSILON's docstring
+# staked its 100-tick worst-case claim on ceil. Verified to bite: with `ceil`
+# temporarily swapped for `floor`, the 0.30 and 0.45 rows fail (16 and 11).
+const CEIL_CASES: Array = [
+	[1.00, 5],
+	[0.30, 17],
+	[0.45, 12],
+	[0.05, 100],
+	[0.00, 100],
+]
+
+# --- Sub-case 12c: the rated-vs-effective cycle line. --------------------
+# At BROWNOUT_SAT the electric tier's 5-tick rating stretches to 10 ticks.
+# Q-inspect must report the 0.50s the arm ACTUALLY takes, and name the
+# 0.25s rating alongside it so the brownout is diagnosable rather than
+# mysterious. PAUSE 1 asks a human to confirm "visibly slower" against
+# exactly this text, so a line that still claimed 0.25s would turn a
+# correct implementation into a failed gate.
+const BROWNOUT_CYCLE_TEXT: String = "0.50s"
+const RATED_CYCLE_TEXT: String = "rated 0.25s"
+
+## Duck-typed stand-in for GridWorld that reports a satisfaction of the
+## test's choosing. `world` is untyped all the way through PowerNetwork and
+## Inserter (see power_network.gd's "world is intentionally untyped" note),
+## and effective_cycle_ticks calls exactly one method on it, so a two-line
+## RefCounted is a complete implementation of the interface under test.
+##
+## Used ONLY for pure arithmetic. Anything about behaviour is asserted
+## against a real GridWorld with real poles, because a stub cannot tell you
+## whether the machine is wired to the network correctly.
+class StubPowerWorld extends RefCounted:
+	var sat: float = 1.0
+	func _init(s: float) -> void:
+		sat = s
+	func power_satisfaction_at(_pos: Vector2i) -> float:
+		return sat
+
 static func test_name() -> String:
-	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling)"
+	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling + STATE_NO_POWER)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -155,9 +298,14 @@ static func run(parent: Node) -> Dictionary:
 	_case_brownout_duration(parent, failures)
 	_case_brownout_smooth_progress(parent, failures)
 	_case_fuel_tier_unaffected(parent, failures)
+	_case_no_power_stall_and_hold(parent, failures)
+	_case_no_power_resumes_after_long_outage(parent, failures)
+	_case_epsilon_boundary(parent, failures)
+	_case_ceil_rounding(parent, failures)
+	_case_status_and_display_regressions(parent, failures)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "7 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected" }
+		return { "ok": true, "message": "12 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected + no-power stall/hold + resume after long outage + epsilon boundary + ceil rounding + status/display regressions" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -568,6 +716,337 @@ static func _case_fuel_tier_unaffected(parent: Node, failures: Array) -> void:
 			% [DELIVERY_TICK_BASIC_BURNER, got, DELIVERY_WATCH_TICKS])
 	_disconnect(world); world.queue_free()
 
+# ===========================================================================
+# (8) NO POWER — STALLS AND HOLDS.
+# The electric-tier counterpart of the Session 4 Task 2 fuel-outage fix. An
+# inserter whose network dies mid-swing must: park in STATE_NO_POWER, KEEP
+# the item already in its hand, and deliver nothing at all until power comes
+# back.
+#
+# "Delivers nothing" is asserted over a long window on purpose. Before Task 7
+# an unpowered electric inserter did not stop — it crawled at the
+# POWER_EPSILON floor of 100 ticks per cycle. A short window cannot tell a
+# stall from a crawl; NO_POWER_STALL_TICKS is longer than that worst case, so
+# a crawling implementation delivers inside it and fails here.
+#
+# The outage is produced by REMOVING THE POLE rather than by poking state:
+# that is the move a player actually makes, and it exercises the real
+# supply-area lookup (no pole within SUPPLY_RADIUS -> satisfaction 0.0)
+# instead of a value the test invented.
+# ===========================================================================
+static func _case_no_power_stall_and_hold(parent: Node, failures: Array) -> void:
+	var world = _build_powered_world(parent, true, failures, "(8)")
+	if world == null:
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(8) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	_verified_satisfaction(world, failures, "(8)", FULL_POWER_SAT, ELECTRIC_DEMAND)
+
+	# One powered tick puts an item in the hand (pickup lands on tick 1), so
+	# the outage below is taken WITH something to lose — which is the point.
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	var held_before: int = Inserter.held_item_type(ins)
+	_check(failures, held_before >= 0,
+		"(8) SETUP: the inserter should be holding an item after one powered tick, held %d — without an item in hand the conservation assertions below are vacuous" % held_before)
+
+	_check(failures, world.remove_building_at(POLE_POS),
+		"(8) SETUP: removing the pole at %s should succeed" % str(POLE_POS))
+
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	var state_1: int = int(ins.state.get("state", -1))
+	_check(failures, state_1 == Inserter.STATE_NO_POWER,
+		"(8) the first unpowered tick should park the inserter in STATE_NO_POWER (%d), got %d" % [Inserter.STATE_NO_POWER, state_1])
+	_check(failures, Inserter.held_item_type(ins) == held_before,
+		"(8) the outage tick must return BEFORE touching held_item_buffer: held %d before the outage, %d after" % [held_before, Inserter.held_item_type(ins)])
+
+	for _i in NO_POWER_STALL_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	var state_n: int = int(ins.state.get("state", -1))
+	_check(failures, state_n == Inserter.STATE_NO_POWER,
+		"(8) after %d unpowered ticks the state should still be STATE_NO_POWER (%d), got %d" % [NO_POWER_STALL_TICKS, Inserter.STATE_NO_POWER, state_n])
+	_check(failures, Inserter.held_item_type(ins) == held_before,
+		"(8) after %d unpowered ticks the held item should still be %d, got %d — the item must survive the whole outage, not just its first tick" % [NO_POWER_STALL_TICKS, held_before, Inserter.held_item_type(ins)])
+	var dst: Building = world.building_at(Inserter.dest_tile(ins))
+	var delivered: int = _bag_count(dst.state.get("bag", []), Items.Type.WHEAT)
+	_check(failures, delivered == 0,
+		"(8) an unpowered inserter must deliver NOTHING across %d ticks, delivered %d (a crawl at the %d-tick POWER_EPSILON floor would finish a cycle inside this window)"
+			% [NO_POWER_STALL_TICKS, delivered, 100])
+	_disconnect(world); world.queue_free()
+
+# ===========================================================================
+# (9) THE FREEZE TEST — RESUME AFTER A LONG MID-SWING OUTAGE.
+# This sub-case enforces the whole "extend, don't add" rule for
+# STATE_NO_POWER's place in tick()'s `match`. There are TWO wrong ways to
+# spend that state and BOTH are silent, so there are two assertions:
+#
+#   UNNAMED  -> caught by the DELIVERY assertion.
+#     tick()'s `match s:` has no `_:` default arm and nothing outside the
+#     arms writes b.state["state"], so a NO_POWER value named in no arm
+#     header matches nothing: tick() becomes a permanent no-op, the state
+#     never changes again, and the machine stays frozen FOREVER — through
+#     power restoration, through any number of ticks, with no error and no
+#     visible difference from "still out of power".
+#
+#   OWN ARM  -> caught by the CONSERVATION assertion.
+#     Only the STATE_IDLE/NO_FUEL/NO_POWER arm carries the Task 2 resume
+#     guard, so an own arm re-creates the item-destruction bug: the item
+#     held through the outage is overwritten by a fresh pickup out of the
+#     source chest, and the inserter still DELIVERS on schedule. The
+#     delivery assertion passes on it. The wheat total does not.
+#
+# Sub-case 8 catches neither: a permanently frozen inserter also holds its
+# item and delivers nothing, and the stall arm never executes during an
+# outage at all because tick() returns at the power check first.
+#
+# The outage is taken MID-SWING — PRE_OUTAGE_TICKS powered ticks first — so
+# that cycle_progress is nonzero when power dies. That is the only way to
+# test the swing-position half of what the NO_POWER write promises; an
+# outage at the cycle boundary leaves progress at 0.0, where "preserved" and
+# "reset" are the same number.
+#
+# Delivery is asserted, never a state change: a state change could be
+# produced by an arm that transitions and then stalls somewhere else.
+# ===========================================================================
+static func _case_no_power_resumes_after_long_outage(parent: Node, failures: Array) -> void:
+	var world = _build_powered_world(parent, true, failures, "(9)")
+	if world == null:
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(9) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	_verified_satisfaction(world, failures, "(9)", FULL_POWER_SAT, ELECTRIC_DEMAND)
+
+	# Run PRE_OUTAGE_TICKS powered ticks, so the outage is taken genuinely
+	# MID-SWING: an item in hand AND cycle_progress strictly between the
+	# pickup and the drop. Reached by TICKING to the state rather than by
+	# poking it, the same way test_inserter_fuel_conservation.gd reaches its
+	# own outage.
+	for _i in PRE_OUTAGE_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	var held_before: int = Inserter.held_item_type(ins)
+	_check(failures, held_before >= 0,
+		"(9) SETUP: the inserter should be holding an item after %d powered ticks, held %d" % [PRE_OUTAGE_TICKS, held_before])
+	var progress_before: float = float(ins.state.get("cycle_progress", -1.0))
+	_check(failures, progress_before > 0.0 and progress_before < 0.5,
+		"(9) SETUP: the outage must be taken MID-SWING — cycle_progress after %d powered ticks should be strictly inside (0.0, 0.5), got %.6f. At 0.0 the swing-position half of the conservation claim goes untested (the IDLE arm sets progress to 0.0 on pickup, so a one-tick setup never leaves it) — at 0.5 or beyond the item has already been delivered"
+			% [PRE_OUTAGE_TICKS, progress_before])
+	var total_before: int = _rig_wheat_total(world, ins)
+	_check(failures, total_before == SEEDED_WHEAT,
+		"(9) SETUP: the rig should account for all %d seeded wheat (source chest + destination chest + the hand), counted %d — the conservation assertion below is only as good as this baseline" % [SEEDED_WHEAT, total_before])
+	_check(failures, world.remove_building_at(POLE_POS),
+		"(9) SETUP: removing the pole at %s should succeed" % str(POLE_POS))
+
+	for _i in FREEZE_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	var frozen_state: int = int(ins.state.get("state", -1))
+	_check(failures, frozen_state == Inserter.STATE_NO_POWER,
+		"(9) PREMISE: after %d unpowered ticks the inserter should be in STATE_NO_POWER (%d), got %d — the resume assertion below only means something if it was really stalled" % [FREEZE_TICKS, Inserter.STATE_NO_POWER, frozen_state])
+	var dst_mid: Building = world.building_at(Inserter.dest_tile(ins))
+	_check(failures, _bag_count(dst_mid.state.get("bag", []), Items.Type.WHEAT) == 0,
+		"(9) PREMISE: nothing should have been delivered during the %d-tick outage" % FREEZE_TICKS)
+	_check(failures, Inserter.held_item_type(ins) == held_before,
+		"(9) the item in hand must survive the whole outage: held %d before, %d after %d unpowered ticks" % [held_before, Inserter.held_item_type(ins), FREEZE_TICKS])
+
+	# SWING POSITION, not just the item. The stall write returns before
+	# cycle_progress is assigned, so the arm resumes the SAME swing rather
+	# than restarting it. Without this, an implementation that preserved the
+	# held item but reset progress to 0.0 would satisfy every other assertion
+	# in sub-cases 8 and 9 — the item would simply take a second trip.
+	var progress_after: float = float(ins.state.get("cycle_progress", -1.0))
+	_check(failures, is_equal_approx(progress_after, progress_before),
+		"(9) the outage must leave cycle_progress UNTOUCHED: %.6f before, %.6f after %d unpowered ticks. The NO_POWER write in tick() has to return BEFORE cycle_progress is assigned, exactly as the NO_FUEL write does"
+			% [progress_before, progress_after, FREEZE_TICKS])
+
+	# Power comes back.
+	_check(failures, world.place_building(Buildings.Type.POWER_POLE, POLE_POS),
+		"(9) SETUP: re-placing the pole at %s should succeed" % str(POLE_POS))
+	var resumed_tick: int = _first_delivery_tick(world, ins, RESUME_WATCH_TICKS)
+	_check(failures, resumed_tick > 0,
+		"(9) after power is restored the inserter MUST resume and DELIVER, got tick %d (-1 = never within %d ticks). -1 here almost certainly means STATE_NO_POWER is not named in any tick() match arm: that match has no `_:` default, so an unnamed state makes tick() a permanent no-op and the machine never recovers"
+			% [resumed_tick, RESUME_WATCH_TICKS])
+
+	# ITEM CONSERVATION — the OTHER half of the "extend, don't add" rule.
+	# The delivery assertion above catches an UNNAMED state; it does not
+	# catch NO_POWER being given its OWN arm, because an own arm without the
+	# resume guard destroys the held item, picks a fresh one out of the
+	# source chest, and delivers that instead. Same visible delivery, one
+	# item short.
+	var total_after: int = _rig_wheat_total(world, ins)
+	_check(failures, total_after == total_before,
+		"(9) ITEM CONSERVATION across the outage: %d wheat before, %d after (source chest + destination chest + the hand). A SHORTFALL here means the item held during the outage was destroyed and replaced by a fresh pickup — which is what happens when STATE_NO_POWER is given its OWN tick() arm instead of being added to the existing STATE_IDLE/STATE_NO_FUEL header, since only that arm carries the Task 2 resume guard"
+			% [total_before, total_after])
+	_disconnect(world); world.queue_free()
+
+# ===========================================================================
+# (10) THE EPSILON BOUNDARY.
+# The cutoff is `sat <= POWER_EPSILON`, not `<`. That choice is not
+# cosmetic: electric_lamp.gd draws its glow at `sat > 0.05`, so a lamp at
+# EXACTLY 0.05 is dark. Matching the comparison makes the two consumers agree
+# on the boundary, and a player watching the lamps die can read the exact
+# moment the inserters give up.
+#
+# A consequence worth stating: this makes effective_cycle_ticks'
+# maxf(POWER_EPSILON, sat) floor purely defensive. Anything at or below
+# epsilon now stalls outright, so the 100-tick worst case is unreachable
+# through tick() — only sub-case 11 can still observe it.
+#
+# Asserted from BOTH sides, because a one-sided boundary test cannot tell
+# `<=` from `<`. See EPS_ACC_POS for how a real network is made to land
+# exactly on 0.05 with three buildings.
+# ===========================================================================
+static func _case_epsilon_boundary(parent: Node, failures: Array) -> void:
+	# --- ON the boundary: must stall ---
+	var at_world = _build_epsilon_world(parent, EPS_CHARGE_AT, failures, "(10-at)")
+	if at_world == null:
+		return
+	var at_ins: Building = at_world.building_at(ELEC_INS_POS)
+	if at_ins == null:
+		_check(failures, false, "(10-at) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(at_world); at_world.queue_free()
+		return
+	var at_sat: float = _epsilon_rig_satisfaction(at_world, failures, "(10-at)")
+	_check(failures, at_sat == Inserter.POWER_EPSILON,
+		"(10) SETUP: the rig must sit EXACTLY on the boundary — satisfaction should equal POWER_EPSILON (%.17f), got %.17f. A boundary test built on an unverified value proves nothing" % [Inserter.POWER_EPSILON, at_sat])
+	# Ticked DIRECTLY rather than through TickSystem: the network pre-pass
+	# drains the accumulator, so a signal-driven tick would spend the charge
+	# and measure the tick AFTER the boundary instead of the one on it.
+	Inserter.tick(at_ins, at_world)
+	var at_state: int = int(at_ins.state.get("state", -1))
+	_check(failures, at_state == Inserter.STATE_NO_POWER,
+		"(10) at satisfaction EXACTLY POWER_EPSILON (%.6f) the inserter must stall — the cutoff is `sat <= POWER_EPSILON`, matching electric_lamp.gd's `sat > 0.05` for lit. Expected STATE_NO_POWER (%d), got %d"
+			% [at_sat, Inserter.STATE_NO_POWER, at_state])
+	_disconnect(at_world); at_world.queue_free()
+
+	# --- one notch ABOVE: must NOT stall ---
+	var up_world = _build_epsilon_world(parent, EPS_CHARGE_ABOVE, failures, "(10-above)")
+	if up_world == null:
+		return
+	var up_ins: Building = up_world.building_at(ELEC_INS_POS)
+	if up_ins == null:
+		_check(failures, false, "(10-above) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(up_world); up_world.queue_free()
+		return
+	var up_sat: float = _epsilon_rig_satisfaction(up_world, failures, "(10-above)")
+	_check(failures, up_sat > Inserter.POWER_EPSILON,
+		"(10) SETUP: the above-boundary rig should report a satisfaction strictly above POWER_EPSILON (%.6f), got %.6f" % [Inserter.POWER_EPSILON, up_sat])
+	Inserter.tick(up_ins, up_world)
+	var up_state: int = int(up_ins.state.get("state", -1))
+	_check(failures, up_state != Inserter.STATE_NO_POWER,
+		"(10) at satisfaction %.6f — ABOVE POWER_EPSILON — the inserter must keep running (crawling, not stalling), got STATE_NO_POWER. A `<` boundary would be off by one notch in the other direction" % up_sat)
+	_disconnect(up_world); up_world.queue_free()
+
+# ===========================================================================
+# (11) ceil() COVERAGE — THE ROUNDING MODE ITSELF.
+# Gap found reviewing Task 6: both satisfactions this file could build from
+# real buildings are integral ratios (5/1.0 = 5, 5/0.5 = 10), so ceil, round
+# and floor were literally indistinguishable — while POWER_EPSILON's
+# docstring stakes its 100-tick worst-case claim on ceil.
+#
+# `world` is duck-typed all the way down, so a stub closes the gap with no
+# world at all. Pure arithmetic, no placement, no ticking: this sub-case is
+# about the formula, and every behavioural claim in this file is still made
+# against a real GridWorld.
+# ===========================================================================
+static func _case_ceil_rounding(_parent: Node, failures: Array) -> void:
+	var b: Building = Inserter.make(Vector2i(0, 0), Belt.DIR_E, Buildings.Type.ELECTRIC_INSERTER)
+	for row in CEIL_CASES:
+		var sat: float = float(row[0])
+		var want: int = int(row[1])
+		var stub := StubPowerWorld.new(sat)
+		var got: int = Inserter.effective_cycle_ticks(b, stub)
+		_check(failures, got == want,
+			"(11) effective_cycle_ticks at satisfaction %.2f should be %d (ceil(%d / max(%.2f, %.2f))), got %d — floor or round would land on a different number here, which is the whole point of this row"
+				% [sat, want, Inserter.cycle_ticks(b), Inserter.POWER_EPSILON, sat, got])
+
+# ===========================================================================
+# (12) STATUS + DISPLAY REGRESSIONS (Task 7 items B, C, D).
+# Three warts opened up by the same pass, each with its own player-visible
+# symptom:
+#
+#   B  stale status. tick()'s IDLE/stall arm wrote b.state["state"] only
+#      inside `if picked >= 0:`, so a machine that recovered but found its
+#      source empty went on reporting the stall it recovered FROM, forever.
+#   C  vestigial fuel. Inserter.make copies Burner state onto every tier and
+#      info_lines appended Burner.info_lines unconditionally, so a healthy
+#      ELECTRIC inserter — a tier with no fuel slot at all — reported
+#      "Fuel: 0 / 16 units" and "Status: NO FUEL".
+#   D  rated-vs-effective cycle. info_lines reported cycle_ticks(b), the
+#      tier's RATING. Under brownout it claimed 0.25s while the arm took
+#      0.50s. PAUSE 1 asks a human to confirm the slowdown against this
+#      text, so the wart would have turned a correct implementation into a
+#      failed gate.
+# ===========================================================================
+static func _case_status_and_display_regressions(parent: Node, failures: Array) -> void:
+	# --- 12a (B): recovered + empty source must read IDLE, not the stall ---
+	# Source chest deliberately EMPTY: the recovery tick therefore takes the
+	# `picked < 0` path, which is the exact path that used to write nothing.
+	var world = _build_powered_world(parent, false, failures, "(12a)")
+	if world == null:
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(12a) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	_check(failures, world.remove_building_at(POLE_POS),
+		"(12a) SETUP: removing the pole at %s should succeed" % str(POLE_POS))
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	_check(failures, int(ins.state.get("state", -1)) == Inserter.STATE_NO_POWER,
+		"(12a) PREMISE: the unpowered inserter should be in STATE_NO_POWER (%d), got %d" % [Inserter.STATE_NO_POWER, int(ins.state.get("state", -1))])
+	_check(failures, world.place_building(Buildings.Type.POWER_POLE, POLE_POS),
+		"(12a) SETUP: re-placing the pole at %s should succeed" % str(POLE_POS))
+	TickSystem.current_tick += 1
+	TickSystem.tick.emit(TickSystem.current_tick)
+	var recovered: int = int(ins.state.get("state", -1))
+	_check(failures, recovered == Inserter.STATE_IDLE,
+		"(12a) a repowered inserter with an EMPTY source must report STATE_IDLE (%d), got %d — %d would mean the stall state is stale, written once and never cleared because the arm only assigns inside `if picked >= 0:`"
+			% [Inserter.STATE_IDLE, recovered, Inserter.STATE_NO_POWER])
+
+	# --- 12b (C): no fuel display on a tier that has no fuel slot ---
+	var lines: Array = Inserter.info_lines(ins, world)
+	var fuel_line: String = ""
+	for line in lines:
+		var text: String = str(line)
+		if text.begins_with("Fuel:") or text.contains("NO FUEL"):
+			fuel_line = text
+			break
+	_check(failures, fuel_line == "",
+		"(12b) a healthy ELECTRIC inserter must show no fuel information at all — the tier has no fuel slot, and Inserter.make copies Burner state onto every tier so fuel_buffer is permanently 0. Found: \"%s\" in %s" % [fuel_line, str(lines)])
+	_disconnect(world); world.queue_free()
+
+	# --- 12c (D): the cycle line reports EFFECTIVE, and names the rating ---
+	var bw = _build_brownout_world(parent, failures, "(12c)")
+	if bw == null:
+		return
+	var bins: Building = bw.building_at(ELEC_INS_POS)
+	if bins == null:
+		_check(failures, false, "(12c) SETUP: no electric inserter at %s in the brownout world" % str(ELEC_INS_POS))
+		_disconnect(bw); bw.queue_free()
+		return
+	_verified_satisfaction(bw, failures, "(12c)", BROWNOUT_SAT, BROWNOUT_DEMAND)
+	var blines: Array = Inserter.info_lines(bins, bw)
+	var cycle_line: String = ""
+	for line in blines:
+		if str(line).begins_with("Cycle:"):
+			cycle_line = str(line)
+			break
+	_check(failures, cycle_line.contains(BROWNOUT_CYCLE_TEXT),
+		"(12c) under brownout the Cycle line must report the EFFECTIVE %s the arm actually takes, got \"%s\"" % [BROWNOUT_CYCLE_TEXT, cycle_line])
+	_check(failures, cycle_line.contains(RATED_CYCLE_TEXT),
+		"(12c) the Cycle line must also name the tier's rating (\"%s\") so the brownout is diagnosable rather than mysterious, got \"%s\"" % [RATED_CYCLE_TEXT, cycle_line])
+	_disconnect(bw); bw.queue_free()
+
 # ---------- helpers (house style, copied from test_inserter.gd) ----------
 
 ## Place an electric inserter at `pos` facing east, with chests on its
@@ -618,7 +1097,7 @@ static func _build_powered_world(parent: Node, stocked: bool, failures: Array, l
 		return null
 	if stocked:
 		var src_chest: Building = world.building_at(Inserter.source_tile(ins))
-		src_chest.state["bag"] = [[Items.Type.WHEAT, 3]]
+		src_chest.state["bag"] = [[Items.Type.WHEAT, SEEDED_WHEAT]]
 	return world
 
 ## _build_powered_world plus the ballast that halves satisfaction: a second
@@ -639,6 +1118,55 @@ static func _build_brownout_world(parent: Node, failures: Array, label: String):
 			_disconnect(world); world.queue_free()
 			return null
 	return world
+
+## Pole + accumulator + electric inserter + chests, and NO generator. The
+## accumulator's discharge is therefore the component's entire supply, which
+## is the only FLOAT term in PowerNetwork's arithmetic — see EPS_ACC_POS for
+## why that is the practical way to land on a non-integral satisfaction.
+## `charge` is poked straight into state (same trick sub-case 3b uses for
+## fuel); the rig is about the satisfaction it produces, not about how the
+## accumulator got charged. Returns the world, or null after a setup failure.
+static func _build_epsilon_world(parent: Node, charge: float, failures: Array, label: String):
+	var world = _make_world(parent)
+	if not world.place_building(Buildings.Type.POWER_POLE, POLE_POS):
+		_check(failures, false, "%s SETUP: power pole placement at %s failed" % [label, str(POLE_POS)])
+		_disconnect(world); world.queue_free()
+		return null
+	if not world.place_building(Buildings.Type.ACCUMULATOR, EPS_ACC_POS):
+		_check(failures, false, "%s SETUP: accumulator placement at %s failed" % [label, str(EPS_ACC_POS)])
+		_disconnect(world); world.queue_free()
+		return null
+	# Source chest left EMPTY on purpose: the above-boundary half of sub-case
+	# 10 then lands in STATE_IDLE, which is unambiguously "not stalled".
+	var ins: Building = _place_electric_with_chests(world, ELEC_INS_POS, failures, label)
+	if ins == null:
+		_disconnect(world); world.queue_free()
+		return null
+	var acc: Building = world.building_at(EPS_ACC_POS)
+	if acc == null:
+		_check(failures, false, "%s SETUP: building_at(%s) returned null after placing the accumulator" % [label, str(EPS_ACC_POS)])
+		_disconnect(world); world.queue_free()
+		return null
+	acc.state["charge"] = charge
+	return world
+
+## Recompute the epsilon rig's network and report its satisfaction, pinning
+## the premise (no raw supply, demand from the one inserter) so a layout
+## drift is diagnosed as a setup problem rather than as a mystifying state
+## assertion two lines later.
+##
+## NOTE: update_supply_demand DRAINS the accumulator it just discharged, so
+## this must be called exactly once per rig, and callers must tick the
+## inserter directly rather than through TickSystem afterwards.
+static func _epsilon_rig_satisfaction(world, failures: Array, label: String) -> float:
+	PowerNetwork.update_supply_demand(world)
+	var comp: int = PowerNetwork.network_id_at(world, POLE_POS)
+	if comp < 0:
+		_check(failures, false, "%s SETUP: pole at %s is not in a power network" % [label, str(POLE_POS)])
+		return -1.0
+	_check(failures, PowerNetwork.demand_for(world, comp) == ELECTRIC_DEMAND,
+		"%s SETUP: the only consumer should be the inserter (demand %d), got %d" % [label, ELECTRIC_DEMAND, PowerNetwork.demand_for(world, comp)])
+	return PowerNetwork.satisfaction_for(world, comp)
 
 ## Recompute the network and confirm it is the scenario the caller thinks it
 ## is BEFORE anything is timed against it. Returns the measured satisfaction
@@ -677,6 +1205,28 @@ static func _first_delivery_tick(world, ins: Building, max_ticks: int) -> int:
 		if _bag_count(dst.state.get("bag", []), Items.Type.WHEAT) > 0:
 			return i
 	return -1
+
+## Every WHEAT item anywhere in one inserter's rig: source chest, plus
+## destination chest, plus whatever the arm is holding. Held items live in
+## held_item_buffer with a count of 0 or 1, so held_item_type >= 0 is worth
+## exactly one item.
+##
+## Conservation across an outage is the assertion that separates "EXTENDED
+## the stall arm header" from "gave the stall its OWN arm". An own arm
+## without the resume guard destroys the item in hand, picks a FRESH one out
+## of the source chest, and still delivers — so a delivery-only assertion
+## passes on it, and the total does not.
+static func _rig_wheat_total(world, ins: Building) -> int:
+	var total: int = 0
+	var src: Building = world.building_at(Inserter.source_tile(ins))
+	if src != null:
+		total += _bag_count(src.state.get("bag", []), Items.Type.WHEAT)
+	var dst: Building = world.building_at(Inserter.dest_tile(ins))
+	if dst != null:
+		total += _bag_count(dst.state.get("bag", []), Items.Type.WHEAT)
+	if Inserter.held_item_type(ins) == Items.Type.WHEAT:
+		total += 1
+	return total
 
 ## Render a sampled cycle_progress sequence for a failure message. Full
 ## six-decimal precision on purpose — the point of printing the sequence is

@@ -15,19 +15,29 @@ extends RefCounted
 ## ahead, in `dir`), drops the item, swings back. Universal source/dest:
 ## belts, chests, and recipe-driven processor I/O ports.
 ##
-## Fuel-powered via Burner module. Cycle speed is FIXED per tier — fuel
+## Fuel-powered via Burner module (BURNER tiers only; the electric tier
+## draws from the power network instead). Cycle speed is FIXED per tier for
+## burner tiers — the electric tier stretches with satisfaction since Task 6.
+## For burner tiers, fuel
 ## tier (wood / coal / briquette) determines fuel ECONOMY (how often you
 ## need to refill), NOT speed. Reversal #7 from session-inserter-
 ## foundation PAUSE 1: tying speed to fuel tier conflated two orthogonal
 ## axes. Throughput upgrades come via building TYPE (basic → fast →
 ## electric), not via fuel choice.
 ##
-## State machine (5 phases):
+## State machine (6 phases):
 ##   IDLE              — arm at rest (source side); waiting for source/dest/fuel
 ##   WORKING_OUT       — arm interpolating source → destination, holding item
 ##   BLOCKED_AT_DEST   — arm at destination, holding item, drop blocked
 ##   WORKING_IN        — arm interpolating destination → source, returning empty
-##   NO_FUEL           — like IDLE but explicit "out of fuel"
+##   NO_FUEL           — like IDLE but explicit "out of fuel"   (burner tiers)
+##   NO_POWER          — like IDLE but explicit "out of power"  (electric tiers)
+##
+## NO_FUEL and NO_POWER are HOLDING stalls: both are written before tick()
+## touches held_item_buffer or cycle_progress, so an outage taken mid-swing
+## keeps the item in hand and resumes the same delivery afterwards. Both are
+## named in the IDLE arm of tick()'s state machine — see the resume-guard
+## comment there for why a stall must never get an arm of its own.
 ##
 ## Architectural notes:
 ##   - cycle_progress (0.0..1.0) drives both phase transitions AND arm
@@ -46,6 +56,12 @@ const STATE_WORKING_OUT: int     = 1
 const STATE_BLOCKED_AT_DEST: int = 2
 const STATE_WORKING_IN: int      = 3
 const STATE_NO_FUEL: int         = 4
+# NO POWER — the electric-tier counterpart of NO_FUEL (Session 4 Task 7).
+# Entered when network satisfaction is at or below POWER_EPSILON. Like
+# NO_FUEL it is a HOLDING stall: the tick() write returns before touching
+# held_item_buffer / cycle_progress, so the item in hand and the swing
+# position both survive the outage. Burner tiers can never reach it.
+const STATE_NO_POWER: int        = 5
 
 # Per-tier cycle duration (ticks @ 20 TPS). Add a row when a new inserter
 # tier ships; tick logic reads via `cycle_ticks(b)` lookup. Default
@@ -175,6 +191,18 @@ const PIVOT_COLOR: Color = Color(0.30, 0.25, 0.18)
 const TINT_IDLE: Color = Color(0.60, 0.60, 0.60)        # dim when idle / no_fuel
 const TINT_NO_FUEL: Color = Color(0.55, 0.55, 0.85)     # cool blue tint
 const TINT_BLOCKED: Color = Color(1.0, 0.95, 0.40)      # yellow when blocked
+# NO POWER (electric tiers only — a burner can never reach this state).
+# Deliberately NOT a variant of TINT_NO_FUEL's cool blue: the two stalls have
+# different causes and different fixes, so they must be tellable apart at a
+# glance on the map rather than only in the panel.
+#
+# Warm and red-weighted, which matters because these tints MULTIPLY the body
+# colour. Against the electric tier's cyan (0.25, 0.75, 0.80) it lands on a
+# flat dark grey — the machine reads as switched off, the same "the lights
+# went out" cue ELECTRIC_LAMP gives, at the same POWER_EPSILON threshold.
+# TINT_IDLE leaves the body recognisably cyan and TINT_NO_FUEL pushes it
+# blue, so all three remain distinct.
+const TINT_NO_POWER: Color = Color(0.85, 0.30, 0.25)
 
 ## Cycle ticks for this inserter's tier. Public API — also called by
 ## InserterPanel / FastInserterPanel for "Cycle: Xs" displays.
@@ -272,12 +300,10 @@ static func tick(b: Building, world) -> void:
 	# could never satisfy the fuel check below and would park in
 	# STATE_NO_FUEL forever. Skip the whole fuel path for them (both the
 	# pull attempt here and the consume_tick calls in the state arms), and
-	# let the state machine run unconditionally. The power CONSEQUENCE lives
-	# further down, in the `ticks` computation: since Task 6 an electric
-	# inserter's cycle STRETCHES with network satisfaction (see
-	# effective_cycle_ticks). STATE_NO_POWER — the hard cutoff below
-	# POWER_EPSILON — is still Task 7; until then a starved inserter crawls
-	# at the 100-tick worst case rather than stopping.
+	# let the state machine run unconditionally. Electric tiers get their OWN
+	# supply check instead, immediately below: a soft one (Task 6 — the cycle
+	# STRETCHES with network satisfaction, see effective_cycle_ticks) and a
+	# hard one (Task 7 — at or below POWER_EPSILON the machine stops).
 	var electric: bool = is_electric(b)
 	# (1 + 2) Fuel check + pull. Restricted to FUEL_PORT_DIR (rotated by
 	# building dir) — see constant docstring for the source-tile-as-fuel
@@ -288,6 +314,37 @@ static func tick(b: Building, world) -> void:
 			if not Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR)):
 				b.state["state"] = STATE_NO_FUEL
 				return
+	else:
+		# (1' + 2') POWER check — the electric-tier mirror of the fuel check
+		# above, and deliberately the SAME SHAPE. Writing the stall state and
+		# returning BEFORE anything touches held_item_buffer or cycle_progress
+		# is the load-bearing part: the item in hand and the swing position
+		# both survive the outage, so the resume guard in the
+		# STATE_IDLE/NO_FUEL/NO_POWER arm below can pick the interrupted
+		# delivery back up when power returns. That is the Session 4 Task 2
+		# item-conservation fix applying to outages as well as to fuel.
+		#
+		# `sat <= POWER_EPSILON`, NOT `<`. electric_lamp.gd lights its glow at
+		# `sat > 0.05`, so a lamp at exactly 0.05 is dark; matching the
+		# comparison makes the two consumers agree on the boundary, and a
+		# player watching lamps die can read the exact moment their inserters
+		# give up. POWER_EPSILON's docstring records the shared-threshold
+		# intent from the other end.
+		#
+		# CONSEQUENCE worth knowing: this makes effective_cycle_ticks'
+		# maxf(POWER_EPSILON, sat) divisor floor purely DEFENSIVE. Anything at
+		# or below epsilon now stalls here instead of crawling, so the 100-tick
+		# worst case that floor caps is no longer reachable through tick() —
+		# only through a direct effective_cycle_ticks call.
+		#
+		# The satisfaction lookup happens twice on a powered tick (here and
+		# inside effective_cycle_ticks below). Accepted deliberately: it is a
+		# dictionary read behind a small fixed scan, and the alternative —
+		# threading the value into effective_cycle_ticks — would cost that
+		# function the world-free purity InserterPanel depends on.
+		if world.power_satisfaction_at(b.anchor) <= POWER_EPSILON:
+			b.state["state"] = STATE_NO_POWER
+			return
 	# (3) State machine.
 	var s: int = int(b.state.get("state", STATE_IDLE))
 	# EFFECTIVE, not rated. For electric tiers this is cycle_ticks(b)
@@ -305,7 +362,7 @@ static func tick(b: Building, world) -> void:
 	var inc: float = 1.0 / float(ticks)
 
 	match s:
-		STATE_IDLE, STATE_NO_FUEL:
+		STATE_IDLE, STATE_NO_FUEL, STATE_NO_POWER:
 			# RESUME GUARD — item-conservation fix (Inserter Arc Session 4,
 			# audit findings #2 / #6).
 			#
@@ -320,15 +377,22 @@ static func tick(b: Building, world) -> void:
 			# destruction needs the refuel-tick _try_pickup to SUCCEED, so an
 			# empty source merely defers it until the next item arrives.
 			#
-			# FORWARD-COMPAT (Task 7 / STATE_NO_POWER): any future stall state
-			# that holds its item must be added to THIS arm header, never given
-			# an arm of its own — a separate arm re-creates the destruction bug,
+			# STATE_NO_POWER joined this header at Task 7 for exactly that
+			# reason, and the rule generalises: any future stall state that
+			# holds its item must be added to THIS arm header, never given an
+			# arm of its own — a separate arm re-creates the destruction bug,
 			# and NO arm at all freezes the machine permanently, because this
 			# match has no `_:` default and nothing outside the arms writes
-			# b.state["state"]. Note this "extend, don't add" rule is specific
-			# to the two multi-state arms (here and draw()'s arm-angle match);
-			# info_lines and the draw tint DO want their own NO_POWER entries,
-			# since that state needs distinct text and colour.
+			# b.state["state"]. (Unnamed is the worse of the two: it is silent,
+			# and it survives power being restored. test_electric_inserter.gd
+			# sub-case 9 is the tripwire.) Note this "extend, don't add" rule is
+			# specific to the two multi-state arms (here and draw()'s arm-angle
+			# match); info_lines and the draw tint DO have their own NO_POWER
+			# entries, since that state needs distinct text and colour.
+			#
+			# Do NOT hoist the guard above the match: held_item_type(b) >= 0 is
+			# also true in WORKING_OUT and BLOCKED_AT_DEST, so a hoisted guard
+			# would fire every tick, return, and livelock the machine.
 			#
 			# A full hand means there is an interrupted DELIVERY to resume, not
 			# a new pickup to start. Deliberately progress-INDEPENDENT: the
@@ -361,6 +425,20 @@ static func tick(b: Building, world) -> void:
 				# only — an electric tier has no fuel buffer to burn.
 				if not electric:
 					Burner.consume_tick(b, ticks)
+			else:
+				# STALE-STATUS FIX (Session 4 Task 7, item B). Until this
+				# `else` existed, b.state["state"] was written ONLY on the
+				# successful-pickup path, so a machine that reached this arm
+				# from a stall and found its source empty kept reporting the
+				# stall it had already recovered FROM — a refuelled inserter
+				# stuck on "NO FUEL", a repowered one stuck on "NO POWER",
+				# indefinitely, with the player's actual fix already applied.
+				#
+				# Safe for burner tiers: an unfuelled one never reaches this
+				# arm at all (the fuel check at the top of tick() writes
+				# NO_FUEL and returns), so anything standing here is supplied
+				# and genuinely idle. Same reasoning for power.
+				b.state["state"] = STATE_IDLE
 		STATE_WORKING_OUT:
 			# Advance toward destination. cycle_progress 0 → 0.5.
 			var p: float = float(b.state.get("cycle_progress", 0.0)) + inc
@@ -674,16 +752,41 @@ static func info_lines(b: Building, world) -> Array:
 			status = "Working (returning)"
 		STATE_NO_FUEL:
 			status = "NO FUEL — feed wood, coal, or fuel briquette"
+		STATE_NO_POWER:
+			# Its OWN entry, not folded into the NO_FUEL arm: the two stalls
+			# have different fixes, and the whole value of the line is telling
+			# the player WHICH one they are looking at. The remedy names the
+			# supply rule literally — PowerNetwork.SUPPLY_RADIUS is 1, so a
+			# pole anywhere in the 3x3 around the inserter powers it.
+			status = "NO POWER — connect a pole within 1 tile"
 	lines.append("Status: %s" % status)
 	# Held item.
 	var held: int = held_item_type(b)
 	if held >= 0:
 		lines.append("Holding: %s" % Items.name_of(held))
-	# Cycle.
+	# Cycle — EFFECTIVE, with the tier's rating named alongside it when the
+	# two differ. Before Task 7 this line reported cycle_ticks(b) alone, so a
+	# browned-out electric inserter insisted it ran at 0.25s while its arm
+	# visibly took 0.50s. Showing both makes the brownout self-diagnosing:
+	# "slower than rated" is the symptom, and the panel says so.
+	#
+	# Two decimals, not one: the electric tier's rating is 0.25s, which %.1f
+	# renders as the wrong number ("0.3s").
+	#
+	# world may be null (info_lines' own signature allows it, and the
+	# source/destination block below already guards for it), in which case
+	# there is nothing to scale by and the rating is the honest answer.
 	var cycle_progress: float = float(b.state.get("cycle_progress", 0.0))
-	lines.append("Cycle: %.0f%% (%.1fs per cycle)" % [cycle_progress * 100.0, float(cycle_ticks(b)) / 20.0])
-	# Filter (fast/electric tier only — basic doesn't surface this line).
-	if b.type == Buildings.Type.FAST_INSERTER:
+	var rated_ticks: int = cycle_ticks(b)
+	var eff_ticks: int = rated_ticks if world == null else effective_cycle_ticks(b, world)
+	if eff_ticks == rated_ticks:
+		lines.append("Cycle: %.0f%% (%.2fs per cycle)" % [cycle_progress * 100.0, float(rated_ticks) / 20.0])
+	else:
+		lines.append("Cycle: %.0f%% (%.2fs per cycle, rated %.2fs)"
+			% [cycle_progress * 100.0, float(eff_ticks) / 20.0, float(rated_ticks) / 20.0])
+	# Filter (fast + electric tiers — basic and long-reach have no filter
+	# slot, so the line would always read "(none)" for them).
+	if b.type == Buildings.Type.FAST_INSERTER or is_electric(b):
 		var filter: int = int(b.state.get("filter_item_type", -1))
 		if filter >= 0:
 			lines.append("Filter: %s" % Items.name_of(filter))
@@ -695,9 +798,20 @@ static func info_lines(b: Building, world) -> Array:
 				lines.append("Status: IDLE (no items match filter)")
 		else:
 			lines.append("Filter: (none — picks any item)")
-	# Burner fuel display.
-	for line in Burner.info_lines(b):
-		lines.append(line)
+	# Burner fuel display — BURNER TIERS ONLY.
+	#
+	# Inserter.make copies Burner.make_state() onto EVERY tier, electric
+	# included, so an electric inserter carries a fuel_buffer that is
+	# permanently 0. Burner.info_lines emits "Status: NO FUEL — feed wood,
+	# coal, or fuel briquette" whenever the buffer is empty, so before this
+	# gate a perfectly healthy electric inserter reported a fuel problem it
+	# has no fuel slot to fix — directly contradicting the "Status:" line four
+	# lines above it. Gated on is_electric for the same one-source-of-truth
+	# reason tick() uses it: the tier list lives in POWER_DEMAND_BY_TYPE and
+	# nowhere else.
+	if not is_electric(b):
+		for line in Burner.info_lines(b):
+			lines.append(line)
 	# Source / destination summary.
 	if world != null:
 		var src: Vector2i = source_tile(b)
@@ -730,6 +844,12 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 			tint = TINT_IDLE
 		STATE_NO_FUEL:
 			tint = TINT_NO_FUEL
+		STATE_NO_POWER:
+			# Its OWN entry, not folded into the NO_FUEL arm: the two stalls
+			# need different colours. Contrast the arm-angle match below,
+			# which EXTENDS its NO_FUEL arm because both stalls park the arm
+			# in the same place.
+			tint = TINT_NO_POWER
 		STATE_BLOCKED_AT_DEST:
 			tint = TINT_BLOCKED
 	var base: Color = body_color(b)
@@ -744,14 +864,20 @@ static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size:
 	canvas.draw_arc(center, float(tile_size) * 0.12, 0.0, TAU, 16, BODY_DARK, 1.0)
 
 	# Arm angle. Canonical (dir=E):
-	#   IDLE / NO_FUEL: pointing toward source (180°, west) = PI radians
+	#   IDLE / NO_FUEL / NO_POWER: pointing toward source (180°, west) = PI
 	#   WORKING_OUT (cycle_progress 0..0.5): interpolates 180° → 0°
 	#   BLOCKED_AT_DEST: pointing toward destination (0°, east) = 0
 	#   WORKING_IN (cycle_progress 0.5..1.0): interpolates 0° → 180°
 	# Rotation by dir adds dir * 90° (PI/2) to the canonical angle.
 	var canonical_angle: float = PI   # default: pointing west (toward source)
 	match s:
-		STATE_IDLE, STATE_NO_FUEL:
+		STATE_IDLE, STATE_NO_FUEL, STATE_NO_POWER:
+			# NO_POWER EXTENDS this arm rather than getting its own: a stalled
+			# machine parks its arm at rest, which is what NO_FUEL already
+			# does, and an arm frozen halfway through a sweep would read as a
+			# rendering bug rather than as a stopped machine. The underlying
+			# cycle_progress is untouched by the stall, so the swing resumes
+			# from where it left off when power returns.
 			canonical_angle = PI
 		STATE_WORKING_OUT:
 			# 0..0.5 maps to PI..0 (linear).

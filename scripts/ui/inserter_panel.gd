@@ -17,7 +17,7 @@ extends BuildingPanel
 ##   ║                                       ║
 ##   ║   ┌──┐                                ║
 ##   ║   │██│  Fuel: 12 / 16 units           ║
-##   ║   └──┘  Cycle speed: 1.0s              ║
+##   ║   └──┘  Cycle speed: 1.00s             ║
 ##   ║                                       ║
 ##   ║   Facing: E (R to rotate)             ║
 ##   ║                                       ║
@@ -36,6 +36,12 @@ const BAR_FILL_BLOCKED: Color = Color(1.00, 0.85, 0.30, 1.0)        # yellow
 const COLOR_WORKING: Color = Color(0.85, 0.95, 0.65)
 const COLOR_BLOCKED: Color = Color(1.00, 0.85, 0.30)
 const COLOR_NO_FUEL: Color = Color(0.55, 0.70, 1.00)
+# NO POWER (electric tiers). Warm amber against COLOR_NO_FUEL's cool blue —
+# the two stalls have different causes and different fixes, so the status
+# line must distinguish them by colour as well as by text. Unlike the map
+# tints in inserter.gd these are drawn directly rather than multiplied into
+# a body colour, so an actual amber is available here.
+const COLOR_NO_POWER: Color = Color(1.00, 0.62, 0.25)
 const COLOR_IDLE: Color = Color(0.75, 0.75, 0.75)
 
 func _top_area_height() -> int:
@@ -110,6 +116,11 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 		Inserter.STATE_NO_FUEL:
 			status_text = "Status: NO FUEL"
 			status_color = COLOR_NO_FUEL
+		Inserter.STATE_NO_POWER:
+			# Its own entry, not folded into NO_FUEL: distinct text and
+			# distinct colour are the entire point of the line.
+			status_text = "Status: NO POWER"
+			status_color = COLOR_NO_POWER
 	draw_string(font, Vector2(label_x + 160, area.position.y + 30 + 16),
 		status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, status_color)
 
@@ -136,19 +147,45 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_COLOR)
 
 	# --- Fuel info next to fuel slot ---
+	# BURNER TIERS ONLY. Inserter.make copies Burner state onto every tier,
+	# so an electric inserter carries a permanently-zero fuel_buffer and this
+	# row used to report "Fuel: 0 / 16 units" on a tier with no fuel slot at
+	# all — the same wart Task 7 item C fixed in Inserter.info_lines. The
+	# cycle line moves up into the vacated row when it is skipped.
 	var fuel_y: float = area.position.y + 160 + 16
-	var fuel: int = int(building.state.get("fuel_buffer", 0))
-	draw_string(font, Vector2(label_x, fuel_y),
-		"Fuel: %d / %d units" % [fuel, Burner.FUEL_BUFFER_CAPACITY],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
-	# Cycle speed is fixed per tier (independent of fuel tier — see
-	# inserter.gd header for the reversal rationale). Fuel tier affects
-	# fuel ECONOMY (energy density: wood=1, coal=4, briquette=8 units
-	# per item). cycle_ticks(b) is the parametric lookup post-Session 2.
-	var cycle_seconds: float = float(Inserter.cycle_ticks(building)) / 20.0
-	draw_string(font, Vector2(label_x, fuel_y + 22),
-		"Cycle speed: %.1fs (fixed)" % cycle_seconds,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
+	var cycle_y: float = fuel_y
+	if not Inserter.is_electric(building):
+		var fuel: int = int(building.state.get("fuel_buffer", 0))
+		draw_string(font, Vector2(label_x, fuel_y),
+			"Fuel: %d / %d units" % [fuel, Burner.FUEL_BUFFER_CAPACITY],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
+		cycle_y = fuel_y + 22
+
+	# Cycle speed. Fixed per tier for BURNER tiers (independent of fuel tier
+	# — see inserter.gd header for the reversal rationale; fuel tier affects
+	# fuel ECONOMY, energy density wood=1 / coal=4 / briquette=8, not speed).
+	# NOT fixed for the electric tier: since Task 6 its cycle stretches with
+	# network satisfaction, which is why the old "(fixed)" label is gone — it
+	# became false for one tier, and PAUSE 1 asks a human to confirm the
+	# slowdown against exactly this text.
+	#
+	# So: report the EFFECTIVE cycle, and name the rating beside it when the
+	# two differ — which is precisely the case a player needs explained. Two
+	# decimals because the electric tier's 0.25s rating renders as the wrong
+	# number ("0.3s") under %.1f.
+	#
+	# effective_cycle_ticks needs a world; BuildingPanel.world is set in
+	# open() and cleared in close(), and _tile_summary below already treats
+	# null as reachable, so fall back to the rating rather than assuming.
+	var rated_ticks: int = Inserter.cycle_ticks(building)
+	var eff_ticks: int = rated_ticks
+	if world != null:
+		eff_ticks = Inserter.effective_cycle_ticks(building, world)
+	var cycle_text: String = "Cycle speed: %.2fs" % (float(eff_ticks) / 20.0)
+	if eff_ticks != rated_ticks:
+		cycle_text = "Cycle speed: %.2fs (rated %.2fs)" % [float(eff_ticks) / 20.0, float(rated_ticks) / 20.0]
+	draw_string(font, Vector2(label_x, cycle_y),
+		cycle_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
 
 	# --- Facing ---
 	# Anchored 40px from the bottom of the top area so subclasses with

@@ -670,9 +670,12 @@ const DATA: Dictionary = {
 		# network. Filter shape is copied verbatim from FAST_INSERTER (same
 		# 'filter' kind, same scalar state_field).
 		#
-		# NOTE (Task 3, registration only): Inserter.tick still runs the Burner
-		# fuel check, so a placed electric inserter parks in STATE_NO_FUEL until
-		# the power gating lands. That is expected at this stage, not a defect.
+		# The fuel path is skipped entirely for this tier since Task 5 —
+		# Inserter.tick branches on is_electric(b), derived from
+		# POWER_DEMAND_BY_TYPE membership, so an electric inserter never runs
+		# the Burner check and can never reach STATE_NO_FUEL. Its stall state
+		# is STATE_NO_POWER (Task 7), entered when network satisfaction is at
+		# or below Inserter.POWER_EPSILON.
 		"slot_layout": [
 			{
 				"id": "held_item", "kind": "output",
