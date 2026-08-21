@@ -29,6 +29,13 @@ extends RefCounted
 ##      integer supply/demand pair produces (Task 7).
 ##  12. Stale-status + vestigial-fuel + rated-vs-effective display
 ##      regressions (Task 7 items B / C / D).
+##  13. THE FILTER GATES PICKUP — the filtered type moves, the other type is
+##      never touched and never even held (Task 8).
+##  14. Panel filter UI against the TWO-slot electric layout: geometry,
+##      drop-to-set, right-click-to-clear (Task 8).
+##  15. Panel routing — main.gd sends this tier to FastInserterPanel (Task 8).
+##  16. Supply-area boundary — Chebyshev 1 runs, Chebyshev 2 stalls (Task 8).
+##  17. Save round-trip of a MID-SWING inserter with a filter set (Task 8).
 ##
 ## Sub-cases 5 and 6 are a PAIR and neither is sufficient alone: correct
 ## duration proves the arithmetic, strictly-increasing progress proves the
@@ -269,6 +276,71 @@ const CEIL_CASES: Array = [
 const BROWNOUT_CYCLE_TEXT: String = "0.50s"
 const RATED_CYCLE_TEXT: String = "rated 0.25s"
 
+# ---------------------------------------------------------------------------
+# Task 8 (panel wiring + the filter proven end to end) layout + numbers.
+# ---------------------------------------------------------------------------
+
+# Sub-case 13's source-chest stock. Two DIFFERENT counts so a mixed-up
+# assertion reads as the wrong number rather than as a coincidence, and the
+# DECOY is listed FIRST in the bag on purpose: _pickup_from_chest scans the
+# bag in order, so an inserter that ignored its filter reaches for the flax
+# on its very first cycle. A wheat-first bag would let a broken filter pass
+# three cycles in a row before it ever picked anything wrong.
+const FILTER_TARGET_COUNT: int = 3      # WHEAT — the filtered type
+const FILTER_DECOY_COUNT: int = 4       # FLAX  — must never be touched
+
+# Ticks for sub-case 13's transport run. Roughly 7 ticks per item at full
+# power (1 IDLE pickup tick + a 5-tick cycle + slop), so three wheat need
+# about 21. 60 is a wide margin that still ends with the arm idle and the
+# flax filtered out, rather than mid-swing.
+const FILTER_RUN_TICKS: int = 60
+
+# Sub-case 14 geometry. FILTER_ROW_Y is the filter slot's y-offset inside
+# the panel's top area (fast_inserter_panel.gd _slot_y_offsets), and
+# FACING_LINE_INSET is where InserterPanel anchors its facing line relative
+# to the BOTTOM of that area (inserter_panel.gd draws at area.size.y - 40).
+# Both are re-derived from the live panel in the assertions — named here so
+# the failure text can say what the numbers mean.
+const FILTER_ROW_Y: float = 240.0
+const FACING_LINE_INSET: float = 40.0
+
+# Cursor stack size for the drop-to-set test. Greater than 1 on purpose:
+# "the cursor is NOT consumed" is then a claim about the whole stack rather
+# than about a single item that could have been silently replaced.
+const DROP_FILTER_COUNT: int = 4
+
+# Sub-case 15: main.gd's panel dispatch, pinned by a static file scan.
+# Main._try_open_building_ui is an instance method on a node that needs the
+# whole scene tree (@onready panel refs, grid_world, player) to construct,
+# so the arm is read out of the source the same way test_building_ui_4.gd
+# reads the processor panels for its reuse audit. What this can and cannot
+# prove is spelled out in the sub-case header.
+const MAIN_SRC_PATH: String = "res://scripts/main.gd"
+const ROUTING_ARM_LABEL: String = "Buildings.Type.ELECTRIC_INSERTER:"
+const ROUTING_ARM_BODY: String = "fast_inserter_panel.open(b, grid_world)"
+
+# Sub-case 16: a SECOND electric inserter, one ring OUTSIDE the pole's
+# supply area. Chebyshev 2 from POLE_POS (9,8), inside the stone patch
+# painted by _make_world, and clear of every building _build_powered_world
+# places. Its own source/dest chests land at (10,10) and (12,10), also free.
+const FAR_INS_POS: Vector2i = Vector2i(11, 10)
+
+# Ticks for sub-case 16. Same budget as sub-case 13, so "the far one
+# delivered nothing" is a statement about a machine that had every chance.
+const SUPPLY_RUN_TICKS: int = 60
+
+# Sub-case 17. Distinct filename from test_inserter.gd's TEST_SAVE_PATH so
+# the two round-trip tests cannot collide if the runner order ever changes.
+const TEST_SAVE_PATH: String = "user://test_electric_inserter.json"
+
+# Tolerance for the round-tripped cycle_progress. JSON is TEXT: the float is
+# formatted on write and parsed back on read, and neither step is
+# contractually bit-exact, so an exact == would assert something SaveSystem
+# never promised. 1e-4 is three orders of magnitude tighter than the
+# electric tier's 0.2 per-tick step, so a progress that was actually lost or
+# reset to zero cannot hide inside the band.
+const CYCLE_PROGRESS_TOL: float = 0.0001
+
 ## Duck-typed stand-in for GridWorld that reports a satisfaction of the
 ## test's choosing. `world` is untyped all the way through PowerNetwork and
 ## Inserter (see power_network.gd's "world is intentionally untyped" note),
@@ -286,7 +358,7 @@ class StubPowerWorld extends RefCounted:
 		return sat
 
 static func test_name() -> String:
-	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling + STATE_NO_POWER)"
+	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling + STATE_NO_POWER + filter end-to-end + panel wiring + supply area + save)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -303,9 +375,14 @@ static func run(parent: Node) -> Dictionary:
 	_case_epsilon_boundary(parent, failures)
 	_case_ceil_rounding(parent, failures)
 	_case_status_and_display_regressions(parent, failures)
+	_case_filter_gates_pickup(parent, failures)
+	_case_panel_filter_ui(parent, failures)
+	_case_panel_routing(failures)
+	_case_supply_area_boundary(parent, failures)
+	_case_save_roundtrip(parent, failures)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "12 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected + no-power stall/hold + resume after long outage + epsilon boundary + ceil rounding + status/display regressions" }
+		return { "ok": true, "message": "17 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected + no-power stall/hold + resume after long outage + epsilon boundary + ceil rounding + status/display regressions + filter gates pickup + panel filter UI + panel routing + supply-area boundary + save round-trip" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -1047,6 +1124,366 @@ static func _case_status_and_display_regressions(parent: Node, failures: Array) 
 		"(12c) the Cycle line must also name the tier's rating (\"%s\") so the brownout is diagnosable rather than mysterious, got \"%s\"" % [RATED_CYCLE_TEXT, cycle_line])
 	_disconnect(bw); bw.queue_free()
 
+# ===========================================================================
+# (13) THE FILTER GATES PICKUP.
+#
+# The `filter` slot, the drop-to-set path and ItemPickerModal all arrived
+# with QoL Cluster B and have only ever been exercised against
+# FAST_INSERTER. The electric tier's slot_layout copies the filter slot
+# verbatim — but that is a claim about DATA. This is the sub-case that turns
+# it into a claim about BEHAVIOUR, and it is the one that matters: wiring a
+# panel proves the row can be drawn, not that the filter does anything.
+#
+# Two independent assertions, and the FIRST is the load-bearing one:
+#   - the arm NEVER HELD the unfiltered type on ANY tick of the run, and
+#   - the end state (all wheat moved, all flax still in the source chest).
+# An inserter that picked a flax up and put it straight back leaves the end
+# state perfect while being exactly the bug worth catching, so the end state
+# alone is not enough. The per-tick watch is what closes that hole.
+# ===========================================================================
+static func _case_filter_gates_pickup(parent: Node, failures: Array) -> void:
+	var world = _build_powered_world(parent, false, failures, "(13)")
+	if world == null:
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(13) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	var src: Building = world.building_at(Inserter.source_tile(ins))
+	var dst: Building = world.building_at(Inserter.dest_tile(ins))
+	if src == null or dst == null:
+		_check(failures, false, "(13) SETUP: source and/or destination chest missing around %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	# Built with stocked=false so the bag is ours to shape — the helper's
+	# single-type stock cannot express "two types, decoy first".
+	src.state["bag"] = [[Items.Type.FLAX, FILTER_DECOY_COUNT], [Items.Type.WHEAT, FILTER_TARGET_COUNT]]
+	ins.state["filter_item_type"] = Items.Type.WHEAT
+	_verified_satisfaction(world, failures, "(13)", FULL_POWER_SAT, ELECTRIC_DEMAND)
+
+	var flax_in_hand_ticks: int = 0
+	for _i in FILTER_RUN_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+		if Inserter.held_item_type(ins) == Items.Type.FLAX:
+			flax_in_hand_ticks += 1
+
+	var dst_wheat: int = _bag_count(dst.state.get("bag", []), Items.Type.WHEAT)
+	var dst_flax: int = _bag_count(dst.state.get("bag", []), Items.Type.FLAX)
+	var src_wheat: int = _bag_count(src.state.get("bag", []), Items.Type.WHEAT)
+	var src_flax: int = _bag_count(src.state.get("bag", []), Items.Type.FLAX)
+
+	_check(failures, flax_in_hand_ticks == 0,
+		"(13) the arm must NEVER hold the unfiltered type. Filter is WHEAT (type %d) yet the arm held FLAX (type %d) on %d of %d ticks — a pick-then-return leaves every chest total correct and is still the bug"
+			% [Items.Type.WHEAT, Items.Type.FLAX, flax_in_hand_ticks, FILTER_RUN_TICKS])
+	_check(failures, dst_wheat == FILTER_TARGET_COUNT,
+		"(13) all %d filtered WHEAT should have reached the destination in %d ticks, it holds %d"
+			% [FILTER_TARGET_COUNT, FILTER_RUN_TICKS, dst_wheat])
+	_check(failures, dst_flax == 0,
+		"(13) the destination must hold NO flax when the filter is set to WHEAT, it holds %d" % dst_flax)
+	_check(failures, src_flax == FILTER_DECOY_COUNT,
+		"(13) all %d unfiltered FLAX must remain UNTOUCHED in the source chest, %d are left"
+			% [FILTER_DECOY_COUNT, src_flax])
+	_check(failures, src_wheat == 0,
+		"(13) the source chest should be out of WHEAT after the run, %d are left" % src_wheat)
+	_disconnect(world); world.queue_free()
+
+# ===========================================================================
+# (14) PANEL FILTER UI ON THE TWO-SLOT ELECTRIC LAYOUT.
+#
+# FastInserterPanel was written for FAST_INSERTER's THREE slots (held_item +
+# fuel + filter). The electric tier has TWO (held_item + filter, no fuel), so
+# nothing about the layout transferring is obvious enough to assume.
+#
+# 14a is the geometry, 14b/14c are the two write paths (drop-to-set and
+# right-click-to-clear) driven through the panel's own _gui_input rather than
+# through the handler functions directly, so the hit test is exercised too —
+# a filter row placed at the wrong y would still pass a direct handler call.
+# 14d records WHY the routing goes to this panel and not the basic one.
+# ===========================================================================
+static func _case_panel_filter_ui(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	if not world.place_building(Buildings.Type.ELECTRIC_INSERTER, ELEC_INS_POS, Belt.DIR_E):
+		_check(failures, false, "(14) SETUP: electric inserter placement at %s failed" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(14) SETUP: building_at(%s) returned null after a successful placement" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+
+	var panel = preload("res://scripts/ui/fast_inserter_panel.gd").new()
+	parent.add_child(panel)
+	panel.cursor = CursorStack.new()
+	panel.inventory = Inventory.new(8)
+	panel.toast_callback = func(_msg): pass
+	panel.open(ins, world)
+
+	# --- 14a: the two-slot geometry -------------------------------------
+	var by_id: Dictionary = _slot_rects_by_id(panel)
+	_check(failures, by_id.size() == 2 and by_id.has("held_item") and by_id.has("filter"),
+		"(14a) FastInserterPanel on the ELECTRIC tier should lay out exactly two slots (held_item + filter), got %s" % str(by_id.keys()))
+	_check(failures, not by_id.has("fuel"),
+		"(14a) the electric tier declares no fuel slot, so the panel must emit no fuel rect — _building_slot_rects drives off slot_layout_for(type), got %s" % str(by_id.keys()))
+	if by_id.has("held_item") and by_id.has("filter"):
+		var area: Rect2 = panel._top_area_rect()
+		var held_r: Rect2 = by_id["held_item"]
+		var filt_r: Rect2 = by_id["filter"]
+		_check(failures, not held_r.intersects(filt_r),
+			"(14a) the filter row must not collide with the held-item row, held=%s filter=%s" % [str(held_r), str(filt_r)])
+		_check(failures, is_equal_approx(filt_r.position.y - area.position.y, FILTER_ROW_Y),
+			"(14a) the filter row should sit at y+%.0f inside the top area exactly as it does on the FAST tier — slots are placed BY ID, so the missing fuel row must not move it. Got y+%.1f"
+				% [FILTER_ROW_Y, filt_r.position.y - area.position.y])
+		var facing_off: float = area.size.y - FACING_LINE_INSET
+		_check(failures, filt_r.position.y + filt_r.size.y - area.position.y < facing_off,
+			"(14a) the filter slot must end ABOVE InserterPanel's facing line. Slot bottom y+%.1f vs facing line y+%.1f"
+				% [filt_r.position.y + filt_r.size.y - area.position.y, facing_off])
+
+	# --- 14b: drop-to-set, through the real click path -------------------
+	panel.cursor.pick(Items.Type.FLAX, DROP_FILTER_COUNT)
+	_check(failures, _click_filter_slot(panel, MOUSE_BUTTON_LEFT),
+		"(14b) SETUP: the panel emitted no filter rect to left-click on")
+	_check(failures, int(ins.state.get("filter_item_type", -99)) == Items.Type.FLAX,
+		"(14b) drop-to-set should copy the cursor's TYPE into filter_item_type (FLAX is type %d), got %d"
+			% [Items.Type.FLAX, int(ins.state.get("filter_item_type", -99))])
+	_check(failures, panel.cursor.has_item() and panel.cursor.item_type == Items.Type.FLAX and panel.cursor.count == DROP_FILTER_COUNT,
+		"(14b) drop-to-set is a COPY, not a move — the cursor must still hold %d of type %d, got count=%d type=%d"
+			% [DROP_FILTER_COUNT, Items.Type.FLAX, panel.cursor.count, panel.cursor.item_type])
+	panel.cursor.clear()
+
+	# --- 14c: right-click clears ----------------------------------------
+	# Pre-set explicitly rather than leaning on 14b's write, so a drop-to-set
+	# regression reddens ONE assertion instead of quietly satisfying this one.
+	ins.state["filter_item_type"] = Items.Type.WHEAT
+	_check(failures, _click_filter_slot(panel, MOUSE_BUTTON_RIGHT),
+		"(14c) SETUP: the panel emitted no filter rect to right-click on")
+	_check(failures, int(ins.state.get("filter_item_type", -99)) == -1,
+		"(14c) right-click on the filter slot should clear filter_item_type back to -1, got %d"
+			% int(ins.state.get("filter_item_type", -99)))
+	panel.queue_free()
+
+	# --- 14d: why the routing is FastInserterPanel and NOT InserterPanel --
+	var basic = preload("res://scripts/ui/inserter_panel.gd").new()
+	parent.add_child(basic)
+	basic.cursor = CursorStack.new()
+	basic.inventory = Inventory.new(8)
+	basic.toast_callback = func(_msg): pass
+	basic.open(ins, world)
+	var basic_by_id: Dictionary = _slot_rects_by_id(basic)
+	var collides: bool = basic_by_id.has("held_item") and basic_by_id.has("filter") \
+		and (basic_by_id["held_item"] as Rect2).intersects(basic_by_id["filter"] as Rect2)
+	# Assert the IMPLICATION, not the antecedent. Asserting `collides` flatly
+	# would turn this suite red the day someone TEACHES InserterPanel about
+	# filters — a correct change failing on an improvement. A good failure
+	# message is not enough mitigation: a red suite is a forcing function
+	# whatever it says. So branch on whether the basic panel knows about
+	# filters at all, and assert what should hold in each world.
+	if not basic._slot_y_offsets().has("filter"):
+		_check(failures, collides,
+			"(14d) PREMISE behind sub-case 15's routing: the BASIC InserterPanel has no \"filter\" key in _slot_y_offsets(), so the electric tier's filter slot falls back to the default offset and should land ON TOP of the held-item slot. Rects: %s" % str(basic_by_id))
+	else:
+		_check(failures, not collides,
+			"(14d) InserterPanel now declares a \"filter\" y-offset, so it has grown filter support — but its rects still collide for this tier. Either finish that support or revisit the ELECTRIC_INSERTER routing in main.gd, which currently sends this tier to FastInserterPanel precisely because the basic panel could not place a filter slot. Rects: %s" % str(basic_by_id))
+	basic.queue_free()
+	_disconnect(world); world.queue_free()
+
+# ===========================================================================
+# (15) PANEL ROUTING — the electric tier opens FastInserterPanel.
+#
+# WHAT THIS CAN AND CANNOT PROVE, stated plainly because the technique is
+# unusual. The dispatch lives in Main._try_open_building_ui, an instance
+# method on a node whose panel references are @onready lookups into a scene
+# tree (HUD/FastInserterPanel and two dozen siblings) and whose body also
+# touches grid_world and the player. Constructing that headless is a scene
+# fixture, not a unit test, so the arm is pinned by a STATIC FILE SCAN — the
+# same technique test_building_ui_4.gd uses for its ProcessorPanel reuse
+# audit.
+#
+# Proved here: the match arm EXISTS, appears exactly once, and its first
+# executable statement is `fast_inserter_panel.open(b, grid_world)` — so the
+# tier can no longer fall through to the generic building_panel, and is not
+# routed to the basic InserterPanel either.
+# NOT proved here: that the identifier `fast_inserter_panel` resolves to a
+# live FastInserterPanel at runtime. That is the scene file's job.
+# What IS proved about the panel itself is sub-case 14 — FastInserterPanel
+# lays this tier out correctly and both filter write paths work on it.
+# ===========================================================================
+static func _case_panel_routing(failures: Array) -> void:
+	var f: FileAccess = FileAccess.open(MAIN_SRC_PATH, FileAccess.READ)
+	if f == null:
+		_check(failures, false, "(15) SETUP: cannot open %s for the routing scan" % MAIN_SRC_PATH)
+		return
+	var lines: PackedStringArray = f.get_as_text().split("\n")
+	f.close()
+
+	var arm_line: int = -1
+	var arm_count: int = 0
+	for i in lines.size():
+		if lines[i].strip_edges() == ROUTING_ARM_LABEL:
+			arm_count += 1
+			if arm_line < 0:
+				arm_line = i
+	_check(failures, arm_count == 1,
+		"(15) main.gd should contain exactly ONE `%s` match arm, found %d — the scan below reads the first" % [ROUTING_ARM_LABEL, arm_count])
+	if arm_line < 0:
+		_check(failures, false,
+			"(15) main.gd has NO `%s` arm in its panel dispatch, so the tier falls through to the generic building_panel — which has no filter row at all" % ROUTING_ARM_LABEL)
+		return
+
+	# First executable line under the arm, skipping blanks and comments.
+	var body: String = ""
+	var j: int = arm_line + 1
+	while j < lines.size():
+		var t: String = lines[j].strip_edges()
+		if t == "" or t.begins_with("#"):
+			j += 1
+			continue
+		body = t
+		break
+	_check(failures, body == ROUTING_ARM_BODY,
+		"(15) the ELECTRIC_INSERTER panel arm must call `%s`. The tier's slot_layout carries a `filter` slot, and FastInserterPanel is the only panel that draws the FILTER header, the name/placeholder, the drop-to-set hint and the right-click-to-clear handler. Got `%s`"
+			% [ROUTING_ARM_BODY, body])
+
+# ===========================================================================
+# (16) SUPPLY-AREA BOUNDARY.
+#
+# PowerNetwork.SUPPLY_RADIUS is 1, so a consumer is powered at Chebyshev 1
+# from a pole and unpowered at Chebyshev 2. Asserted from BOTH sides, and
+# behaviourally as well as by query: the query half proves the topology, the
+# tick half proves the inserter actually reads it. A machine that queried
+# correctly and ran anyway would pass the first half alone.
+#
+# The far inserter contributes NO demand — power_network.gd's ELECTRIC_
+# INSERTER arm skips consumers whose _supply_component_id is -1 — so the
+# near inserter's satisfaction is unchanged by its presence.
+# ===========================================================================
+static func _case_supply_area_boundary(parent: Node, failures: Array) -> void:
+	var world = _build_powered_world(parent, true, failures, "(16)")
+	if world == null:
+		return
+	var near_ins: Building = world.building_at(ELEC_INS_POS)
+	if near_ins == null:
+		_check(failures, false, "(16) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	var far_ins: Building = _place_electric_with_chests(world, FAR_INS_POS, failures, "(16-far)")
+	if far_ins == null:
+		_disconnect(world); world.queue_free()
+		return
+	var far_src: Building = world.building_at(Inserter.source_tile(far_ins))
+	var far_dst: Building = world.building_at(Inserter.dest_tile(far_ins))
+	var near_dst: Building = world.building_at(Inserter.dest_tile(near_ins))
+	if far_src == null or far_dst == null or near_dst == null:
+		_check(failures, false, "(16) SETUP: a source or destination chest is missing around %s / %s" % [str(ELEC_INS_POS), str(FAR_INS_POS)])
+		_disconnect(world); world.queue_free()
+		return
+	far_src.state["bag"] = [[Items.Type.WHEAT, SEEDED_WHEAT]]
+
+	var near_cheb: int = _chebyshev(POLE_POS, ELEC_INS_POS)
+	var far_cheb: int = _chebyshev(POLE_POS, FAR_INS_POS)
+	_check(failures, near_cheb == PowerNetwork.SUPPLY_RADIUS,
+		"(16) PREMISE: the near inserter should sit at Chebyshev %d from the pole, measured %d" % [PowerNetwork.SUPPLY_RADIUS, near_cheb])
+	_check(failures, far_cheb == PowerNetwork.SUPPLY_RADIUS + 1,
+		"(16) PREMISE: the far inserter should sit ONE ring outside the supply area at Chebyshev %d, measured %d" % [PowerNetwork.SUPPLY_RADIUS + 1, far_cheb])
+
+	PowerNetwork.update_supply_demand(world)
+	var near_sat: float = PowerNetwork.power_satisfaction_at(world, ELEC_INS_POS)
+	var far_sat: float = PowerNetwork.power_satisfaction_at(world, FAR_INS_POS)
+	_check(failures, near_sat > Inserter.POWER_EPSILON,
+		"(16) Chebyshev %d is INSIDE the supply area — satisfaction should be above POWER_EPSILON, got %.4f" % [PowerNetwork.SUPPLY_RADIUS, near_sat])
+	_check(failures, far_sat == 0.0,
+		"(16) Chebyshev %d is OUTSIDE the supply area — satisfaction should be exactly 0.0, got %.4f" % [PowerNetwork.SUPPLY_RADIUS + 1, far_sat])
+
+	for _i in SUPPLY_RUN_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+
+	var near_delivered: int = _bag_count(near_dst.state.get("bag", []), Items.Type.WHEAT)
+	var far_delivered: int = _bag_count(far_dst.state.get("bag", []), Items.Type.WHEAT)
+	var far_left: int = _bag_count(far_src.state.get("bag", []), Items.Type.WHEAT)
+	_check(failures, near_delivered > 0,
+		"(16) the inserter at Chebyshev %d is powered and should have delivered within %d ticks, its destination holds %d" % [PowerNetwork.SUPPLY_RADIUS, SUPPLY_RUN_TICKS, near_delivered])
+	_check(failures, far_delivered == 0,
+		"(16) the inserter at Chebyshev %d has no power and must deliver NOTHING, its destination holds %d" % [PowerNetwork.SUPPLY_RADIUS + 1, far_delivered])
+	_check(failures, far_left == SEEDED_WHEAT,
+		"(16) the unpowered inserter must not even pick up — its source should still hold %d wheat, it holds %d" % [SEEDED_WHEAT, far_left])
+	_check(failures, int(far_ins.state.get("state", -99)) == Inserter.STATE_NO_POWER,
+		"(16) the out-of-range inserter should report STATE_NO_POWER (%d), got %d" % [Inserter.STATE_NO_POWER, int(far_ins.state.get("state", -99))])
+	_disconnect(world); world.queue_free()
+
+# ===========================================================================
+# (17) SAVE ROUND-TRIP OF A MID-SWING FILTERED INSERTER.
+#
+# MID-SWING on purpose. A save taken at the cycle boundary round-trips an
+# empty hand and a zero progress, which survive any serializer including one
+# that dropped the fields entirely. The arm is therefore driven to
+# PRE_OUTAGE_TICKS first — the same "strictly between pickup and delivery"
+# point sub-case 9 derives and verifies — and the premise is re-asserted
+# here rather than assumed, so a timing drift reads as a setup failure
+# instead of as a mysterious serialization one.
+#
+# JSON coerces every number to a float, so the ints are read back through
+# int() and the float through a tolerance (see CYCLE_PROGRESS_TOL).
+# ===========================================================================
+static func _case_save_roundtrip(parent: Node, failures: Array) -> void:
+	var world = _build_powered_world(parent, true, failures, "(17)")
+	if world == null:
+		return
+	var ins: Building = world.building_at(ELEC_INS_POS)
+	if ins == null:
+		_check(failures, false, "(17) SETUP: no electric inserter at %s" % str(ELEC_INS_POS))
+		_disconnect(world); world.queue_free()
+		return
+	ins.state["filter_item_type"] = Items.Type.WHEAT
+	for _i in PRE_OUTAGE_TICKS:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+
+	var progress_before: float = float(ins.state.get("cycle_progress", -1.0))
+	var held_before: int = Inserter.held_item_type(ins)
+	var state_before: int = int(ins.state.get("state", -99))
+	_check(failures, held_before == Items.Type.WHEAT,
+		"(17) PREMISE: after %d powered ticks the arm should be holding WHEAT (type %d), holds type %d" % [PRE_OUTAGE_TICKS, Items.Type.WHEAT, held_before])
+	_check(failures, progress_before > 0.0 and progress_before < 0.5,
+		"(17) PREMISE: after %d powered ticks the arm should be strictly MID-SWING (0.0 < progress < 0.5), progress is %.6f" % [PRE_OUTAGE_TICKS, progress_before])
+
+	var orig_path: String = SaveSystem.save_path
+	SaveSystem.save_path = TEST_SAVE_PATH
+	var player_a := Node2D.new()
+	parent.add_child(player_a)
+	if not SaveSystem.save_game(world, player_a, Inventory.new(16)):
+		_check(failures, false, "(17) save_game failed")
+		_save_cleanup(world, player_a, null, null, orig_path)
+		return
+	var world_b = GridWorldScript.new()
+	parent.add_child(world_b)
+	var player_b := Node2D.new()
+	parent.add_child(player_b)
+	var result: LoadResult = SaveSystem.load_game(world_b, player_b, Inventory.new(16))
+	if not result.success:
+		_check(failures, false, "(17) load_game failed: %s" % result.error_message)
+		_save_cleanup(world, player_a, world_b, player_b, orig_path)
+		return
+
+	var ins_b: Building = world_b.building_at(ELEC_INS_POS)
+	if ins_b == null:
+		_check(failures, false, "(17) no building at %s after load" % str(ELEC_INS_POS))
+	else:
+		_check(failures, ins_b.type == Buildings.Type.ELECTRIC_INSERTER,
+			"(17) building type should still be ELECTRIC_INSERTER (%d) after load, got %d" % [Buildings.Type.ELECTRIC_INSERTER, ins_b.type])
+		_check(failures, int(ins_b.state.get("filter_item_type", -99)) == Items.Type.WHEAT,
+			"(17) filter_item_type should still be WHEAT (type %d) after load, got %d" % [Items.Type.WHEAT, int(ins_b.state.get("filter_item_type", -99))])
+		var progress_after: float = float(ins_b.state.get("cycle_progress", -1.0))
+		_check(failures, absf(progress_after - progress_before) < CYCLE_PROGRESS_TOL,
+			"(17) cycle_progress should survive the round-trip — saved %.6f, loaded %.6f. A reset to 0.0 means the arm teleports back to the source on every reload" % [progress_before, progress_after])
+		_check(failures, Inserter.held_item_type(ins_b) == Items.Type.WHEAT,
+			"(17) the held item must survive the round-trip — the arm was carrying WHEAT (type %d), after load it carries type %d. Losing it destroys an item on every save/load" % [Items.Type.WHEAT, Inserter.held_item_type(ins_b)])
+		_check(failures, int(ins_b.state.get("state", -99)) == state_before,
+			"(17) the state machine's state should survive the round-trip, saved %d and loaded %d" % [state_before, int(ins_b.state.get("state", -99))])
+	_save_cleanup(world, player_a, world_b, player_b, orig_path)
+
 # ---------- helpers (house style, copied from test_inserter.gd) ----------
 
 ## Place an electric inserter at `pos` facing east, with chests on its
@@ -1246,6 +1683,57 @@ static func _make_world(parent: Node) -> Node2D:
 		for y in range(8, 13):
 			w.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
 	return w
+
+## slot id -> Rect2 for every slot a panel lays out. Keyed by ID because
+## every geometry claim in sub-case 14 is about WHICH row a slot landed in,
+## and the electric tier's layout has no fuel row to count positions from.
+static func _slot_rects_by_id(panel) -> Dictionary:
+	var out: Dictionary = {}
+	for entry in panel._building_slot_rects():
+		out[str(entry["slot_def"].get("id", ""))] = entry["rect"]
+	return out
+
+## Synthesize a mouse-button press at the CENTRE of the panel's filter slot
+## and push it through the panel's own _gui_input, so the whole real path
+## runs — hit test, then _handle_building_slot_click -> _drop_into_slot ->
+## _drop_into_filter for LMB, or FastInserterPanel's own RMB arm for
+## MOUSE_BUTTON_RIGHT. Calling those handlers directly instead would skip the
+## hit test, and a filter row placed at the wrong y would still pass.
+## Returns false if the panel emitted no filter rect at all.
+static func _click_filter_slot(panel, button_index: int) -> bool:
+	var by_id: Dictionary = _slot_rects_by_id(panel)
+	if not by_id.has("filter"):
+		return false
+	var r: Rect2 = by_id["filter"]
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button_index
+	ev.pressed = true
+	ev.position = r.position + r.size * 0.5
+	panel._gui_input(ev)
+	return true
+
+## Chebyshev (chessboard) distance — the metric PowerNetwork.SUPPLY_RADIUS
+## is expressed in.
+static func _chebyshev(a: Vector2i, b: Vector2i) -> int:
+	return maxi(absi(a.x - b.x), absi(a.y - b.y))
+
+## Tear down sub-case 17's two worlds, delete the scratch save file, and put
+## SaveSystem.save_path back. Mirrors test_inserter.gd's _cleanup, but routed
+## through this file's own _disconnect and TEST_SAVE_PATH.
+static func _save_cleanup(world, player_a, world_b, player_b, orig_path: String) -> void:
+	_disconnect(world)
+	if world != null:
+		world.queue_free()
+	if player_a != null:
+		player_a.queue_free()
+	_disconnect(world_b)
+	if world_b != null:
+		world_b.queue_free()
+	if player_b != null:
+		player_b.queue_free()
+	if FileAccess.file_exists(TEST_SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE_PATH))
+	SaveSystem.save_path = orig_path
 
 static func _check(failures: Array, condition: bool, label: String) -> void:
 	if not condition:

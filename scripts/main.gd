@@ -1003,6 +1003,28 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 			# Reuses basic InserterPanel — no filter row needed (filter is a
 			# fast-axis capability, long-reach is the reach-axis upgrade).
 			inserter_panel.open(b, grid_world)
+		Buildings.Type.ELECTRIC_INSERTER:
+			# Reuses FastInserterPanel, NOT InserterPanel — the OPPOSITE call
+			# from LONG_REACH_INSERTER directly above, for the opposite reason.
+			# The electric tier's slot_layout carries a `filter` slot (copied
+			# verbatim from FAST_INSERTER, buildings.gd Type.ELECTRIC_INSERTER),
+			# and FastInserterPanel is the only panel that knows what a filter
+			# row is: the FILTER header, the item name / "(any item)"
+			# placeholder, the drop-to-set hint, and the right-click-to-clear
+			# handler all live there. Opened on InserterPanel the slot would
+			# render as an unlabelled box with no way to clear it — and worse,
+			# InserterPanel._slot_y_offsets() has no "filter" key, so the slot
+			# would fall back to the default offset and land ON TOP of the
+			# held-item slot. Sub-case 14 of test_electric_inserter.gd pins
+			# that collision as the reason this arm exists.
+			#
+			# The tier difference FastInserterPanel absorbs for free: this tier
+			# has TWO slots (held_item + filter) where the fast tier has three
+			# (held_item + fuel + filter). _building_slot_rects() drives off
+			# Buildings.slot_layout_for(building.type) and looks each slot's y
+			# up BY ID, so the missing fuel row simply is not emitted and the
+			# filter row stays where it always was.
+			fast_inserter_panel.open(b, grid_world)
 		_:
 			# Future buildings whose slot_layout exists but specialized panel
 			# doesn't: open the generic fallback. (Post-Session 4 the multi-
