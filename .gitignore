@@ -38,3 +38,10 @@ exports/
 *.dll
 *.dmg
 *.zip
+
+# Art pipeline. Sprites and their sidecars ARE committed — the game loads them.
+# The 4x masters are large, regenerable intermediates; source GLBs are large
+# binaries that live with the Tripo account, not in git history.
+art/renders/*_4x.png
+art/source/*.glb
+

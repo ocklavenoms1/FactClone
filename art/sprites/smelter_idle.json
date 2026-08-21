@@ -1,0 +1,13 @@
+{
+  "name": "smelter_idle",
+  "footprint_tiles": 2.0,
+  "canvas_tiles": 3,
+  "render_px": 384,
+  "sprite_px": 96,
+  "anchor_px_from_center": [
+    -0.35,
+    11.61
+  ],
+  "scale_applied": 1.02793,
+  "source_glb": "art\\source\\smelter.glb"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "dir_test_yaw180",
+  "footprint_tiles": 1.0,
+  "canvas_tiles": 2,
+  "render_px": 256,
+  "sprite_px": 64,
+  "anchor_px_from_center": [
+    -0.0,
+    5.51
+  ],
+  "scale_applied": 0.92,
+  "source_glb": "..\\AppData\\Local\\Temp\\claude\\C--Users-ockla-FACTCLONE\\41d06b7e-5a63-4354-9d7a-efaa8c1d1324\\scratchpad\\proxies\\dir_test.glb"
+}

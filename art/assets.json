@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Asset manifest for the sprite pipeline. build_sprites.ps1 reads this and",
+    "renders every entry. Adding building 4..20 means adding a row here and",
+    "dropping <name>.glb into art/source/ — no script changes.",
+    "",
+    "  name        output basename; source GLB must be art/source/<name>.glb",
+    "  footprint   tiles per side (1 or 2)",
+    "  inset       fraction of the footprint the model fills (0.92 default)",
+    "  max_height  cap in tiles, 0 = uncapped. Use for very tall silhouettes.",
+    "  states      extra renders sharing one mesh; hook in art/blender/states/",
+    "  yaws        4-way buildings list [0,90,180,270]; omit for fixed ones",
+    "  animated    body+part frame sequence; see PIPELINE.md 'Moving parts'"
+  ],
+  "assets": [
+    {
+      "name": "chest",
+      "footprint": 1,
+      "inset": 0.92,
+      "max_height": 0,
+      "states": [],
+      "yaws": []
+    },
+    {
+      "name": "smelter",
+      "footprint": 2,
+      "inset": 0.92,
+      "max_height": 0,
+      "states": ["idle", "smelting"],
+      "yaws": []
+    },
+    {
+      "name": "power_pole",
+      "footprint": 1,
+      "inset": 0.55,
+      "max_height": 3.0,
+      "states": [],
+      "yaws": []
+    }
+  ],
+  "animated": [
+    {
+      "name": "inserter",
+      "body": "inserter_body.glb",
+      "part": "inserter_arm.glb",
+      "footprint": 1,
+      "canvas_tiles": 3,
+      "frames": [0, 45, 90, 135, 180]
+    }
+  ]
+}

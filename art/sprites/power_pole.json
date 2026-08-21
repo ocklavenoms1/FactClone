@@ -1,0 +1,13 @@
+{
+  "name": "power_pole",
+  "footprint_tiles": 1.0,
+  "canvas_tiles": 2,
+  "render_px": 256,
+  "sprite_px": 64,
+  "anchor_px_from_center": [
+    0.0,
+    14.71
+  ],
+  "scale_applied": 0.61111,
+  "source_glb": "art\\source\\power_pole.glb"
+}
