@@ -191,7 +191,25 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 ---
 
-## Electricity Arc — 2 of N sessions shipped
+## Electricity Arc — 2 of N sessions shipped (+ first non-lamp consumer, via the Inserter Arc)
+
+**The arc's consumer side is no longer theoretical.** `session-inserter-electric` shipped
+ELECTRIC_INSERTER — the first consumer that is not the lamp, and the first to use the
+locked cycle-multiplier contract rather than only modulating a colour. It landed from the
+*Inserter* arc, which means the queued "Session 5 — Electric Inserters" below is now largely
+absorbed; re-scope it rather than building it. Two contracts got their first real exercise:
+
+- **The cycle-multiplier contract survived contact**, with one correction. This section's
+  locked form was `1.0 / max(0.1, satisfaction)`; the shipped form is
+  `ceil(cycle_ticks / max(POWER_EPSILON, satisfaction))` with `POWER_EPSILON = 0.05`. Same
+  shape, different floor — 0.05 was chosen so the epsilon doubles as the STATE_NO_POWER
+  cutoff, one constant instead of two that must agree. Future electric processors should
+  copy the SHIPPED form, not the line above.
+- **Consumer demand must be CONSTANT, not duty-cycled.** `update_supply_demand` runs as a
+  pre-pass at the top of `GridWorld._on_tick`, so any activity flag it reads is one tick
+  stale — a demand that varies with activity creates an undamped delayed-feedback loop and
+  every lamp on the network flickers. This is a topological consequence of the pre-pass, not
+  a balance choice, and it binds every future consumer. Validated at PAUSE 2: lamps steady.
 
 **Status:** Sessions 1 (foundation) + 2 (generators + storage) shipped. Linear-satisfaction model locked as arc-wide consumer interface contract. Asymmetric generator-vs-consumer pole rules locked (see "Electricity Network Design Decision" above). `PowerNetwork.update_supply_demand` is now a 3-stage settle (supply → storage decision → satisfaction) — any future storage tier plugs into that, don't special-case it. Future sessions extend.
 
@@ -219,18 +237,22 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 
 ---
 
-## Inserter Arc — 3 of 6 sessions shipped
+## Inserter Arc — 4 of 6 sessions shipped
 
-**Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) + 3 (long-reach, parametric extension to orthogonal reach axis) shipped. 3 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
+**Status:** Sessions 1 (basic, foundation) + 2 (fast tier + filter, parametric refactor) + 3 (long-reach, parametric extension to orthogonal reach axis) + 4 (electric tier, cross-arc into Electricity) shipped. 2 remaining sessions queued; each adds a tier or capability, none architecturally blocking.
+
+**Session 4 shipped only HALF its scoped content.** It was queued below as "Electric Inserter + multi-filter"; the electric tier shipped, multi-filter did not. The tier reuses the fast tier's single scalar `filter_item_type` verbatim. 3-slot multi-filter is re-queued as its own item — do not assume it exists.
 
 **Shipped:**
 - **Session 1 (`session-inserter-foundation`)** — basic 1-tile inserter, fuel-powered via Burner module, 1.0s cycle. Universal source/dest (belt/chest/Processor). Closes the "can't connect chest to building without a belt" hole.
 - **Session 2 (`session-inserter-fast-filter`)** — Fast Inserter: 0.5s cycle (twice as fast), single-slot filter (drop-to-set, RMB-clear). Inserter.gd refactored to tier-parametric (`CYCLE_TICKS_BY_TYPE` / `BODY_COLOR_BY_TYPE` Dictionary lookup tables); both basic and fast share `Inserter.tick`. New `'filter'` slot kind in BuildingPanel. Pre-existing Session 1 fuel-port bug caught at PAUSE 1 and fixed (now uses `FUEL_PORT_DIR = Belt.DIR_S`, mirroring Smelter pattern).
 - **Session 3 (`session-inserter-long-reach`)** — Long-Reach Inserter: 2-tile reach (orthogonal upgrade axis from speed+filter), 1.5s cycle (slower to balance reach), rust-red color, no filter. NEW `REACH_BY_TYPE` parametric table + `reach(b)` accessor; REFACTORED `ARM_LENGTH` const → `ARM_LENGTH_BY_TYPE` table + `arm_length(b)` accessor. `source_tile()` / `dest_tile()` multiply offset by `reach(b)` — zero tick changes (already accessor-driven). Long-reach arm bumped from initial 1.10 → 2.00 × tile_size at PAUSE 2 smoke gate to physically reach the 2-tile-away tiles. Reuses basic `InserterPanel` (no filter row).
 
+- **Session 4 (`session-inserter-electric`)** — Electric Inserter: 5-tick cycle (0.25s, fastest tier), 1-tile reach, electric cyan, single filter, and **no fuel slot at all**. Four rows added to the existing `*_BY_TYPE` tables plus a NEW `POWER_DEMAND_BY_TYPE` (5 units/tick); `is_electric(b)` is DERIVED from membership in that table, so "draws power" and "is not a burner" cannot drift apart. Brownout is `ceil(cycle_ticks / max(POWER_EPSILON, satisfaction))` with `POWER_EPSILON = 0.05` bounding the worst case at 20× rated. NEW `STATE_NO_POWER = 5` across six sites. Reuses `FastInserterPanel` (opposite dispatch call from long-reach, opposite reason). Closed audit findings #2 and #6 (mid-swing fuel outage destroyed the held item) on the *fuel* tiers as a prerequisite. Save v18 unchanged.
+
 **Queued (re-plan each at session start):**
-- **Session 4 — Electric Inserter + multi-filter.** Switches from fuel-powered to electric power (requires Electricity Arc to ship first — separate prereq). Multi-slot filter: 3 filter slots, picks any of the 3 types. Electric tier is base for the next steps.
-- **Session 5 — Long-Reach Fast Inserter / Long-Reach Electric.** Combines reach + speed/power dimensions. Tier-parametric tables make this ~30 lines per variant (validated by Session 3's clean orthogonal-axis addition).
+- **Multi-filter (3 filter slots).** Descoped out of Session 4 and NOT shipped. `filter_item_type` is a scalar on every tier today; multi-filter extends it to an Array of types and touches the filter slot kind in `BuildingPanel`, the picker modal, and `_try_pickup`'s gate. Size it fresh — the Session 4 estimate covered a session that did something else.
+- **Session 5 — Long-Reach Fast Inserter / Long-Reach Electric.** Combines reach + speed/power dimensions. Tier-parametric tables make this ~30 lines per variant (validated by Session 3's clean orthogonal-axis addition, and again by Session 4's four-row extension).
 - **Session 6 — Stack Inserter (electric).** Picks UP TO 3 items per cycle (or per stack-size config), drops them as a single batch. Throughput scaling for late-game. Fundamentally different from prior tiers' "1 item per cycle" model — needs careful design pass.
 
 **Cluster B candidates surfaced during Session 3:**
@@ -242,6 +264,79 @@ Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area meta
 - Filter tracking is universal (`filter_item_type` on every inserter type, default -1). Multi-filter (Session 4) extends to an Array of types.
 - Burner module is shared across drill / smelter / inserter / fast inserter / future kilns. The FUEL PORT DIRECTION pattern (perpendicular edge, never `-1`) is now documented in the Burner header.
 - Click-handling-extraction trigger from this section's "Click-handling duplication" entry is now MET (filter slot's RMB-clear is a panel-specific click semantic). Captured in QoL Polish Session below.
+
+---
+
+## Queued: gate-automation + console fixes (~1-2 hours, scoped `session-inserter-electric`)
+
+Scoped by an investigation into reducing human eye-time at PAUSE gates. The finding that
+shaped it: **5 of 10 PAUSE 1/2 checks were already covered** by tests that same session had
+committed, so the expensive options (a spec-driven scenario runner, a screenshot pipeline)
+would each have added only ~1-2 net checks. This is the cheap residue that closes everything
+closeable. Deliberately NOT building the scenario+capture boot scene — revisit that when a
+session's gate is pixel-heavy (Electricity Foundation was, and burned five iterations).
+
+- **Colour-distance assertion over `BODY_COLOR_BY_TYPE`** (`inserter.gd:87-92`) with a minimum
+  pairwise floor. ~5 lines, no new infrastructure. Covers the objective half of "is the new
+  tier distinct". Measured distances today — **the pair to watch is not the obvious one**:
+
+  | RGB dist | pair |
+  |---|---|
+  | 0.197 | basic bronze vs long-reach rust — **closest overall, pre-existing** |
+  | 0.300 | fast blue-grey vs electric cyan — closest involving the new tier |
+  | 0.656 | basic bronze vs electric cyan |
+
+  Set the floor below 0.197 or the assertion reds on existing colours. That bronze/rust
+  proximity is worth a design look independently.
+- **Assert the rendered `"Status: NO POWER"` string** (`inserter_panel.gd:122`). Currently the
+  only genuine coverage gap of the ten gate checks: `STATE_NO_POWER` is asserted at state
+  level, but nothing asserts the panel actually says so.
+- **Boot smoke as a documented ritual** — zero code. Boots the real `main.tscn` with full
+  scene-tree and autoload wiring, catching *runtime* boot failures the isolated test harness
+  cannot reach, and hands back a readable frame. ~2.5s, off-screen, disturbs nothing:
+
+  ```
+  ./tools/Godot_v4.6.3-stable_win64_console.exe --write-movie <scratch>/g.png \
+    --quit-after 150 --resolution 1280x720 --position 6000,6000 --path .
+  ```
+
+  Grep the output for `Parse Error` **and** `SCRIPT ERROR` per the house rule. Note
+  `--write-movie` **hard-crashes under `--headless`** (dummy rasterizer, signal 11) and leaves
+  a 0-byte `.wav` behind — do not wrap it in a "did an output file appear?" check.
+
+**Two console bugs found incidentally, both in `scripts/ui/console.gd`:**
+
+- **The error classifier is inverted on the most common rejection.** `:302` tests
+  `begins_with("tile (") and find("out of") >= 0`, but the message at six sites is
+  `"Tile %s is outside world bounds."` — `"outside"` does not contain `"out of"`, and no other
+  clause in the chain matches. **A rejected `place` or `tp` is reported to the user as a
+  success.** This is why the console cannot be trusted as a scenario-setup layer.
+- **`tick_speed` always reports the wrong "was".** `:707` assigns
+  `TickSystem.tick_rate_multiplier = m`, then `:708` reads that same variable back for the
+  `(was %.2fx)` half of the message. It always prints the new value. (Same string also mixes
+  `×` and ASCII `x`.)
+
+---
+
+## Queued (balance): steam generator fuel buffer is too small to anchor a grid
+
+`Burner.FUEL_BUFFER_CAPACITY` is a single shared constant (16 units) across every Burner
+consumer — drill, smelter, the three fuel inserter tiers, and the steam generator. The
+generator burns **1 unit/sec** (`CYCLE_TICKS = 20` at 20 TPS), so a full buffer is
+**~16 seconds** of runtime, and 4 coal fills it. That is fine for a drill the player tends and
+wrong for the building the whole electric grid hangs off — it means hand-feeding a generator
+roughly every quarter minute, or committing a belt to it immediately.
+
+Surfaced while building the PAUSE 1 rig, which had to re-assert fuel every frame to keep the
+generators lit long enough to observe a brownout — the workaround is the evidence.
+
+**Candidate fix:** a per-building `FUEL_BUFFER_CAPACITY_BY_TYPE` table on `burner.gd`, exactly
+the parametric shape the inserter tiers already use (`CYCLE_TICKS_BY_TYPE`, `REACH_BY_TYPE`,
+`POWER_DEMAND_BY_TYPE`), with the existing 16 as the lookup-miss default so every current
+consumer is unchanged by construction. Note `try_pull_fuel` is the only enforcer of the cap —
+nothing clamps `fuel_buffer` on write — so the table must be consulted there. Check the panel's
+`Fuel: n / N` display reads the same table, and check whether a bigger buffer needs a save note
+(it should not: `fuel_buffer` is an existing int field).
 
 ---
 
@@ -888,3 +983,21 @@ check (lamp brightness, arm speed, no flicker).
 `update_supply_demand` is a pre-pass that runs before the generators' own tick.
 And hand-editing a rig generator's fuel slot is meaningless: the lever owns
 that field. Emptying it by hand leaves that generator dark until the next F8.
+
+**This is PERMANENT INFRASTRUCTURE, not session scaffolding — reuse it.** Any
+future power-related session gets its smoke setup for free: a live network with
+a real generator, a real brownout at an exact midpoint, and a one-key sweep
+through the whole satisfaction range, without building anything by hand. That is
+the setup cost of every electric gate from here on, already paid.
+
+Extending it for a new consumer is the cheap path *provided the demand total
+stays 40* — that number is what makes the lever land on exactly 0.50 rather than
+somewhere near it, and `test_electric_rig.gd` asserts satisfaction with `==`, not
+`is_equal_approx`, precisely so a drifted total reddens instead of passing
+quietly. Swap a consumer OUT when you add one in: one electric inserter (5) is
+five lamps (1). If a future session genuinely needs a different total, change the
+generator count too and re-derive — do not leave the midpoint approximate.
+
+Its real lesson is cheaper than the rig: **the human gate went from "construct
+the scenario, then look" to "look".** Most of a PAUSE gate's cost was never the
+looking. Build the rig FIRST next time, before the gate, not after the tier.

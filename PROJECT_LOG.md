@@ -9,6 +9,109 @@ Each entry has three sections:
 
 ---
 
+## Inserter Arc Session 4 — Electric Inserter
+
+**Date:** 2026-08-20
+**Tag:** `session-inserter-electric`
+**Save:** v18 (no schema bump — the tier introduces no new state field; `filter_item_type` and the standard inserter state shape are reused verbatim)
+**Tests:** 39 → 42 (`test_inserter_fuel_conservation.gd`, `test_electric_inserter.gd`, `test_electric_rig.gd`)
+
+Fourth of the Inserter Arc and the first cross-arc session: the Electricity Arc gains its
+first consumer that is not a lamp. Shipped across Tasks 1-11 with a subagent triad per task
+and two user gates.
+
+**Scope note, recorded honestly:** NOTES scoped Session 4 as "Electric Inserter + multi-filter".
+Only the electric tier shipped. The tier reuses the fast tier's *single* scalar filter verbatim;
+3-slot multi-filter remains unbuilt and is re-queued.
+
+### What shipped
+
+- **ELECTRIC_INSERTER tier** — 5-tick cycle (0.25s, twice the fast tier and the fastest on the
+  board), 1-tile reach, electric cyan `Color(0.25, 0.75, 0.80)`, single filter slot, and
+  **deliberately no fuel slot at all**. It reuses `FastInserterPanel` via `main.gd` dispatch —
+  the opposite call from `LONG_REACH_INSERTER` directly above it, for the opposite reason.
+- **Four rows added to existing parametric tables**, the arc's established extension cost:
+  `CYCLE_TICKS_BY_TYPE` (5), `BODY_COLOR_BY_TYPE` (cyan), `REACH_BY_TYPE` (1),
+  `ARM_LENGTH_BY_TYPE` (0.55).
+- **One NEW table: `POWER_DEMAND_BY_TYPE`** (`ELECTRIC_INSERTER: 5`). `is_electric(b)` is
+  **derived from membership in that table** rather than declared separately, so "draws power"
+  and "is not a burner" are one fact and cannot drift apart. That single source of truth gates
+  the entire Burner fuel path in `tick()`.
+- **Brownout formula** — `effective_cycle_ticks(b, world)` returns
+  `ceil(cycle_ticks(b) / max(POWER_EPSILON, satisfaction))`, with `POWER_EPSILON = 0.05`
+  bounding the worst case at 20× rated rather than a division by zero. Burner tiers return
+  early before the satisfaction lookup, so they are structurally immune. `cycle_ticks(b)` stays
+  world-free for panel callers; the panel shows effective *and* rated when they differ.
+- **`STATE_NO_POWER = 5` across six sites** in `inserter.gd`: the constant (`:64`), the stall
+  write at the top of `tick()` (`:346`), and four match arms (`:365`, `:755`, `:847`, `:874`).
+  The state machine has **no default arm** by design, so a new state must be spelled out
+  everywhere or the file will not compile — that is the guard rail, and it worked.
+- **Audit findings #2 and #6 CLOSED** (2026-07-19 flaw review, both HIGH, both item-destruction).
+  An empty fuel buffer overwrote state to `STATE_NO_FUEL` unconditionally — including mid-swing
+  with an item held — and `STATE_NO_FUEL` shares a match branch with `STATE_IDLE`, so the
+  refuel tick called `_try_pickup` → `_set_held` and overwrote the held item out of existence.
+  Fixed by a resume guard: if `held_item_type(b) >= 0`, clamp `cycle_progress` to `[0.0, 0.5]`,
+  set `STATE_WORKING_OUT`, and return without attempting pickup. `test_inserter_fuel_conservation.gd`
+  asserts total item count is conserved across source + held buffer + destination through a
+  full outage-and-refuel cycle. Fixed on the *fuel* tiers, in this session, because the electric
+  tier could not inherit a bug it has no fuel path to reach.
+- **`ElectricRig`** (`scripts/world/electric_rig.gd`) — the PAUSE 1 smoke rig as permanent,
+  tested infrastructure rather than throwaway setup. See Decisions.
+
+### Decisions
+
+- **Power demand is CONSTANT, not duty-cycled — and the code decided this, not taste.** Demand is
+  recomputed per tick rather than cached, so duty-cycling would have cost nothing to implement.
+  But `PowerNetwork.update_supply_demand` runs as a **pre-pass at the top of `GridWorld._on_tick`**,
+  before the building tick loop — so any activity flag it read would be one tick stale. A
+  duty-cycled inserter would therefore drive an undamped delayed-feedback loop: demand drops,
+  satisfaction rises, the inserter speeds up, demand rises, satisfaction falls. Every lamp on the
+  network would flicker in sympathy. Constant demand is the correct answer for a *topological*
+  reason, not a balance one. **Validated at PAUSE 2: lamps held steady under brownout.**
+- **`is_electric` derived from the demand table, not declared.** Two facts that must always agree
+  should be one fact. A stray row added for a burner tier flips it away from the fuel path AND
+  registers phantom demand together, and a test asserts both from both directions.
+- **`STATE_NO_POWER` is its own state, not `STATE_NO_FUEL` reused.** They share a shape but not a
+  cause, and the panel must say the true thing — an electric inserter that reports NO FUEL sends
+  the player looking for a fuel slot that does not exist.
+- **The rig is production code with a test, not a scratch scene.** `ElectricRig` owns the layout
+  *and* the lever; `main.gd` owns only key bindings, the dedup flag and toasts. The headless test
+  drives the same two entry points the game does, so what the test proves and what the human looks
+  at cannot drift apart. Two steam generators against a demand pinned at exactly 40 give
+  satisfaction 1.00 / 0.50 / 0.00 by fuelling both, one, or neither — a three-state lever that
+  builds and removes nothing.
+
+### Lessons
+
+- **A compile error in a `class_name` module kills the test runner before it prints a summary and
+  is indistinguishable from a hang.** Hit twice this session because the output filter matched
+  neither `FAIL` nor `passed,`. **Always grep for `Parse Error` as well.** Corollary discovered at
+  Task 10: a *newly added* `class_name` is invisible to `--headless` runs until the global class
+  cache is rebuilt — `--headless --path . --editor --quit` regenerates it. Anyone adding a
+  `class_name` in a headless-only session will hit this and misread it as a hang.
+- **A wrong claim in a brief propagates into code.** A brief asserted `effective_cycle_ticks` needed
+  "world-free purity for panel callers"; it has always taken a world — `cycle_ticks` is the
+  world-free one. The implementer faithfully encoded the error. Caught only by the code-quality
+  review. The Design Brief Verification protocol earned at `session-inserter-long-reach` exists for
+  exactly this, and it paid again: **if the brief and the code disagree, the code wins.**
+- **Assertions coupled to one fix shape false-red correct implementations.** A RED test pinned
+  `STATE_BLOCKED_AT_DEST` on the refuel tick, which a correct clamp-then-return would not produce.
+  Relaxed to the observable set plus a settle-tick assertion. Write the RED test against the
+  *contract*, not against the fix you happen to be imagining.
+- **A test whose rig is never reached by the code path oversells itself.** A brownout-immunity
+  sub-case built an 11-building powered network to prove burner tiers ignore satisfaction — but
+  `effective_cycle_ticks` returns before reading the world for any burner, so the rig was
+  decorative and its comments claimed otherwise. Kept the assertion, corrected the comment.
+  **A factually wrong comment is a defect in this codebase**, and four were caught in one review.
+- **Verify the gate rig with a frame capture, not arithmetic.** The rig's origin offset was derived
+  from a comment whose tile-pitch maths was wrong, and it drifted under the hotbar. Measured by
+  off-screen capture (`--write-movie`, window positioned outside the display) and corrected.
+- **Half of a PAUSE checklist can already be automated without anyone noticing.** A scoping pass
+  found 5 of 10 PAUSE checks were already covered by tests this same session had committed. Gate
+  checklists should be reviewed against existing coverage before being written, not after.
+
+---
+
 ## Electricity Arc Session 2 — More Generators + Accumulator
 
 **Date:** 2026-08-20
