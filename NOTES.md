@@ -850,3 +850,41 @@ When 3×3 ships, also consider:
 - Visual tells on the building itself — do players SEE that fuel must enter via the southwest tile of a 3×3 Smelter, or do they have to learn it from the recipe?
 
 These are real design questions that 2×2 lets us defer. Don't try to solve them in Session D; capture the tradeoffs here so future-me has the framing pre-loaded.
+
+## Debug scenario: the ELECTRIC_INSERTER smoke-test rig (session-inserter-electric, PAUSE 1)
+
+Discoverability note, not design: the launch command and the two keys were
+previously written down nowhere in the repo, which made a scenario built for a
+human to LOOK at findable only by grepping `main.gd`.
+
+**Launch with it already built:**
+
+```
+./tools/Godot_v4.6.3-stable_win64_console.exe --path . -- --scenario=electric_rig
+```
+
+The bare `--` is mandatory and silent when missing. The flag is read from
+`OS.get_cmdline_user_args()`, which is populated *only* by args after the
+separator — Godot's own parser swallows anything before it, and the game then
+boots normally with no warning and no visual difference from a plain launch.
+
+**Keys, both live even while a building panel is open** (they sit above
+`_process`'s modal early-return, deliberately — the dest chest's panel is how
+you compare throughput between states):
+
+| Key | Effect |
+|---|---|
+| `F10` | Spawn the rig south of the player. On ground that already holds an intact rig it ADOPTS that one — re-attaching the lever after a save/load — instead of scattering a second copy. Shift+F10 clears the dedup flag. |
+| `F8` | THE LEVER: FULL → BROWNOUT → ZERO → FULL. Changes only how many of the two steam generators carry fuel. Nothing is built or removed. |
+
+**What the three states mean.** Demand is pinned at exactly 40 (4 electric
+inserters × 5 + 20 lamps × 1) and each fuelled generator supplies 20, so the
+lever lands on exactly 1.00 / 0.50 / 0.00 satisfaction — hero inserter cycle 5
+ticks, 10 ticks, then `STATE_NO_POWER`. The arithmetic is pinned headlessly in
+`scripts/tests/test_electric_rig.gd`; the rig exists for the half a test cannot
+check (lamp brightness, arm speed, no flicker).
+
+**Two things that are not bugs.** Satisfaction lags an F8 press by ~0.1 s —
+`update_supply_demand` is a pre-pass that runs before the generators' own tick.
+And hand-editing a rig generator's fuel slot is meaningless: the lever owns
+that field. Emptying it by hand leaves that generator dark until the next F8.

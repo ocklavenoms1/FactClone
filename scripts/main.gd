@@ -147,6 +147,38 @@ var placement_direction: int = Belt.DIR_E   # 0=E, 1=S, 2=W, 3=N
 var _demo_spawned: bool = false
 var _demo_origin: Vector2i = Vector2i.ZERO
 
+# Electric-rig scenario state (session-inserter-electric, PAUSE 1). Same
+# dedup shape as the F11 demo above — F10 spawns, Shift+F10 clears the flag.
+# The rig can also be spawned at launch via `-- --scenario=electric_rig`;
+# that path sets the same flag, so a later F10 correctly no-ops with a toast
+# instead of scattering a second copy.
+#
+# _rig_gen_anchors holds the rig's two STEAM_GENERATOR anchors in the order
+# ElectricRig.build() returned them, so the F8 lever can find them without
+# scanning the world. Plain Vector2i data — the Building objects themselves
+# are never cached, per the no-objects-in-state house rule (same reasoning
+# applies to main.gd's own long-lived vars: a cached Building would dangle
+# the moment the player removes the generator).
+#
+# NOT PERSISTED, deliberately. The rig's BUILDINGS are ordinary world state and
+# survive a save/load like anything else; this bookkeeping does not, so after
+# F5/F9 (or a relaunch without the scenario flag) the rig is on screen with
+# _rig_spawned false and F8 has nothing to drive. Recovery is a single F10:
+# ElectricRig.build() ADOPTS a rig that is already standing (every planned cell
+# already holding exactly the planned building) and returns its real generator
+# anchors, so the lever re-attaches instead of a second rig being scattered.
+# Persisting these four fields would mean a save-schema bump for a debug
+# scenario, which is a worse trade than one keypress.
+var _rig_spawned: bool = false
+var _rig_origin: Vector2i = Vector2i.ZERO
+var _rig_gen_anchors: Array = []
+var _rig_source_chest: Vector2i = Vector2i.ZERO
+# Whether the source chest is one the rig placed (or adopted). False means a
+# building was already sitting on that cell and it is the PLAYER's — the lever
+# must not overwrite its bag. See ElectricRig.build()'s COLLIDED case.
+var _rig_source_seeded: bool = false
+var _rig_power_state: int = ElectricRig.POWER_FULL
+
 # Vision tracking: which region the player was in last frame. When the player
 # crosses a region boundary, GridWorld.update_vision() is called to upgrade
 # new in-range regions to active and demote out-of-range ones to fog.
@@ -295,6 +327,23 @@ func _ready() -> void:
 	_player_last_region = GridWorld.region_of_world_pos(player.global_position)
 	grid_world.update_vision(_player_last_region)
 
+	# Scenario boot flag: `godot --path . -- --scenario=electric_rig`.
+	#
+	# MUST run here and not earlier. The rig is placed relative to the PLAYER
+	# TILE, and the player position is not final until the save-or-generate
+	# branch above has run (_generate_fresh_world is what assigns
+	# _safe_spawn_position). It also has to follow update_vision, so the rig
+	# lands inside already-revealed terrain rather than in fog.
+	#
+	# OS.get_cmdline_user_args(), not get_cmdline_args(): user args are
+	# everything after a bare `--`, which is the only form Godot itself will
+	# not consume. A bare `--verbose` without the separator is eaten by the
+	# engine and never reaches the project.
+	for arg in OS.get_cmdline_user_args():
+		if arg == "--scenario=electric_rig":
+			_spawn_electric_rig(grid_world.world_to_tile(player.global_position))
+			break
+
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
 ## defaults that main.gd's `player_progression` was initialized with — this
 ## is the forward-compat read pattern from CONVENTIONS.md.
@@ -375,6 +424,17 @@ func _safe_spawn_position() -> Vector2:
 	return Vector2(picked.x * ts + ts * 0.5, picked.y * ts + ts * 0.5)
 
 func _process(delta: float) -> void:
+	# Electric-rig fuel sustain. Deliberately the FIRST statement in _process,
+	# ahead of the dev-console gate, the quantity-picker gate and the
+	# modal-panel early-return further down — ahead even of the rig's own two
+	# keys, which DO sit behind the first two of those. Those gates exist to
+	# suppress INPUT, and this is not input — it is the rig holding the power
+	# state the user last selected. Putting it after any of them would mean
+	# that opening the generator's own panel (or the console, or Q-inspect's
+	# picker) stops the top-up, and the lit generators starve seconds later,
+	# mid-inspection. That is the exact silent drift this call prevents.
+	_sustain_rig_power()
+
 	# Vision update on region cross. Cheap: one Vector2i compare per frame;
 	# only does work on the rare frames where player crosses a region boundary
 	# (typically every several seconds at walking speed).
@@ -409,6 +469,38 @@ func _process(delta: float) -> void:
 	# building placement, Q-inspect, etc., while the picker is open.
 	if quantity_picker != null and quantity_picker.visible:
 		return
+
+	# The two ELECTRIC_INSERTER smoke-test keys, deliberately UP HERE with the
+	# I / M / Esc group instead of down with F11 and F5. Everything below the
+	# modal early-return is dead while a building panel is open, and CHEST is
+	# the only rig building that HAS a panel — opening the dest chest to watch
+	# iron ore arrive is the most natural way there is to compare throughput
+	# between FULL and BROWNOUT, so a lever that dies when that panel opens is
+	# a lever that is dead during exactly the observation it exists for. Safe
+	# at this height because neither gate reads hover_tile: F8 reads nothing at
+	# all, and F10 needs only the player tile, which it derives inline. Both
+	# stay BELOW the dev-console and quantity-picker gates above — those
+	# suppress ALL action input on purpose and debug keys are no exception.
+	#
+	# F10 — spawn the rig south of the player: two steam generators, a six-pole
+	# bus, twenty lamps, and four electric inserters — three pure load plus the
+	# hero, which is the only one flanked by a loaded chest and an empty one.
+	# Demand is 4 x 5 + 20 x 1 = exactly 40. Same dedup contract as F11:
+	# Shift+F10 clears the flag.
+	if Input.is_action_just_pressed("debug_spawn_electric_rig"):
+		if Input.is_key_pressed(KEY_SHIFT):
+			_rig_spawned = false
+			_show_toast("[debug] Rig flag cleared. Next F10 spawns fresh; clean up the old rig manually.")
+		elif _rig_spawned:
+			_show_toast("[debug] Rig already exists at %s. Shift+F10 to allow respawn." % str(_rig_origin))
+		else:
+			_spawn_electric_rig(grid_world.world_to_tile(player.global_position))
+
+	# F8 is THE LEVER — FULL -> BROWNOUT -> ZERO -> FULL, by changing how many
+	# of the rig's generators have fuel. Nothing is built or removed, so the
+	# rig the user is watching never changes shape underneath them.
+	if Input.is_action_just_pressed("debug_cycle_power"):
+		_cycle_rig_power()
 
 	# Inventory toggle (I) — always handled, even while grid is open
 	# (lets I close the grid).
@@ -1317,6 +1409,122 @@ func _spawn_demo_chain(player_tile: Vector2i) -> void:
 		var harvester: Building = grid_world.building_at(flax_harvester_pos)
 		harvester.state["buffer"] = [[Items.Type.FLAX, 2]]
 	_show_toast("[debug] Demo chain: %d placed, %d skipped at origin %s" % [placed, skipped, str(player_tile)])
+
+## Spawn the ELECTRIC_INSERTER smoke-test rig (session-inserter-electric,
+## PAUSE 1). Sibling of _spawn_demo_chain, but the LAYOUT lives in
+## ElectricRig rather than in a plan array here: the headless test
+## (test_electric_rig.gd) drives the same ElectricRig.build(), so the
+## arithmetic the test proves and the rig the user looks at cannot drift
+## apart. This function owns only the things a test has no opinion about —
+## where the origin sits relative to the player, the dedup flag, and the toast.
+##
+## Sets the dedup flag itself (unlike _spawn_demo_chain, whose caller does).
+## There are TWO call sites — the F10 gate and the `--scenario=electric_rig`
+## boot flag — and a flag set at only one of them would let a launch-spawned
+## rig be silently duplicated by a later keypress.
+func _spawn_electric_rig(player_tile: Vector2i) -> void:
+	var origin: Vector2i = player_tile + ElectricRig.ORIGIN_OFFSET
+	var rig: Dictionary = ElectricRig.build(grid_world, origin)
+
+	_rig_spawned = true
+	_rig_origin = origin
+	_rig_gen_anchors = rig["gen_anchors"]
+	_rig_source_chest = rig["source_chest"]
+	_rig_source_seeded = bool(rig.get("source_seeded", false))
+	_rig_power_state = ElectricRig.POWER_FULL
+
+	var placed: int = int(rig["placed"])
+	var skipped: int = int(rig["skipped"])
+	# ADOPTED: the rig was already standing in full — a save/load or a relaunch
+	# without the scenario flag. build() handed back the generators that are
+	# actually on the ground, so the lever is live again and nothing was built.
+	# Reported distinctly from a fresh spawn because "0 placed" would otherwise
+	# read as the INCOMPLETE failure below.
+	if bool(rig.get("adopted", false)):
+		_show_toast("[rig] Re-attached to the rig already at %s. Hero at %s. F8 cycles power." % [str(origin), str(rig["hero"])])
+		return
+	# The skip count is reported because a NONZERO value means the rig is
+	# INCOMPLETE, not merely tidy — the spawn is player-relative, so loading a
+	# save and pressing F10 next to existing buildings drops whichever pieces
+	# collided. A missing generator halves supply and a missing lamp moves
+	# demand off 40; either way every satisfaction number in the design is
+	# wrong and the brownout tier is no longer the one being observed.
+	if skipped > 0:
+		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F10 for a clean one." % [placed, placed + skipped, skipped])
+		return
+	# Name the hero's absolute tile: all four electric inserters share the same
+	# cyan body and the same dark-grey no-power tint, so the only thing that
+	# distinguishes the one under test is the pair of chests flanking it.
+	_show_toast("[rig] Ready — hero inserter at %s between two chests. F8 cycles power." % str(rig["hero"]))
+
+## THE LEVER (F8). FULL -> BROWNOUT -> ZERO -> FULL by changing how many of the
+## rig's generators have fuel. Builds nothing and removes nothing, which is the
+## whole point: the rig under observation keeps its exact shape across all
+## three states.
+##
+## Also re-seeds the source chest on every press — but ONLY when that chest is
+## one the rig placed or adopted (_rig_source_seeded). An empty source chest
+## drops the hero to STATE_IDLE, which looks exactly like a power fault to
+## someone watching the arm stop, and 2400 iron ore is only ~14 minutes at full
+## speed; a chest that was already there when the rig spawned belongs to the
+## player, and overwriting its bag would destroy their items on every press.
+##
+## Refuses when there is no rig REGISTERED, which is not the same as no rig on
+## screen: the registration is session-only (see _rig_spawned's declaration),
+## so after a save/load the rig is visible but unregistered. F10 re-attaches.
+func _cycle_rig_power() -> void:
+	if not _rig_spawned or _rig_gen_anchors.is_empty():
+		_show_toast("[rig] No rig registered. Press F10 — it re-attaches to a rig already on the ground.")
+		return
+	_rig_power_state = (_rig_power_state + 1) % ElectricRig.POWER_STATE_COUNT
+	ElectricRig.apply_power_state(grid_world, _rig_gen_anchors, _rig_power_state)
+	if _rig_source_seeded:
+		ElectricRig.refill_source(grid_world, _rig_source_chest)
+	# The two-tick settle is real but imperceptible: update_supply_demand is a
+	# PRE-PASS that runs before the building tick loop, so the pole's Q-inspect
+	# Capacity line and the lamps lag the press by ~0.1 s. Not a bug, and it
+	# must not be "fixed" by moving the pre-pass.
+	_show_toast(ElectricRig.state_label(_rig_power_state))
+
+## Hold the rig's chosen power state every frame, by fuel alone.
+##
+## THE STABILITY DECISION, stated once here. Burner.FUEL_BUFFER_CAPACITY is 16
+## units and SteamGenerator burns exactly one unit per second (CYCLE_TICKS 20
+## at 20 TPS), so a one-shot fuel seed silently expires 16 seconds after the
+## lever is pressed — the user would be looking at ZERO while the toast still
+## said FULL. Three ways out, and this is why this one:
+##
+##   - seed a huge fuel_buffer (100000): mechanically legal, no clamp exists
+##     anywhere, but Burner.info_lines prints "Fuel: 100000 / 16 units" in the
+##     Q-inspect panel the whole smoke test is conducted through.
+##   - feed the generators from a real fuel chest: puts a CHEST on the fuel
+##     port edge, and Burner.try_pull_fuel then refills fuel_buffer on the same
+##     tick the lever zeroes it, making BROWNOUT and ZERO unreachable.
+##   - top a LIT generator back up whenever its buffer reaches 1 unit: the
+##     panel stays honest, and the state is stable indefinitely.
+##
+## The third is what ElectricRig.sustain_fuel does, and the narrowness of it is
+## the point — it writes ONE field, on ONE generator class, at ONE buffer value:
+##
+##   - not output_active. TickSystem's autoload _process emits the tick before
+##     Main._process runs, so a value written here is what the next tick's
+##     supply pre-pass reads INSTEAD of the generator's own fuel-derived one. A
+##     rig held at FULL POWER by this function would look green with the whole
+##     fuel -> output_active -> supply path broken.
+##   - not the dark generators. The lever already zeroed them; re-zeroing every
+##     frame would silently eat coal a player hand-fed into the fuel slot,
+##     which buildings.gd:768 makes a legal thing to do.
+##   - not at 0 units, only at exactly 1. Burning steps down one unit at a time
+##     and is caught at 1, so 0 means the player emptied the slot themselves —
+##     refilling that would hand them 16 free units per frame.
+##
+## The upshot for the smoke test: hand-editing a rig generator's fuel slot is
+## not a meaningful thing to do. The lever decides what the rig is showing, and
+## a slot emptied by hand stays empty until the next F8 press.
+func _sustain_rig_power() -> void:
+	if not _rig_spawned or _rig_gen_anchors.is_empty():
+		return
+	ElectricRig.sustain_fuel(grid_world, _rig_gen_anchors, _rig_power_state)
 
 func _overlay_list_str(overlays: Array) -> String:
 	var parts: Array = []
