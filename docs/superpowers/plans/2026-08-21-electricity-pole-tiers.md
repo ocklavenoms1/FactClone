@@ -208,8 +208,10 @@ const POLE_TYPES: Dictionary = {
 	# Electricity Arc Session 3 (session-electricity-pole-tiers): pole tiers.
 	# Medium Pole — 1x1, wire range 6, supply radius 2.
 	# Substation  — 2x2, wire range 11, supply radius 4. The backbone piece.
-	# Both are POWER_POLE with different numbers; see POLE_RANGE_BY_TYPE and
-	# SUPPLY_RADIUS_BY_TYPE in power_network.gd. Appended at the END of the
+	# Both BEHAVE like POWER_POLE, differing only in their range/radius
+	# numbers — but b.type is NEVER Buildings.Type.POWER_POLE for them, so
+	# every `type == POWER_POLE` test is a site they must be added to by hand.
+	# The per-tier tables land in a later task. Appended at the END of the
 	# enum so every previously-saved type keeps its integer value.
 	MEDIUM_POLE,
 	SUBSTATION,
@@ -1465,12 +1467,181 @@ Expected:
 - `pole tier rig` sub-case 2 **finally passes at demand 40** — the lamps in the medium pole's and substation's areas now resolve to a component. This is the task that closes the gap Task 4 left open, so the rig test should now be green except for anything MST-dependent.
 - **`test_electric_rig.gd` and `test_electric_inserter.gd` must both stay green.** They assert exact satisfaction values through this exact code path, so a regression here surfaces there first. `test_electric_rig.gd` in particular asserts satisfaction with `==` rather than `is_equal_approx`, deliberately — if the nearest-pole tie-break has changed which component a rig consumer resolves to, that is where you will see it.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Sub-task 5b — close audit finding #1 (load leaves network caches stale)**
+
+**Why this lands here and not in a separate session.** Task 5 adds `_pole_cells`, a *second*
+cache with the same lifecycle as `_pole_component`. Both are rebuilt only behind
+`if world._power_network_dirty`. `save_system.gd` repopulates `grid_world.buildings` and
+`occupied` **directly** — bypassing `place_building` / `remove_building`, which are the only
+paths that set the dirty flags — and never marks either network dirty. Shipping a second cache
+into a lifecycle with a known, confirmed-live hole is knowingly widening a HIGH.
+
+This is audit finding **#1** (`docs/audits/2026-07-19-flaw-review.md:55`). Its fix exists only
+on `audit-hardening-stale-base` and never reached main — see the NOTES entry.
+
+Initial boot is safe because both flags default `true` (`grid_world.gd:211`, `:223`). The live
+failure is a **mid-session F9 quick-load** (`main.gd:659`) into a world whose topology has
+already resolved to `dirty = false`.
+
+- [ ] **Step 8a: Write the failing test — behavioural, not a call-existence check**
+
+The whole point of this finding is that the failure is **silent**. A test asserting
+"`mark_power_network_dirty` gets called" would pass against a fix that calls it at the wrong
+time. Assert the observable consequence instead: after loading, does the topology describe the
+**loaded** world or the **pre-load** one?
+
+Append to `scripts/tests/test_pole_tiers.gd`, wiring `_case_load_invalidates_caches(parent, failures)` into `run()`:
+
+```gdscript
+# ===========================================================================
+# (9) LOAD INVALIDATES THE NETWORK CACHES — audit finding #1.
+#
+# save_system.load_game writes grid_world.buildings and .occupied DIRECTLY,
+# bypassing place_building/remove_building — the only paths that set the
+# dirty flags. It never marks either network dirty. Both flags default true
+# (grid_world.gd:211, :223), so a fresh boot is safe; a MID-SESSION F9
+# quick-load into an already-resolved world is not.
+#
+# WHY THIS IS BEHAVIOURAL. The failure is silent — no error, no visual tell,
+# just a topology describing a world that is no longer loaded. A test that
+# asserted "mark_power_network_dirty was called" would pass against a fix
+# placed before the buildings are written, which fixes nothing. So this
+# asserts the CONSEQUENCE: query the network after a load and check it
+# describes the world that was actually loaded.
+#
+# The pre-load world is deliberately built so its stale answer and the
+# correct answer DIFFER. One connected component before, two after — if the
+# cache leaks, the count reads 1 and the sub-case reddens.
+# ===========================================================================
+static func _case_load_invalidates_caches(parent: Node, failures: Array) -> void:
+	# --- Build world A: two poles 3 apart -> ONE component. Save it. ---
+	var world_a = _make_world(parent)
+	world_a.place_building(Buildings.Type.POWER_POLE, Vector2i(5, 5))
+	world_a.place_building(Buildings.Type.POWER_POLE, Vector2i(8, 5))
+	PowerNetwork.rebuild_topology(world_a)
+	_check(failures, _component_count(world_a) == 1,
+		"(9) SETUP: world A's two poles are 3 apart and should be one component, got %d" % _component_count(world_a))
+	var save_a: Array = []
+	for anchor in world_a.buildings:
+		save_a.append(world_a.buildings[anchor].to_dict())
+	_teardown(world_a)
+
+	# --- Build world B: two poles 9 apart -> TWO components. RESOLVE it,
+	# so _power_network_dirty is false and the caches hold world B's answer. ---
+	var world_b = _make_world(parent)
+	world_b.place_building(Buildings.Type.POWER_POLE, Vector2i(20, 20))
+	world_b.place_building(Buildings.Type.POWER_POLE, Vector2i(29, 20))
+	PowerNetwork.rebuild_topology(world_b)
+	_check(failures, _component_count(world_b) == 2,
+		"(9) SETUP: world B's two poles are 9 apart and should be two components, got %d" % _component_count(world_b))
+	_check(failures, not world_b._power_network_dirty,
+		"(9) SETUP: rebuild_topology should have cleared the dirty flag, leaving a resolved cache to go stale")
+
+	# --- Load world A INTO world B, the way load_game does: direct writes to
+	# buildings + occupied, no place_building. This is the exact mutation
+	# save_system.gd performs at :386 and :476-482. ---
+	world_b.buildings.clear()
+	world_b.occupied.clear()
+	for d in save_a:
+		var b: Building = Building.from_dict(d)
+		world_b.buildings[b.anchor] = b
+		var fp: Vector2i = Buildings.footprint_of(b.type)
+		for dx in fp.x:
+			for dy in fp.y:
+				world_b.occupied[Vector2i(b.anchor.x + dx, b.anchor.y + dy)] = b.anchor
+	# NOTE: no explicit rebuild_topology here, and that is the point. A caller
+	# querying the network is entitled to a correct answer; the dirty flag is
+	# how the module promises that. Every public query already begins with
+	# `if world._power_network_dirty: rebuild_topology(world)`.
+
+	# --- The assertion. World A has one component. If the load left the cache
+	# stale, we are still holding world B's TWO, and worse, keyed at world B's
+	# coordinates where no building exists any more. ---
+	_check(failures, world_b._power_network_dirty,
+		"(9) loading a save left _power_network_dirty FALSE, so the pole topology still describes the pre-load world — audit finding #1. save_system.load_game writes buildings directly and must call grid_world.mark_power_network_dirty()")
+	var comps: int = PowerNetwork.network_id_at(world_b, Vector2i(5, 5))
+	_check(failures, comps >= 0,
+		"(9) after loading, the pole at (5, 5) should belong to a network; got %d, meaning the topology never rebuilt for the loaded world" % comps)
+	_check(failures, PowerNetwork.network_id_at(world_b, Vector2i(20, 20)) < 0,
+		"(9) (20, 20) held a pole in the PRE-LOAD world and holds nothing in the loaded one, so it must not report a network — a stale _pole_component is reporting one")
+	_teardown(world_b)
+```
+
+Also add the fluid-network half, which is the finding as originally written:
+
+```gdscript
+	# The fluid network has the identical hole and the identical fix. Asserted
+	# here rather than in a fluid test file because it is the same defect, the
+	# same line of save_system, and splitting them would let one be fixed and
+	# the other forgotten — which is how it got here.
+	_check(failures, world_b._fluid_network_dirty,
+		"(9) loading a save left _fluid_network_dirty FALSE — pipe/pump connectivity still describes the pre-load world. Same defect, same fix site")
+```
+
+- [ ] **Step 8b: Run to verify it fails**
 
 ```bash
-git add scripts/world/grid_world.gd scripts/world/power_network.gd scripts/tests/test_pole_tiers.gd
-git commit -m "Pole Tiers Task 5: _pole_cells + nearest-pole supply resolution"
+timeout 300 ./tools/Godot_v4.6.3-stable_win64_console.exe --headless --path . res://scenes/test_runner.tscn > /tmp/t5b.log 2>&1; echo "exit=$?"
+grep -cE "Parse Error" /tmp/t5b.log; grep -E "FAIL|passed," /tmp/t5b.log
 ```
+
+Expected: `FAIL  pole tiers` naming `(9) loading a save left _power_network_dirty FALSE` and the `(20, 20)` stale-report assertion. **If sub-case 9 passes before the fix, stop and report** — it means the test is not reproducing the finding and needs reshaping, not the code.
+
+- [ ] **Step 8c: Apply the fix**
+
+In `scripts/systems/save_system.gd`, at the **end** of `load_game`'s world-mutation section — after the buildings loop that populates `grid_world.buildings` and `occupied` (around `:476-482`), and after any other direct world writes — add:
+
+```gdscript
+	# Audit finding #1. load_game writes grid_world.buildings and .occupied
+	# DIRECTLY, bypassing place_building / remove_building — the only paths
+	# that set these flags. Without this, a mid-session F9 quick-load leaves
+	# both network caches describing the PRE-LOAD world: pipes that exist only
+	# in the loaded save stay invisible, and pipes that existed only before it
+	# keep feeding machines that have no water. Silent in both directions.
+	#
+	# These two methods existed with ZERO callers until this line — they were
+	# written for exactly this case and never wired up.
+	#
+	# Placed AFTER the buildings are written, not before: marking dirty and
+	# then mutating would let any query in between resolve against a
+	# half-loaded world and cache that.
+	grid_world.mark_power_network_dirty()
+	grid_world.mark_fluid_network_dirty()
+```
+
+**Verify the placement claim rather than trusting it** — read `load_game` in full and confirm no world mutation happens after your inserted line. If something does, move the call below it and say so in your report.
+
+- [ ] **Step 8d: Confirm GREEN and that nothing else moved**
+
+Expected: sub-case 9 passes. **`test_save_load_roundtrip.gd`, `test_fluid_network.gd`, `test_power_network.gd`, `test_electric_rig.gd` and `test_save_migration.gd` must all stay green** — an extra rebuild is never wrong, only slower, so a regression in any of those means the call landed in the wrong place.
+
+- [ ] **Step 9: Commit**
+
+Use an explicit pathspec. A concurrent `art/` pipeline stages into the same index, so bare `git commit` and `--amend` are both unsafe here — see NOTES.
+
+```bash
+git commit -F - -- scripts/world/grid_world.gd scripts/world/power_network.gd scripts/systems/save_system.gd scripts/tests/test_pole_tiers.gd
+```
+
+Message:
+
+```
+Pole Tiers Task 5: _pole_cells + nearest-pole resolution; closes audit #1
+
+Multi-cell poles now resolve from any footprint cell, and consumer supply
+queries pick the NEAREST covering pole (ties to the larger radius) instead
+of whichever cell the scan happened to hit first.
+
+Also closes audit finding #1 (HIGH): load_game wrote grid_world.buildings
+directly, bypassing the only paths that mark the network caches dirty, so a
+mid-session F9 quick-load left both pole topology and pipe connectivity
+describing the pre-load world. Fixed here rather than deferred because this
+task adds _pole_cells — a second cache on the same lifecycle — and shipping
+it into a known-live hole would widen the finding. mark_power_network_dirty
+and mark_fluid_network_dirty had zero callers before this.
+```
+
+Then verify: `git show --name-only --format="" HEAD` must list exactly those four files and no `art/` entry.
 
 ---
 

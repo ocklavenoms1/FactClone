@@ -6,6 +6,92 @@ Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work
 
 ---
 
+## ⚠ `audit-hardening-stale-base` IS NOT A DEAD ARCHIVE — DO NOT DELETE
+
+**A prior session characterized this branch as "safe to delete whenever." That was wrong.**
+It is the **only copy** of the fixes for a set of audit findings that are **still live on main**.
+
+Discovered 2026-08-21 during Electricity Session 3 Task 1, when a code reviewer noticed in
+passing that `save_system.gd` repopulates `grid_world.buildings` on load without marking
+either network cache dirty. That is audit finding **#1** (HIGH), described verbatim in
+`docs/audits/2026-07-19-flaw-review.md:55` — including the detail that
+`mark_fluid_network_dirty()` "is never called anywhere in the codebase." It still has zero
+callers today.
+
+The fix exists. It is not on main:
+
+```
+git merge-base --is-ancestor 497b5ce HEAD   ->  NO
+git branch --contains 497b5ce               ->  audit-hardening-stale-base only
+```
+
+**Eight hardening commits never reached main:**
+
+| commit | findings it fixed |
+|---|---|
+| `2014b60` hardening-6: bounded perf | #29, #32, #72, #73, #74 |
+| `be80226` hardening-5: test-debt | #25, #26, #28, #63, #69 |
+| `c5b5921` doc sweep | #34-36, #41/#44, #43, #67-68, #76-84 |
+| `ce4058a` hardening-4: placement guards | #10, #16 |
+| `50ecc12` hotfix | OS.alert out of SaveSystem |
+| `3e76e19` hardening-3: soil-arc | #4, #5, #7, #47, #51 |
+| `497b5ce` hardening-2: load correctness | #1, #11, #12, #13, #21 |
+| `653f5a2` hardening-1: item conservation | #2/#6, #3, #8, #9, #19 |
+
+**How this happened:** the 2026-07 audit ran against a stale clone (94 commits behind real
+trunk). The fixes were written against that stale code. We reset to real main, re-verified
+the ten HIGH findings as still-live, and went to feature work — and the branch was then
+mentally filed as superseded. It is not superseded; it is *unapplied*.
+
+### Which findings are actually closed on main is UNKNOWN
+
+Confirmed closed on main, re-fixed in later sessions:
+- **#2 / #6** — mid-swing fuel outage destroying the held item (`session-inserter-electric`, `37ff498`)
+- **#8 / #9** — shared-buffer slot rendering (the diagnostic reframed it, then the resolver landed)
+- **#10** — placement terrain guards (`test_placement_terrain_guards.gd` is on main)
+
+Everything else in the table above has **no verified status**.
+
+### The re-application session (queued)
+
+**Its FIRST task is a status table, before any fixing.** For every finding in those eight
+commits: is it still reproducible on current main? Do not cherry-pick — each fix was written
+against a stale clone and must be re-verified against current code first. Two precedents for
+why: the **#8/#9** pass found the finding was real but *the wrong shape*, and **#10**'s blast
+radius had **grown** since the audit was written.
+
+Immediate priority is the load-correctness cluster, because those are the ones with a
+confirmed-live HIGH: **#11** save-field shape validation, **#12** atomic save write,
+**#13** vision/map refresh after quick-load, **#21** load-failure fallthrough overwriting a
+recoverable save. (**#1** itself is being closed inside Electricity Session 3 Task 5, which is
+already opening that lifecycle to add a second cache — see that plan.)
+
+---
+
+## Working protocol: git commits with a concurrent pipeline — ALWAYS use an explicit pathspec
+
+**Never use bare `git commit` or `git commit --amend` in this repo.** Always name the paths:
+
+```
+git commit -F - -- scripts/world/foo.gd scripts/tests/test_foo.gd
+```
+
+`--amend` and bare `commit` commit **the whole index**, regardless of what you staged. The
+`art/` Blender pipeline runs as a **separate concurrent session** that stages its own work into
+the same index, so files can appear there between your `git status` check and your commit.
+
+**Triggered by:** Electricity Session 3 Task 1 (2026-08-21). An implementer ran `--amend` and
+swallowed **65 `art/` files** into a script-only commit (69 files, +2644/−1497). Repaired with
+`git reset --mixed <prev>`, which moves HEAD and the index but **never touches the working
+tree** — so nothing was lost. Note the one real consequence: the reset **cleared the index**, so
+any deliberate staging by the concurrent session was discarded (content intact, `git add` may
+need repeating).
+
+**Rule is permanent, not session-scoped.** Verify after every commit with
+`git show --name-only --format="" HEAD`.
+
+---
+
 ## Working protocol: worktree absolute paths
 
 When a session runs in a git worktree (CWD = `.claude/worktrees/<branch>/`), Write/Edit tools follow file paths **literally**. Passing a main-repo absolute path (e.g., `C:\Users\elham\facvtorio\docs\...`) writes to the **main repo**, not the worktree — and the cross-repo write is hard to detect because `git status` of the worktree shows clean (the file landed somewhere the worktree's index can't see).
