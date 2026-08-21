@@ -1,13 +1,63 @@
 {
   "name": "chest",
+  "source": "chest.glb",
   "footprint_tiles": 1.0,
-  "canvas_tiles": 2,
-  "render_px": 256,
-  "sprite_px": 64,
-  "anchor_px_from_center": [
-    -0.28,
-    6.04
+  "fit": "footprint",
+  "height_tiles": null,
+  "yaw_correction": 0.0,
+  "cell_tiles": [
+    1,
+    2
   ],
-  "scale_applied": 0.98925,
-  "source_glb": "art\\source\\chest.glb"
+  "sprite_px": [
+    32,
+    64
+  ],
+  "render_px": [
+    128,
+    222
+  ],
+  "anchor_px": [
+    16.0,
+    64.0
+  ],
+  "overhangs_front_edge": false,
+  "normalized_scale": 0.989247,
+  "normalized_extent_tiles": [
+    0.92,
+    0.7469,
+    0.6034
+  ],
+  "material_norm": true,
+  "material_report": [
+    {
+      "material": "rust",
+      "roughness_src": "scalar",
+      "roughness_before": 0.85,
+      "roughness_after": 0.85,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "steel",
+      "roughness_src": "scalar",
+      "roughness_before": 0.7,
+      "roughness_after": 0.7,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    }
+  ],
+  "masters": [
+    {
+      "tag": "chest",
+      "state": null,
+      "yaw": null,
+      "master": "art/renders/chest_4x.png",
+      "sprite": "art/sprites/chest.png",
+      "state_hook": null
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
 }

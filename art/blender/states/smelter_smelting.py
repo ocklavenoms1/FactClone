@@ -1,44 +1,97 @@
-# State hook: smelter "smelting".
-#
-# Invoked by render_asset.py via --extra-py, after normalization and before
-# framing, with `bpy`, `root` and `scale` in scope.
-#
-# The principle for visual states: the MESH IS NEVER REGENERATED. One Tripo
-# generation produces the body; each state is a material/light delta applied at
-# render time. This keeps states pixel-aligned with each other by construction
-# — vital, since the game swaps between them on the same tile.
-#
-# Here: make the furnace mouth emissive and add a warm point light in front of
-# it so the glow spills onto the surrounding hull.
+"""State hook: smelter "smelting".
 
-import bpy
+TWO MECHANISMS LIVE HERE, DELIBERATELY.
 
-# Strength is deliberately low. Anything above ~4 clips to pure white once the
-# 128 px render is downsampled to 32 px, and a white blob reads as a hole in the
-# sprite rather than as heat. Tuned by eye at true in-game size, not at 4x.
-GLOW_RGB = (1.0, 0.42, 0.10)
-GLOW_STRENGTH = 3.0
+1. MASK EMISSION - the standard for assets 4-20.
+   Any region that should glow is painted flat #FF00FF in the concept image.
+   normalize.neutralize_mask() has already replaced that magenta with a dark
+   cavity colour (so it never reaches the screen in ANY state) and handed back
+   the mask socket. This hook reuses that exact socket to drive emission, so
+   the lit region and the neutralized region cannot disagree.
 
-# Match by material name first (real Tripo meshes carry arbitrary object names,
-# so name-matching is a convention we control at export/rename time).
-targets = [m for m in bpy.data.materials
-           if any(k in m.name.lower() for k in ("firebrick", "mouth", "furnace"))]
+   Magenta is used because it appears in no real material in this set.
+   Measured separation in linear RGB from the palette:
+       nearest palette member (fired_clay)  1.194
+       widest pair inside the palette       0.206
+       the distance that killed the old key 0.079
+   The mask sits 15x clear of the failure threshold, so tolerance is no longer
+   a knife-edge - anything up to ~0.60 works.
 
-for m in targets:
-    if not m.use_nodes:
-        m.use_nodes = True
-    bsdf = m.node_tree.nodes.get("Principled BSDF")
-    if bsdf:
-        bsdf.inputs["Emission Color"].default_value = (*GLOW_RGB, 1.0)
-        bsdf.inputs["Emission Strength"].default_value = GLOW_STRENGTH
+   Validate on each new asset with the harness before trusting it:
+       blender -b -P art/blender/dump_texture.py -- --glb art/source/X.glb \
+           --out-dir art/renders/tex
+       python art/tools/keymask.py art/renders/tex/X_basecolor.png
+   It reports the texel-distance histogram and passes only on a clean bimodal
+   gap. JPEG smear around a hard magenta edge is the plausible failure, and
+   this is how we would see it.
 
-# spill light just outside the furnace mouth (-Y face of the hull)
-light_data = bpy.data.lights.new("SmeltGlow", type="POINT")
-light_data.energy = 18.0
-light_data.color = GLOW_RGB
-light_data.shadow_soft_size = 0.3
-glow = bpy.data.objects.new("SmeltGlow", light_data)
-bpy.context.scene.collection.objects.link(glow)
-glow.location = (0.0, -0.95, 0.42)
+2. EMITTER FALLBACK - what the current smelter actually ships with.
+   The existing kiln was generated before the mask existed, so it has no
+   magenta: the harness measures 0.000% of texels within 0.6 of the key, and
+   100% out past 1.2. A warm point light is placed in the furnace mouth from
+   `glow_at` in the manifest instead. It needs nothing from the texture and
+   lights the real recessed geometry rather than faking a glow.
 
-print(f"STATE_HOOK: smelting applied to {len(targets)} material(s)")
+   This mechanism is NOT deprecated yet. It ships until the mask is validated
+   on a real generation; only then does per-asset emitter placement go away.
+
+WHY NOT WIDEN THE PALETTE INSTEAD
+The earlier fix was to add a saturated orange (#FF5A18) so the key would
+separate. That solves the masking problem by making a hot-looking colour
+legitimately available to every cold asset in the set, which Tripo would then
+drift into. It buys a working mask at the cost of palette discipline across
+twenty buildings. The mask belongs outside the palette, not inside it.
+"""
+
+import lock
+
+GLOW_MAX = 2.2                # <= lock.EMISSION_CEILING
+FALLBACK_ENERGY = 26.0
+
+
+def mask_emission(sockets):
+    """Drive emission from the mask socket normalization already built."""
+    lit = 0
+    for mat_name, socket in (sockets or {}).items():
+        mat = bpy.data.materials.get(mat_name)
+        if not mat or not mat.use_nodes:
+            continue
+        nt = mat.node_tree
+        bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not bsdf:
+            continue
+
+        gain = nt.nodes.new("ShaderNodeMath")
+        gain.operation = "MULTIPLY"
+        gain.label = f"mask emission x{GLOW_MAX}"
+        gain.inputs[1].default_value = GLOW_MAX
+        nt.links.new(socket, gain.inputs[0])
+
+        ecol = bsdf.inputs.get("Emission Color")
+        estr = bsdf.inputs.get("Emission Strength")
+        if ecol is not None:
+            ecol.default_value = (*lock.MASK_FIRE_COLOR, 1.0)
+        if estr is not None:
+            nt.links.new(gain.outputs["Value"], estr)
+        lit += 1
+    return lit
+
+
+def emitter(where):
+    data = bpy.data.lights.new("SmeltGlow", type="POINT")
+    data.energy = FALLBACK_ENERGY
+    data.color = lock.MASK_FIRE_COLOR
+    data.shadow_soft_size = 0.12
+    obj = bpy.data.objects.new("SmeltGlow", data)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = tuple(where)
+    return obj
+
+
+lit = mask_emission(globals().get("mask_sockets"))     # noqa: F821
+spot = globals().get("glow_at")                        # noqa: F821
+if spot:
+    emitter(spot)
+
+print(f"STATE smelting: mask-driven emission on {lit} material(s)"
+      f"{'; emitter fallback at ' + str(spot) if spot else '; no emitter'}")

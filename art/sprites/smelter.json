@@ -1,0 +1,63 @@
+{
+  "name": "smelter",
+  "source": "smelter.glb",
+  "footprint_tiles": 2.0,
+  "fit": "footprint",
+  "height_tiles": null,
+  "yaw_correction": 45.0,
+  "cell_tiles": [
+    2,
+    3
+  ],
+  "sprite_px": [
+    64,
+    96
+  ],
+  "render_px": [
+    256,
+    333
+  ],
+  "anchor_px": [
+    32.0,
+    96.0
+  ],
+  "overhangs_front_edge": false,
+  "normalized_scale": 1.97545,
+  "normalized_extent_tiles": [
+    1.84,
+    1.7112,
+    1.242
+  ],
+  "material_norm": true,
+  "material_report": [
+    {
+      "material": "tripo_material_2ad78c50-79de-41cb-bb9d-4eb366a2899d",
+      "roughness_src": "texture",
+      "roughness_after": [
+        0.34,
+        0.86
+      ],
+      "metallic_src": "texture",
+      "metallic_after": "<= 0.55"
+    }
+  ],
+  "masters": [
+    {
+      "tag": "smelter_idle",
+      "state": "idle",
+      "yaw": null,
+      "master": "art/renders/smelter_idle_4x.png",
+      "sprite": "art/sprites/smelter_idle.png",
+      "state_hook": null
+    },
+    {
+      "tag": "smelter_smelting",
+      "state": "smelting",
+      "yaw": null,
+      "master": "art/renders/smelter_smelting_4x.png",
+      "sprite": "art/sprites/smelter_smelting.png",
+      "state_hook": "smelter_smelting.py"
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
+}

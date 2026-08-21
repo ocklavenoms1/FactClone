@@ -1,0 +1,56 @@
+{
+  "name": "smelter_nomatnorm",
+  "source": "smelter.glb",
+  "footprint_tiles": 2.0,
+  "fit": "footprint",
+  "height_tiles": null,
+  "yaw_correction": 45.0,
+  "cell_tiles": [
+    2,
+    3
+  ],
+  "sprite_px": [
+    64,
+    96
+  ],
+  "render_px": [
+    256,
+    333
+  ],
+  "anchor_px": [
+    32.0,
+    96.0
+  ],
+  "overhangs_front_edge": false,
+  "normalized_scale": 1.97545,
+  "normalized_extent_tiles": [
+    1.84,
+    1.7112,
+    1.242
+  ],
+  "material_norm": false,
+  "material_report": [
+    {
+      "material": "tripo_material_2ad78c50-79de-41cb-bb9d-4eb366a2899d"
+    }
+  ],
+  "masters": [
+    {
+      "tag": "smelter_idle_nomatnorm",
+      "state": "idle",
+      "yaw": null,
+      "master": "art/renders/smelter_idle_nomatnorm_4x.png",
+      "sprite": "art/sprites/smelter_idle_nomatnorm.png",
+      "state_hook": null
+    },
+    {
+      "tag": "smelter_smelting_nomatnorm",
+      "state": "smelting",
+      "yaw": null,
+      "master": "art/renders/smelter_smelting_nomatnorm_4x.png",
+      "sprite": "art/sprites/smelter_smelting_nomatnorm.png",
+      "state_hook": "smelter_smelting.py"
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
+}

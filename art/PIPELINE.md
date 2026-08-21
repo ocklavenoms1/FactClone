@@ -1,342 +1,502 @@
-# Stewardship Art Pipeline — Tripo → Blender → Sprite
+# Stewardship art pipeline — Tripo → Blender → sprite
 
-How a building goes from a text prompt to a PNG the game can draw. Written to
-be reproducible by someone who was not present when it was built.
+How a building goes from a prompt to a PNG the game can draw. Reproducible by
+someone who was not here.
 
-Nothing here touches Godot. This pipeline produces PNGs and JSON sidecars; the
+Nothing here touches Godot. This pipeline emits PNGs and JSON sidecars; the
 sprite-loading layer is a separate session.
 
 ---
 
-## 0. The locked constants
+## 0. The lock
 
-These are the reason the asset set looks like one game. **Changing any of them
-invalidates every sprite already rendered** and requires a full re-render.
-Treat a change here the way you would treat a save-schema bump.
+Every constant lives in [`art/blender/lock.py`](blender/lock.py) and is hashed
+into a **lock stamp** written into every asset's metadata JSON. A sprite
+rendered under a changed camera is therefore detectable rather than silently
+wrong.
 
-| Constant | Value | Where |
-|---|---|---|
-| Camera projection | Orthographic | `template.blend` |
-| Camera azimuth | **45°** | `build_template.py: CAM_AZIMUTH_DEG` |
-| Camera pitch | **35° from vertical** | `build_template.py: CAM_PITCH_DEG` |
-| Render resolution | **128 px per tile** (4× target) | `RENDER_PX_PER_TILE` |
-| Final resolution | **32 px per tile** (= `TILE_SIZE`) | `FINAL_PX_PER_TILE` |
-| Scale | 1 Blender unit = 1 game tile | reference cube |
-| Key light | azimuth −90° relative to camera, 50° elevation, warm | 3-sun rig |
-| Fill light | azimuth +60° relative, 30° elevation, cool | 3-sun rig |
-| Rim light | azimuth +180° relative, 25° elevation, white | 3-sun rig |
-| View transform | `Standard` (not AgX) | `template.blend` |
-| Film | Transparent (renders to alpha) | `template.blend` |
+Current stamp: **`434c0cf56d8f`**
 
-**Why 45° / 35°.** 45° azimuth puts two faces of a boxy building in view at
-equal weight, so silhouettes stay legible and the tile grid reads as diamonds
-at a consistent angle. A 35° pitch is shallow enough to show the front face
-(where a furnace mouth or an inserter hand lives) while still reading as a
-top-down factory view. Factorio sits in the same neighbourhood.
+| Constant | Value |
+|---|---|
+| Projection | Orthographic |
+| **Camera azimuth** | **0°** |
+| **Camera pitch** | **60° above the ground plane** (30° from vertical) |
+| `GROUND_SQUASH` = sin 60° | 0.86603 |
+| `WALL_RATIO` = 1/tan 60° | 0.57735 |
+| Tile | 1 Blender unit = 1 tile = 32 px |
+| Supersample | 4× (a 1×1 cell renders 128×111) |
+| Engine | Cycles, CPU, 96 samples |
+| View transform / look | `Standard` / `None` |
+| Film | Transparent |
+| Key light | elev 50°, plan 135°, energy 3.2, sun angle 8° |
+| Fill light | elev 25°, plan 300°, energy 0.85, cool |
+| Rim light | elev 55°, plan 330°, energy 1.15, cool |
+| World ambient | `#6B7891`-ish at 0.22 |
+| Frame pad | 0.04 tiles |
+| Footprint fill | 0.92 |
+| Roughness clamp | [0.34, 0.86] |
+| Metallic ceiling | 0.55 |
+| Emission ceiling | 2.5 |
 
-**Why 4× supersample.** Cycles renders at 128 px per tile and the result is
-box-filtered down to 32. Downsampling a large render preserves edge and
-material detail that a native 32 px render turns to mush, and it leaves
-headroom if `TILE_SIZE` ever increases — the 4× masters are kept in
-`art/renders/`.
+**Why azimuth 0.** At 45° a square ground tile projects to a diamond — that is
+isometric. Factorio's ground grid is axis-aligned squares, and the existing
+`draw_one()` code draws axis-aligned rects on a square grid. A 45° render
+would not sit on that grid.
 
-**Why `Standard` and not AgX.** AgX desaturates and rolls off highlights for
-filmic realism. On a 32 px sprite that reads as washed-out mud. Standard keeps
-the colors that the prompt asked for.
+**Why pitch 60.** A 1-tile-tall wall reads as 0.577 tiles of screen height —
+the shallow 3/4 factory-game proportion — while a ground tile still reads as a
+square after the anamorphic correction below.
 
-**Why the key light is fixed relative to the camera, not to the world.** Every
-sprite is lit from the same screen-space direction, so a chest and a smelter
-placed side by side agree about where the sun is. This is what makes a set of
-independently-generated assets read as one scene.
+**Why `Standard`, not AgX.** AgX desaturates and rolls off highlights for
+filmic realism. At 32 px that is washed-out mud. Keep light energies below
+clipping instead of relying on a tone curve.
+
+**Why the rig is fixed.** Every sprite is lit from the same screen direction,
+so assets placed side by side agree about where the sun is. That agreement is
+most of what makes independently generated assets read as one game.
 
 ---
 
-## 1. Layout
+## 1. The anamorphic correction, and the trap
+
+A horizontal 1×1 tile projects to 1 wide × 0.866 tall. Left alone every sprite
+footprint is a squashed rectangle that will not sit on a square tile.
+
+**`render.pixel_aspect_y` does not work for this.** Blender ignores pixel
+aspect when framing an orthographic camera: renders at `pixel_aspect_y = 0.866`
+and `= 1.0` come back byte-identical, because with square pixels the camera
+frame aspect is forced to equal the resolution aspect.
+
+The correction that works — bake the squash into the render height, undo it in
+the downsample:
+
+```
+render_px_x = cell_w_tiles * 32 * 4
+render_px_y = round(cell_h_tiles * 32 * 4 * 0.86603)
+sprite_px   = (cell_w_tiles * 32, cell_h_tiles * 32)
+camera.sensor_fit = 'HORIZONTAL'
+camera.ortho_scale = cell_w_tiles
+```
+
+The LANCZOS resample to `sprite_px` applies the vertical stretch in the same
+pass, so the image is filtered exactly once.
+
+**Verify, never trust.** [`verify_calibration.py`](blender/verify_calibration.py)
+renders an emissive 1×1 ground plane and measures its opaque bounding box after
+downsample. It must come back exactly 32×32.
+
+```bash
+powershell -ExecutionPolicy Bypass -File art\build.ps1 -Calibrate
+```
+
+Re-run it after any change to the camera or the lock. It currently passes.
+
+---
+
+## 2. Layout
 
 ```
 art/
-  template.blend            THE locked scene. Every render starts here.
-  assets.json               manifest: one row per building
-  build_sprites.ps1         the one command that builds everything
-  PROMPTS.md                the Tripo prompt template + accepted prompts
-  PIPELINE.md               this file
-  source/                   YOUR Tripo GLBs land here (see source/README.md)
-  sprites/                  OUTPUT: 32 px/tile PNGs + JSON sidecars
-  renders/                  OUTPUT: 128 px/tile masters, contact sheets, tests
+  template.blend           THE locked scene (generated, never hand-edited)
+  assets.json              manifest: one row per building
+  build.ps1                the one command
+  PROMPTS.md               prompt template + art direction + Tripo settings
+  PIPELINE.md              this file
+  source/                  YOUR Tripo GLBs (see source/README.md)
+  sprites/                 OUTPUT: final PNGs + metadata JSON
+  renders/                 OUTPUT: 4x masters, turnarounds, verdict sheets
   blender/
-    build_template.py       regenerates template.blend from code
-    render_asset.py         one GLB -> one sprite
-    render_animated.py      body + moving part -> a frame sequence
-    make_proxies.py         crude stand-in GLBs for pipeline testing
-    contact_sheet.py        all sprites at true size over a tile grid
-    strip.py                a row of sprites at a chosen zoom
-    rotation_test.py        the 4-renders-vs-rotate-sprite experiment
-    moving_parts_test.py    the layered-composite experiment
-    states/
-      smelter_smelting.py   per-state material/light hooks
+    lock.py                every locked constant + the lock stamp
+    make_template.py       regenerates template.blend
+    verify_calibration.py  the 32x32 camera check
+    normalize.py           import, normalize, material clamp, framing
+    render_asset.py        one asset -> master PNG(s) + metadata
+    turnaround.py          8-way sheet, to read yaw_correction off
+    analyze_mesh.py        structural report on a Tripo mesh
+    dump_texture.py        extract basecolour/normal/rm to PNG for measurement
+    make_proxies.py        stand-in geometry for testing without Tripo
+    states/                per-state material/light hooks
+  tools/                   system Python (needs Pillow + numpy)
+    downsample.py          premultiplied LANCZOS downsample
+    sheet.py               contact sheets on neutral mid-grey
+    rotation_test.py       the 4-renders-vs-2D-rotation comparison
+    keymask.py             validates the magenta emission mask on a real texture
+    detail_density.py      feature count per tile + high-frequency survival
 ```
 
-The template is **generated from code**, not hand-edited. If it is ever lost or
-corrupted, rebuild it:
+`template.blend` is generated from code, so the lock lives in a reviewable
+diff rather than inside a binary:
 
 ```bash
-blender -b -P art/blender/build_template.py
+blender -b -P art/blender/make_template.py
 ```
-
-Editing `build_template.py` and regenerating is the only supported way to
-change the template — that way the locked constants live in version control
-and a diff shows what changed.
 
 ---
 
-## 2. The everyday loop
+## 3. The everyday loop
 
-1. Write the prompt using the template in `art/PROMPTS.md`.
-2. Generate in Tripo Studio; bring the GLB into `art/source/<name>.glb`
-   (see `art/source/README.md` for the Studio→Blender bridge route).
-3. Add a row to `art/assets.json` if the asset is new.
-4. Build:
+1. Write the prompt from [`PROMPTS.md`](PROMPTS.md); generate in Tripo.
+2. Put the GLB at `art/source/<name>.glb`.
+3. Run the turnaround and **read** the facing off it — never guess:
+   ```bash
+   blender -b art/template.blend -P art/blender/turnaround.py -- \
+       --glb art/source/smelter.glb --name smelter --footprint 2
+   python art/tools/sheet.py --out art/renders/smelter_turnaround.png --label \
+       art/renders/turnaround/smelter_yaw*_4x.png
+   ```
+4. Put that angle into `assets.json` as `yaw_correction`, with the rest of the row.
+5. Build:
+   ```bash
+   powershell -ExecutionPolicy Bypass -File art\build.ps1 -Sheet
+   ```
+6. Judge `art/renders/verdict_truesize.png` **at 100%**. Never at 4×. A sprite
+   that only works magnified does not work.
 
-```bash
-powershell -File art\build_sprites.ps1 -Sheet
-```
-
-5. Look at `art/renders/contact_sheet.png` at 100% zoom. Judge at **true
-   in-game size**, never at 4×. A sprite that only reads when magnified does
-   not work.
-
-Single asset while iterating:
-
-```bash
-powershell -File art\build_sprites.ps1 -Only chest
-```
+Useful flags: `-Only <name>`, `-Calibrate`, `-NoMaterialNorm`.
 
 ### The manifest
 
 ```json
 {
-  "name": "smelter",      // source is art/source/smelter.glb
-  "footprint": 2,          // tiles per side
-  "inset": 0.92,           // fraction of footprint the model fills
-  "max_height": 0,         // tile cap on height; 0 = uncapped
-  "states": ["idle", "smelting"],
-  "yaws": []               // [0,90,180,270] for 4-way buildings
+  "name": "power_pole",
+  "source": "power_pole.glb",
+  "footprint": 1,
+  "fit": "height",
+  "height_tiles": 2.6,
+  "yaw_correction": 0,
+  "states": { "idle": null, "smelting": "smelter_smelting.py" },
+  "yaws": [],
+  "status": "real"
 }
 ```
 
-`inset` is the deliberate gap between a building and its tile edge. 0.92 gives
-a small breathing margin. The power pole uses **0.55** with `max_height: 3.0`,
-because a pole that fills its tile horizontally looks like a tower — thin
-things need a smaller inset and a height cap instead.
+`fit` matters more than it looks. `footprint` scales the XY extent to fill the
+footprint; `height` scales Z to `height_tiles`. **Tall thin assets must use
+`height`** — a pole's footprint carries no usable scale signal, and fitting to
+it makes the pole enormous.
 
 ---
 
-## 3. Scale normalization
+## 4. Import and normalization
 
-Tripo returns models at arbitrary scale, arbitrary origin, arbitrary
-orientation. `render_asset.py` normalizes every import identically:
+### The import trap that costs an hour
 
-1. Import the GLB; discard any camera or light that came with it.
-2. Parent everything to one empty, so normalization is a single transform.
-3. Measure the world-space bounding box of the mesh data.
-4. Compute one uniform scale so the **larger horizontal dimension** equals
-   `footprint × inset` tiles. If that would exceed `max_height`, scale to the
-   height cap instead.
-5. Translate so the footprint centre is at the world origin and the **base sits
-   on Z = 0** — buildings stand on the ground, they do not float or sink.
+The glTF importer leaves objects with `rotation_mode = 'QUATERNION'`. Writing
+`rotation_euler` on such an object is **silently discarded** — the matrix is
+driven by `rotation_quaternion` instead. Every Tripo mesh arrives this way, and
+the failure reports no error: an 8-way turnaround renders eight identical
+images. `import_glb()` forces `'XYZ'` before anything touches a rotation.
 
-Only uniform scale is ever applied. Non-uniform scaling would make one asset's
-proportions disagree with the rest, which is exactly the drift this pipeline
-exists to prevent.
+### Order of operations
 
-### Framing and the anchor sidecar
+1. Force euler rotation mode; drop any camera or light that came with the file.
+2. Yaw by the per-asset `yaw_correction` so the front faces **−Y** (toward camera).
+3. Uniform scale, by `fit`. Uniform only — non-uniform scale would make this
+   asset's proportions disagree with every other asset.
+4. Centre on the footprint centre in XY; sit `bbox.min.z` on the ground.
 
-After normalization the silhouette is measured **in camera space** and the
-canvas is grown to a whole number of tiles around it. A 1×1 building does not
-produce a 32×32 sprite: rotated 45°, a one-tile box is about 1.41 tiles wide,
-and the pitch adds height on top. The chest lands on a 64×64 canvas.
+Bounds are measured with `foreach_get` into numpy. A 1.95M-triangle mesh
+iterated in pure Python takes minutes; this takes milliseconds.
 
-So the sprite cannot simply be centred on the tile. Every sprite gets a JSON
-sidecar:
+### Material normalization
+
+Tripo bakes lighting into base colour and returns PBR chosen by nobody. The
+pass clamps roughness into [0.34, 0.86], metallic to ≤ 0.55, emission to ≤ 2.5,
+with an optional HSV correction before Base Color. Toggle with
+`-NoMaterialNorm` so its effect can be measured.
+
+**A trap here too.** Tripo ships roughness *and* metallic as a packed `_rm`
+texture, so those sockets are **linked** and their `default_value` is ignored —
+clamping the scalar does nothing at all. The clamp is inserted into the node
+chain instead: a clamped Map Range for the roughness band, a Math `MINIMUM` for
+the metallic ceiling (a Map Range would compress the span rather than clamp it).
+
+Measured on the real kiln, pass on vs off: mean 0.41% per-channel change, max
+9/255, concentrated in the brightest 20% of pixels (2.09/255 vs 0.80/255
+elsewhere). It is correctly active but small on this asset — Tripo's `rm` map
+happened to be reasonable. Its cross-asset value cannot be judged from one
+asset.
+
+---
+
+## 5. Framing and the Godot contract
+
+The cell is a whole number of tiles, centred on the footprint's X centre, with
+its **bottom edge on the footprint's front edge** — so tall silhouettes
+overflow upward only.
+
+Screen projection, pre-stretch: `u = x`, `v = sin(60°)·y + cos(60°)·z`.
+
+Each asset emits `art/sprites/<name>.json`:
 
 ```json
 {
-  "name": "power_pole",
-  "footprint_tiles": 1.0,
-  "canvas_tiles": 3,
-  "sprite_px": 96,
-  "anchor_px_from_center": [0.0, 24.61]
+  "cell_tiles": [2, 3],
+  "sprite_px": [64, 96],
+  "anchor_px": [32.0, 96.0],
+  "lock_stamp": "434c0cf56d8f"
 }
 ```
 
-`anchor_px_from_center` is where the building's **footprint centre** sits
-relative to the sprite's centre, in final sprite pixels, +y downward. Godot
-places the sprite so that `sprite_centre + anchor` lands on the tile centre.
-The power pole's anchor is ~24 px below centre because the pole overflows
-upward — which is exactly how a tall object should sit on its tile.
+`anchor_px` is the pixel offset from the sprite's top-left to the footprint's
+**bottom-centre**. Godot draws at `footprint_bottom_centre − anchor_px`. One
+anchor, one rule, and it works for a chest and a pole alike.
 
-This mechanism is what makes vertical overflow work in general, and most of the
-remaining buildings will need it.
+For a 4-way asset the cell is **unioned across all four facings**, so Godot
+carries one anchor per building rather than four.
 
----
+### The pad that buys a whole tile
 
-## 4. Visual states
+`FRAME_PAD_TILES` is 0.04, not 0.10. At 0.10 the pad alone pushed a 1×1 chest
+into a 2-tile-wide cell — a free extra 32 px of nothing.
 
-A state is **not a second generation**. One mesh is rendered more than once
-with a material/light delta applied at render time by a hook in
-`art/blender/states/<asset>_<state>.py`, invoked via `--extra-py`.
-
-`smelter_smelting.py` sets emission on any material whose name contains
-`firebrick`/`mouth`/`furnace` and adds a warm point light in front of the
-furnace mouth so the glow spills onto the hull.
-
-Two reasons this beats generating an "idle smelter" and a "smelting smelter":
-
-- **Registration.** Both states go through identical normalization and framing,
-  so they are pixel-aligned by construction — verified: `smelter_idle` and
-  `smelter_smelting` share canvas `96×96` and anchor `[-0.35, 11.61]`. Two
-  separate Tripo generations would differ in shape and the building would
-  visibly jump when it started smelting.
-- **Cost.** A state is a ~10-line hook, not a generation.
-
-**Tuning note, learned the hard way.** The first smelting pass used emission
-strength 12 and a 60 W spill light. At 4× it looked like glowing metal; after
-downsampling to 32 px it clipped to a pure white rectangle that read as a *hole*
-in the sprite. Tuned down to strength 3 / 18 W. **Judge every state at true
-in-game size** — bright emissive detail is the first thing the downsample
-destroys.
+Worse, `FOOTPRINT_FILL 0.92 + 2 × 0.04` is **exactly 1.000 tiles**, so float
+noise alone decided whether `ceil()` returned 1 or 2. It returned 2, and the
+chest rendered 64 px wide for no reason. `frame()` now uses a tolerance of
+1e-4 tiles — far below one pixel, far above float noise. The chest is 32×64.
 
 ---
 
-## 5. Rotation — settled: render four times
+## 6. Downsampling — premultiply or get halos
 
-**Answer: four renders with the model rotated. Do not rotate the sprite in Godot.**
+Blender writes PNG with **straight (unassociated)** alpha, where fully
+transparent pixels are black. Resizing that bleeds black into every silhouette
+edge and each sprite picks up a dark fringe.
 
-This was tested rather than assumed. `rotation_test.py` renders a deliberately
-asymmetric block (yellow nose pointing −Y, blue fin offset on top) at yaw
-0/90/180/270 and compares it against the same sprite rotated 90/180/270 in 2D,
-as an engine transform would. See `art/renders/rotation_test.png` — top row is
-true 3D renders, bottom row is the 2D rotation.
-
-The 2D row fails in two ways that are obvious side by side:
-
-1. **Lighting rotates with the object.** The baked key light is supposed to
-   come from a fixed screen direction. Rotate the sprite and the lit face swings
-   round with it, so a rotated building disagrees with every neighbour about
-   where the sun is.
-2. **Gravity rotates with the object.** The projection bakes in a specific view
-   direction; spinning it in 2D tips the object over. The bottom row reads as a
-   building lying on its side, not one facing a different way.
-
-Four renders cost four Cycles renders — seconds, and only for the subset of
-buildings that actually rotate. The manifest handles it:
-
-```json
-{ "name": "inserter", "footprint": 1, "yaws": [0, 90, 180, 270] }
-```
-
-producing `inserter_d0.png` … `inserter_d270.png`.
+`downsample.py` premultiplies → resizes (LANCZOS) → unpremultiplies. This is
+the single difference between crisp and muddy at 32 px, and it is why the
+downsample lives in system Python with Pillow rather than in Blender.
 
 ---
 
-## 6. Moving parts — settled: pose in 3D, render the assembly per frame
+## 6b. Detail-density conformance
 
-**Recommendation: generate the moving part as a separate Tripo model, pose it
-in Blender, and render the whole assembly once per frame.** Use
-`render_animated.py`. Do not draw the moving part programmatically, and do not
-alpha-composite a part sprite over a body sprite.
-
-The three candidate approaches, and what testing showed:
-
-**(a) Keep drawing the moving part programmatically in GDScript.** Tempting,
-because the arm-swing interpolation already exists and works. Rejected: a flat
-programmatic rectangle next to a 3D-rendered, textured, three-point-lit body is
-precisely the visual incoherence this whole pipeline exists to eliminate. The
-arm is not a minor detail on an inserter — it is the part the player watches.
-
-**(b) Render body and part as separate sprites, composite in Godot.** Tested in
-`moving_parts_test.py` (see `art/renders/moving_parts_test.png`). It registers
-perfectly — all frames share one canvas and a `[0,0]` anchor — but it is
-**wrong at rear-facing angles**: alpha compositing can only ever draw the arm
-*in front of* the body, so when the arm swings behind the housing it floats over
-it instead of being occluded. Compare against
-`art/renders/inserter_frames.png`, where at 45° the arm is correctly hidden
-behind the housing. Depth ordering cannot be recovered from two flat layers.
-
-**(c) Pose in 3D, render the assembly per frame. ← chosen.** Occlusion,
-contact shading, and the arm's shadow on the body all come out correct for
-free, because it is a real render of a real 3D arrangement.
-
-Cost is modest and bounded: one extra Tripo generation per animated building
-(the part), then N renders. `art/assets.json` lists five frames for the
-inserter; the existing swing interpolation stays exactly as it is and simply
-selects a frame index instead of computing a draw transform.
-
-The one requirement this places on the source art: **the moving part's pivot
-must be at the world origin** when exported, because `render_animated.py` spins
-it about world Z. That is documented in `art/source/README.md`.
-
-Frame sets, rotation sets, and state pairs all share a further rule enforced by
-`--canvas-tiles` / `--center-on-origin`: **a multi-frame set must share one
-canvas and one origin.** Auto-fitting each frame to its own silhouette would
-silently re-centre every frame and the animation would jitter.
-
----
-
-## 7. Output conventions
-
-| Path | Contents |
-|---|---|
-| `art/sprites/<name>.png` | 32 px/tile sprite — what the game loads |
-| `art/sprites/<name>.json` | canvas size, footprint, anchor |
-| `art/sprites/<name>_<state>.png` | one per visual state |
-| `art/sprites/<name>_d<yaw>.png` | one per facing, 4-way buildings |
-| `art/sprites/<name>_f<deg>.png` | animation frames |
-| `art/sprites/<name>_frames.json` | frame list + shared anchor |
-| `art/renders/<name>_4x.png` | 128 px/tile master, kept for re-downsampling |
-| `art/renders/contact_sheet.png` | the coherence check |
-
----
-
-## 8. Reproducing from nothing
+Two numbers, both from `art/tools/detail_density.py`. Conformance is judged per
+asset against the budget; it does not need the other assets to exist.
 
 ```bash
-# 1. rebuild the locked template
-blender -b -P art/blender/build_template.py
-
-# 2. (optional) proxy GLBs, to exercise the pipeline with no Tripo assets
-blender -b -P art/blender/make_proxies.py -- --out-dir art/source
-
-# 3. render everything in the manifest
-powershell -File art\build_sprites.ps1 -Sheet
-
-# 4. re-run the two design experiments
-blender -b -P art/blender/rotation_test.py
-blender -b -P art/blender/moving_parts_test.py
+python art/tools/detail_density.py smelter_idle chest power_pole
 ```
 
-Blender is expected at `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`;
-override with `-Blender <path>`.
+**Feature count per tile**, against the cap of six. Counted at *final* sprite
+resolution, because that is where "readable" is decided: Sobel edge magnitude →
+threshold → connected components of ≥3 px, reported at three thresholds so the
+figure is not one lucky cutoff.
 
-### Two environment gotchas, both already worked around in `build_sprites.ps1`
+**High-frequency survival.** Rendering at 4× and downsampling cannot carry any
+spatial frequency above one quarter of the master's Nyquist limit. The tool
+takes the 4× master, measures its power spectrum, and reports the fraction of
+AC energy above that cutoff — energy destroyed no matter how good the filter
+is. The opaque region is cropped, its surround filled with the mean opaque
+luminance so the silhouette does not ring, and a Hann window applied.
 
-- The installed **Tripo3d Blender Bridge** add-on logs to stderr on every
-  headless launch. With `2>&1` and `$ErrorActionPreference = "Stop"`, that
-  benign line becomes a fatal `NativeCommandError`. The script uses
-  `"Continue"` and detects success by looking for a marker in stdout.
-- `@($null)` unrolls to plain `$null` on assignment in PowerShell, and
-  `foreach ($x in $null)` iterates **zero** times — which silently skipped
-  every asset that had no states and no rotations. The script uses an
-  empty-string sentinel instead.
+Measured:
+
+| asset | features/tile (p85) | HF energy destroyed |
+|---|---|---|
+| **smelter** (real, cobbled) | **8.75** — 1.46× over cap | **14.3%** |
+| chest (proxy, flat-shaded) | 3.00 | 2.1% |
+| power_pole (proxy, flat-shaded) | 11.00 | 2.6% |
+
+The kiln throws away roughly **seven times** the spectral energy of flat-shaded
+geometry. That 14.3% is generation effort that provably cannot reach the
+screen — the cobble problem as a number.
+
+Two caveats worth stating. The proxies are untextured flat-shaded geometry, so
+~2% is a *floor*, not a realistic target for a textured asset; the real
+threshold should be set when the first compliant Tripo asset lands. And the
+power pole's high feature count is an artefact of a thin object being measured
+per-tile — density metrics need care on assets that do not fill their footprint.
 
 ---
 
-## 9. Status
+## 7. Visual states
 
-The pipeline is proven end to end on proxy geometry covering all three Session 1
-failure modes (1×1, 2×2 with states, tall-and-thin), plus rotation and
-animation. **The consistency verdict on real Tripo output is still outstanding**
-— see the session report. Proxies were authored in one script with a shared
-material set, so their coherence proves the *renderer* is deterministic and
-proves nothing about Tripo's style drift. That verdict requires the three real
-assets.
+A state is **never a second generation** — two generations would differ in
+shape and the building would jump when it changed state. One mesh is rendered
+more than once with a material/light delta from a hook in `blender/states/`.
+
+For a fused single-material mesh, selecting in **texture space** is the only
+handle available: the mesh has one material and its loose parts are meaningless
+(see §9). So any region that should glow is painted flat `#FF00FF` in the
+concept image, and Blender keys on that.
+
+### Magenta is a mask, not a colour
+
+`normalize.neutralize_mask()` runs on **every** asset in **every** state and
+replaces the magenta with a dark cavity colour, handing back the mask socket.
+The `smelting` hook reuses that same socket to drive emission. Two consequences
+that matter:
+
+- Magenta can never reach the screen. An idle firebox renders as a cold dark
+  opening rather than a magenta rectangle.
+- The lit region and the neutralized region are the same socket, so they cannot
+  disagree.
+
+Measured separation from the palette, linear RGB: nearest member (fired clay)
+**1.194**, versus a widest-pair-inside-the-palette of 0.206 and the **0.079**
+that killed the first attempt. The mask sits 15× clear of the failure
+threshold; tolerance is 0.45 with roughly 0.6 of headroom.
+
+**Why not just widen the palette.** The earlier fix added a saturated orange
+`#FF5A18` so the key would separate. That makes a hot-looking colour
+legitimately available to every *cold* asset in the set, which Tripo will drift
+into — buying a working mask at the cost of palette discipline across twenty
+buildings. The mask belongs outside the palette.
+
+### What the first attempt taught us
+
+Keying on the palette member `hot_iron #8C4A32` had no usable window at all:
+
+| tolerance | texels matched |
+|---|---|
+| 0.340 | 99.83% (the entire model glows) |
+| 0.079 | 4.50% (nearest non-heat palette colour) |
+| 0.036 | 0.00% (nothing glows) |
+
+and the texture held **0.000%** genuinely fiery texels — the concept image had
+no lit firebox to bake.
+
+### Validate before trusting — the harness
+
+```bash
+blender -b -P art/blender/dump_texture.py -- --glb art/source/<name>.glb --out-dir art/renders/tex
+python art/tools/keymask.py art/renders/tex/<name>_basecolor.png
+```
+
+`keymask.py` prints the texel-distance histogram and passes only on a clean
+bimodal gap: a spike near 0, a wide empty band, then the material bulk. The
+plausible failure is JPEG ringing smearing texels continuously out of a hard
+magenta edge — this is how we would see it, on asset 4 rather than asset 14.
+
+Baseline on the current kiln (generated before the mask existed): **0.000%** of
+texels within 0.6 of the key, 100% out beyond 1.2 — correctly reported as
+`NO MASK PRESENT`.
+
+### What ships today
+
+Until the mask passes on a real generation, the smelter ships on the **emitter
+fallback**: a warm point light placed in the furnace mouth from `glow_at` in the
+manifest. One coordinate per asset, nothing required of the texture, and it
+lights the real recessed geometry rather than faking a glow. It is not
+deprecated — per-asset emitter placement goes away only once the mask is
+validated. `smelter_idle` and `smelter_smelting` are otherwise pixel-identical,
+which is the whole point.
+
+---
+
+## 8. Rotation — settled: four renders
+
+Tested, not assumed. `art/renders/rotation_test.png`: top row is four true 3D
+renders with the model rotated; bottom row is the `d0` sprite rotated 90/180/270
+in 2D, as an engine transform would.
+
+The 2D row fails in two ways that need no measurement to see:
+
+1. **Gravity rotates with the sprite.** The projection bakes in a view
+   direction; spinning it in 2D lays the kiln on its side with the chimney
+   pointing sideways.
+2. **Lighting rotates with the sprite.** The baked key swings around, so a
+   rotated building disagrees with its neighbours about where the sun is.
+
+Four renders cost four Cycles renders — seconds, and only for buildings that
+actually rotate. Set `"yaws": [0, 90, 180, 270]`; the cell is unioned across
+all four so Godot still carries one anchor.
+
+---
+
+## 9. Moving parts — recommendation
+
+**Recommended: option 3 for the parts you already animate — keep drawing the
+moving part programmatically — and option 1 only where the motion is a true
+3D rotation.** Reasoning, with the measurements behind it.
+
+**Option 2, splitting a fused mesh, is dead.** Measured on the real kiln via
+`analyze_mesh.py`: the mesh separates into **705 loose parts**, the largest
+spanning 0.659 tiles. They are surface fragments, not components. There is no
+"the arm" to select, and there is only **one material**, so material-slot
+selection is unavailable too. This is not a tuning problem; AI-generated meshes
+are a soup of disconnected patches.
+
+**Option 3 is the right default, and the brief's instinct is correct.** The
+arm-swing interpolation already exists and works. Throwing away working code to
+gain a sprite sequence is a bad trade, and the fill-bar cases (accumulator) are
+pure overlay anyway — no geometry is involved at all. Keeping the programmatic
+layer also keeps animation out of the asset budget entirely: no extra
+generations, no frame sets, no sprite-sheet packing.
+
+The cost is a visual seam: a flat drawn shape beside a textured, three-point-lit
+render. Two things keep that acceptable, and both should be applied — sample
+the body's own palette for the drawn part rather than using flat colour, and
+keep drawn parts small relative to the body.
+
+**Option 1 earns its cost only where the motion is genuinely 3D.** A water
+wheel or windmill sail rotates about an axis that, at 60° pitch, traces an
+**ellipse** on screen, not a circle — no 2D transform reproduces it, and the
+spokes self-occlude as they pass behind the hub. Those two buildings want a
+short pre-rendered frame set: one extra generation for the moving part, exported
+with **its pivot at the world origin**, rendered as a full assembly per frame.
+
+**And that budget is far smaller than it sounds, because a rotationally
+symmetric wheel repeats every 360/N degrees.** Render one period and loop it:
+
+| Part | Symmetry | Travel needed | Frames |
+|---|---|---|---|
+| Water wheel | 8 spokes | **45°** | 12 |
+| Windmill sails | 4 sails | **90°** | 16 |
+
+**~28 frames for the entire animated set**, not hundreds. Everything else —
+inserter arm, accumulator fill bar — stays programmatic and costs nothing.
+
+Render the assembly, never composite two sprite layers: alpha compositing can
+only draw the part *in front of* the body, so a spoke swinging behind the hub
+would float over it. Depth ordering cannot be recovered from two flat layers.
+
+Frame sets are out of scope for this session; `render_animated.py` from the
+earlier draft was removed rather than left behind at the wrong camera angle.
+
+---
+
+## 10. Reproducing from nothing
+
+```bash
+blender -b -P art/blender/make_template.py                    # rebuild the lock
+powershell -ExecutionPolicy Bypass -File art\build.ps1 -Calibrate
+blender -b -P art/blender/make_proxies.py -- --out-dir art/source   # optional stand-ins
+powershell -ExecutionPolicy Bypass -File art\build.ps1 -Sheet
+python art/tools/rotation_test.py --name smelter_rot --out art/renders/rotation_test.png
+```
+
+Blender is expected at `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`
+(override with `-Blender`). `art/tools/*` need system Python with Pillow and numpy.
+
+### Environment gotchas already handled
+
+- **PowerShell execution policy.** Scripts are blocked by default here; run
+  `build.ps1` with `-ExecutionPolicy Bypass`.
+- **Blender stderr.** The installed Tripo Blender Bridge add-on logs to stderr
+  on every headless launch. With `2>&1` and `$ErrorActionPreference = "Stop"`
+  that benign line becomes a fatal `NativeCommandError`. `build.ps1` uses
+  `"Continue"` and detects success from stdout markers.
+- **Blender 5.x** renamed `BLENDER_EEVEE_NEXT` back to `BLENDER_EEVEE`. The
+  pipeline uses Cycles on CPU: a 128×111 render is well under a second and
+  headless EEVEE needs a GPU context that is not available here.
+
+---
+
+## 11. Status
+
+| | |
+|---|---|
+| Camera calibration | **PASS** — emissive 1×1 plane measures 32×32 |
+| Real Tripo assets | **1 of 3** (smelter). Chest and power pole are proxies. |
+| Consistency verdict | **pending** — needs all three real |
+| Smelter art direction | **REJECTED**, regenerate from `PROMPTS.md` |
+| Smelter detail density | **FAIL** — 8.75 features/tile vs cap 6; 14.3% HF energy destroyed |
+| Emission mask (magenta) | **built, validated analytically** (15× margin); awaiting a real generation to key on |
+| Shipping state mechanism | per-asset `glow_at` emitter — **not deprecated** until the mask passes |
+
+The pipeline is complete and verified end to end. What it now needs is assets:
+three concept images in one batch, verified by silhouette, through Tripo
+image-to-3D. Everything up to that point has passed.

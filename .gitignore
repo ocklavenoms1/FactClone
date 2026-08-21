@@ -43,5 +43,8 @@ exports/
 # The 4x masters are large, regenerable intermediates; source GLBs are large
 # binaries that live with the Tripo account, not in git history.
 art/renders/*_4x.png
+art/renders/turnaround/
 art/source/*.glb
 
+art/renders/_calib*
+art/renders/tex/

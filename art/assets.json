@@ -1,51 +1,78 @@
 {
-  "_comment": [
-    "Asset manifest for the sprite pipeline. build_sprites.ps1 reads this and",
-    "renders every entry. Adding building 4..20 means adding a row here and",
-    "dropping <name>.glb into art/source/ — no script changes.",
-    "",
-    "  name        output basename; source GLB must be art/source/<name>.glb",
-    "  footprint   tiles per side (1 or 2)",
-    "  inset       fraction of the footprint the model fills (0.92 default)",
-    "  max_height  cap in tiles, 0 = uncapped. Use for very tall silhouettes.",
-    "  states      extra renders sharing one mesh; hook in art/blender/states/",
-    "  yaws        4-way buildings list [0,90,180,270]; omit for fixed ones",
-    "  animated    body+part frame sequence; see PIPELINE.md 'Moving parts'"
-  ],
+  "_schema": {
+    "name": "output basename; renders to art/sprites/<name>.png",
+    "source": "filename in art/source/ (defaults to <name>.glb)",
+    "footprint": "tiles per side, 1 or 2",
+    "fit": "'footprint' scales XY to fill the footprint; 'height' scales Z to height_tiles",
+    "height_tiles": "required when fit=height. Tall thin assets MUST use height - a pole's footprint carries no usable scale signal",
+    "footprint_fill": "override lock.FOOTPRINT_FILL for this asset",
+    "yaw_correction": "degrees to rotate so the front faces -Y. Determined from an 8-way turnaround, never guessed",
+    "states": "map of state name -> hook filename in art/blender/states/, or null",
+    "yaws": "[0,90,180,270] for 4-way buildings; [] for fixed. Cell is unioned across all four",
+    "hsv": "optional {hue,saturation,value} correction injected before Base Color",
+    "status": "real = generated in Tripo; proxy = placeholder stand-in geometry",
+    "glow_at": "furnace/firebox position in tiles, after yaw_correction. Drives the emitter fallback until the magenta mask is validated on a real generation.",
+    "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py."
+  },
   "assets": [
     {
-      "name": "chest",
-      "footprint": 1,
-      "inset": 0.92,
-      "max_height": 0,
-      "states": [],
-      "yaws": []
+      "name": "smelter",
+      "source": "smelter.glb",
+      "footprint": 2,
+      "fit": "footprint",
+      "yaw_correction": 45,
+      "states": {
+        "idle": null,
+        "smelting": "smelter_smelting.py"
+      },
+      "yaws": [],
+      "status": "real",
+      "note": "Tripo 'stone kiln 3d model'. REJECTED on art direction: conical, outrigger outside the footprint (38% of sprite width, building rendered 1.69x smaller), cobbled stone (8.75 features/tile vs cap 6; 14.3% of HF energy destroyed by the downsample). No magenta mask - keymask.py reports NO MASK PRESENT - so it ships on the glow_at emitter. Regenerate from PROMPTS.md.",
+      "glow_at": [
+        -0.28,
+        -0.46,
+        0.16
+      ],
+      "_glow_at_note": "furnace-mouth position after yaw_correction, in tiles. Used by the smelting state's emitter fallback."
     },
     {
-      "name": "smelter",
-      "footprint": 2,
-      "inset": 0.92,
-      "max_height": 0,
-      "states": ["idle", "smelting"],
-      "yaws": []
+      "name": "chest",
+      "source": "chest.glb",
+      "footprint": 1,
+      "fit": "footprint",
+      "yaw_correction": 0,
+      "states": {},
+      "yaws": [],
+      "status": "proxy",
+      "note": "PLACEHOLDER. Not a Tripo asset - proves the 1x1 path only."
     },
     {
       "name": "power_pole",
+      "source": "power_pole.glb",
       "footprint": 1,
-      "inset": 0.55,
-      "max_height": 3.0,
-      "states": [],
-      "yaws": []
-    }
-  ],
-  "animated": [
+      "fit": "height",
+      "height_tiles": 2.6,
+      "yaw_correction": 0,
+      "states": {},
+      "yaws": [],
+      "status": "proxy",
+      "note": "PLACEHOLDER. fit=height is the point: fitting a pole to its footprint would make it enormous."
+    },
     {
-      "name": "inserter",
-      "body": "inserter_body.glb",
-      "part": "inserter_arm.glb",
-      "footprint": 1,
-      "canvas_tiles": 3,
-      "frames": [0, 45, 90, 135, 180]
+      "name": "smelter_rot",
+      "source": "smelter.glb",
+      "footprint": 2,
+      "fit": "footprint",
+      "yaw_correction": 45,
+      "states": {},
+      "yaws": [
+        0,
+        90,
+        180,
+        270
+      ],
+      "status": "test",
+      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor."
     }
   ]
 }

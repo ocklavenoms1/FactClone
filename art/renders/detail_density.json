@@ -1,0 +1,95 @@
+{
+  "smelter_idle": {
+    "footprint_tiles": 2.0,
+    "features": {
+      "thresholds": {
+        "p75": 44,
+        "p85": 35,
+        "p92": 21
+      },
+      "tiles": 4.0,
+      "per_tile": {
+        "p75": 11.0,
+        "p85": 8.75,
+        "p92": 5.25
+      }
+    },
+    "high_frequency": {
+      "master_px": [
+        236,
+        228
+      ],
+      "cutoff_norm_freq": 0.25,
+      "energy_lost_pct": 14.3,
+      "energy_bands_pct": {
+        "0.000-0.125": 72.0,
+        "0.125-0.250": 13.7,
+        "0.250-0.500": 9.0,
+        "0.500-1.000": 4.9,
+        "1.000-1.500": 0.4
+      }
+    }
+  },
+  "chest": {
+    "footprint_tiles": 1.0,
+    "features": {
+      "thresholds": {
+        "p75": 1,
+        "p85": 3,
+        "p92": 5
+      },
+      "tiles": 1.0,
+      "per_tile": {
+        "p75": 1.0,
+        "p85": 3.0,
+        "p92": 5.0
+      }
+    },
+    "high_frequency": {
+      "master_px": [
+        118,
+        117
+      ],
+      "cutoff_norm_freq": 0.25,
+      "energy_lost_pct": 2.1,
+      "energy_bands_pct": {
+        "0.000-0.125": 94.3,
+        "0.125-0.250": 3.6,
+        "0.250-0.500": 1.7,
+        "0.500-1.000": 0.4,
+        "1.000-1.500": 0.0
+      }
+    }
+  },
+  "power_pole": {
+    "footprint_tiles": 1.0,
+    "features": {
+      "thresholds": {
+        "p75": 7,
+        "p85": 11,
+        "p92": 6
+      },
+      "tiles": 1.0,
+      "per_tile": {
+        "p75": 7.0,
+        "p85": 11.0,
+        "p92": 6.0
+      }
+    },
+    "high_frequency": {
+      "master_px": [
+        108,
+        204
+      ],
+      "cutoff_norm_freq": 0.25,
+      "energy_lost_pct": 2.6,
+      "energy_bands_pct": {
+        "0.000-0.125": 90.3,
+        "0.125-0.250": 7.1,
+        "0.250-0.500": 1.7,
+        "0.500-1.000": 1.0,
+        "1.000-1.500": 0.0
+      }
+    }
+  }
+}

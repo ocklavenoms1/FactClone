@@ -1,13 +1,81 @@
 {
   "name": "power_pole",
+  "source": "power_pole.glb",
   "footprint_tiles": 1.0,
-  "canvas_tiles": 2,
-  "render_px": 256,
-  "sprite_px": 64,
-  "anchor_px_from_center": [
-    0.0,
-    14.71
+  "fit": "height",
+  "height_tiles": 2.6,
+  "yaw_correction": 0.0,
+  "cell_tiles": [
+    1,
+    3
   ],
-  "scale_applied": 0.61111,
-  "source_glb": "art\\source\\power_pole.glb"
+  "sprite_px": [
+    32,
+    96
+  ],
+  "render_px": [
+    128,
+    333
+  ],
+  "anchor_px": [
+    16.0,
+    96.0
+  ],
+  "overhangs_front_edge": false,
+  "normalized_scale": 0.9319,
+  "normalized_extent_tiles": [
+    0.8387,
+    0.5125,
+    2.6
+  ],
+  "material_norm": true,
+  "material_report": [
+    {
+      "material": "creosote",
+      "roughness_src": "scalar",
+      "roughness_before": 0.95,
+      "roughness_after": 0.86,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "ceramic",
+      "roughness_src": "scalar",
+      "roughness_before": 0.35,
+      "roughness_after": 0.35,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "concrete",
+      "roughness_src": "scalar",
+      "roughness_before": 0.95,
+      "roughness_after": 0.86,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "galvanized",
+      "roughness_src": "scalar",
+      "roughness_before": 0.4,
+      "roughness_after": 0.4,
+      "metallic_src": "scalar",
+      "metallic_before": 0.8,
+      "metallic_after": 0.55
+    }
+  ],
+  "masters": [
+    {
+      "tag": "power_pole",
+      "state": null,
+      "yaw": null,
+      "master": "art/renders/power_pole_4x.png",
+      "sprite": "art/sprites/power_pole.png",
+      "state_hook": null
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
 }

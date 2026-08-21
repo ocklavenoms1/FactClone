@@ -1,0 +1,150 @@
+{
+  "source": "smelter.glb",
+  "yaw_applied": 45.0,
+  "objects": 1,
+  "triangles": 1951573,
+  "vertices": 1020282,
+  "materials": [
+    "tripo_material_2ad78c50-79de-41cb-bb9d-4eb366a2899d"
+  ],
+  "textures": [
+    [
+      "stone+kiln+3d+model_basecolor.jpg",
+      [
+        8192,
+        8192
+      ]
+    ],
+    [
+      "stone+kiln+3d+model_normal.jpg",
+      [
+        4096,
+        4096
+      ]
+    ],
+    [
+      "stone+kiln+3d+model_rm.jpg",
+      [
+        4096,
+        4096
+      ]
+    ]
+  ],
+  "normalized_extent_tiles": [
+    1.84,
+    1.711,
+    1.242
+  ],
+  "footprint_tiles": 2.0,
+  "loose_parts": 705,
+  "parts_top": [
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d",
+      "tris": 65601,
+      "extent": [
+        0.52,
+        0.659,
+        0.366
+      ],
+      "center_xy": [
+        -0.66,
+        -0.423
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.039",
+      "tris": 53292,
+      "extent": [
+        0.743,
+        0.507,
+        0.32
+      ],
+      "center_xy": [
+        -0.459,
+        0.025
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.122",
+      "tris": 39550,
+      "extent": [
+        0.33,
+        0.524,
+        0.367
+      ],
+      "center_xy": [
+        0.131,
+        -0.076
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.007",
+      "tris": 37728,
+      "extent": [
+        0.432,
+        0.35,
+        0.309
+      ],
+      "center_xy": [
+        -0.274,
+        -0.65
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.059",
+      "tris": 36972,
+      "extent": [
+        0.215,
+        0.554,
+        0.372
+      ],
+      "center_xy": [
+        -0.087,
+        -0.331
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.008",
+      "tris": 36219,
+      "extent": [
+        0.408,
+        0.197,
+        0.338
+      ],
+      "center_xy": [
+        -0.421,
+        -0.668
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.052",
+      "tris": 35725,
+      "extent": [
+        0.327,
+        0.504,
+        0.411
+      ],
+      "center_xy": [
+        -0.041,
+        -0.397
+      ]
+    },
+    {
+      "name": "tripo_node_2ad78c50-79de-41cb-bb9d-4eb366a2899d.076",
+      "tris": 33626,
+      "extent": [
+        0.225,
+        0.445,
+        0.481
+      ],
+      "center_xy": [
+        0.161,
+        -0.401
+      ]
+    }
+  ],
+  "core_xy_tiles": 0.659,
+  "full_xy_tiles": 1.84,
+  "core_fraction_of_footprint": 0.33,
+  "scale_lost_to_overhang": 0.642
+}

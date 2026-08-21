@@ -1,0 +1,72 @@
+{
+  "name": "smelter_rot",
+  "source": "smelter.glb",
+  "footprint_tiles": 2.0,
+  "fit": "footprint",
+  "height_tiles": null,
+  "yaw_correction": 45.0,
+  "cell_tiles": [
+    3,
+    3
+  ],
+  "sprite_px": [
+    96,
+    96
+  ],
+  "render_px": [
+    384,
+    333
+  ],
+  "anchor_px": [
+    48.0,
+    96.0
+  ],
+  "overhangs_front_edge": true,
+  "normalized_scale": 1.97545,
+  "normalized_extent_tiles": [
+    1.84,
+    1.7112,
+    1.242
+  ],
+  "material_norm": true,
+  "material_report": [
+    {
+      "material": "tripo_material_2ad78c50-79de-41cb-bb9d-4eb366a2899d"
+    }
+  ],
+  "masters": [
+    {
+      "tag": "smelter_rot_d0",
+      "state": null,
+      "yaw": 0,
+      "master": "art/renders/smelter_rot_d0_4x.png",
+      "sprite": "art/sprites/smelter_rot_d0.png",
+      "state_hook": null
+    },
+    {
+      "tag": "smelter_rot_d90",
+      "state": null,
+      "yaw": 90,
+      "master": "art/renders/smelter_rot_d90_4x.png",
+      "sprite": "art/sprites/smelter_rot_d90.png",
+      "state_hook": null
+    },
+    {
+      "tag": "smelter_rot_d180",
+      "state": null,
+      "yaw": 180,
+      "master": "art/renders/smelter_rot_d180_4x.png",
+      "sprite": "art/sprites/smelter_rot_d180.png",
+      "state_hook": null
+    },
+    {
+      "tag": "smelter_rot_d270",
+      "state": null,
+      "yaw": 270,
+      "master": "art/renders/smelter_rot_d270_4x.png",
+      "sprite": "art/sprites/smelter_rot_d270.png",
+      "state_hook": null
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
+}
