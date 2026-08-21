@@ -327,7 +327,8 @@ func _ready() -> void:
 	_player_last_region = GridWorld.region_of_world_pos(player.global_position)
 	grid_world.update_vision(_player_last_region)
 
-	# Scenario boot flag: `godot --path . -- --scenario=electric_rig`.
+	# Scenario boot flags: `godot --path . -- --scenario=electric_rig`, or
+	# `-- --scenario=pole_tiers` for the Electricity Session 3 rig.
 	#
 	# MUST run here and not earlier. The rig is placed relative to the PLAYER
 	# TILE, and the player position is not final until the save-or-generate
@@ -339,9 +340,17 @@ func _ready() -> void:
 	# everything after a bare `--`, which is the only form Godot itself will
 	# not consume. A bare `--verbose` without the separator is eaten by the
 	# engine and never reaches the project.
+	#
+	# The two scenarios are mutually exclusive: both rigs register through the
+	# same _rig_* variables and both are lever-driven by F8, so spawning both
+	# would leave F8 attached to whichever ran second while the first went dark
+	# 16 seconds later. `break` on the first match enforces that.
 	for arg in OS.get_cmdline_user_args():
 		if arg == "--scenario=electric_rig":
 			_spawn_electric_rig(grid_world.world_to_tile(player.global_position))
+			break
+		if arg == "--scenario=pole_tiers":
+			_spawn_pole_tier_rig(grid_world.world_to_tile(player.global_position))
 			break
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
@@ -495,6 +504,27 @@ func _process(delta: float) -> void:
 			_show_toast("[debug] Rig already exists at %s. Shift+F10 to allow respawn." % str(_rig_origin))
 		else:
 			_spawn_electric_rig(grid_world.world_to_tile(player.global_position))
+
+	# F7 — spawn the POLE TIER rig (Electricity Session 3) below the player:
+	# two basic-pole clusters with a generator each, a medium pole and one
+	# substation bridging them, plus a detached four-pole square as the MST
+	# rendering control. Demand is 4 x 5 + 20 x 1 = exactly 40, same as F10's
+	# rig, so F8 reads identically on either. Same dedup contract: Shift+F7
+	# clears the flag.
+	#
+	# Sits in this group, ABOVE the modal early-return, for the same reason the
+	# F8/F10 pair does — see the block comment above them. This rig has no
+	# CHEST and therefore no panel of its own, but it shares _rig_spawned with
+	# the electric rig, so a player who spawned that one and opened its dest
+	# chest would otherwise find F7 dead while F8 still worked.
+	if Input.is_action_just_pressed("debug_spawn_pole_tier_rig"):
+		if Input.is_key_pressed(KEY_SHIFT):
+			_rig_spawned = false
+			_show_toast("[rig] Rig flag cleared. Next F7 spawns fresh.")
+		elif _rig_spawned:
+			_show_toast("[rig] A rig already exists at %s. Shift+F7 to allow respawn." % str(_rig_origin))
+		else:
+			_spawn_pole_tier_rig(grid_world.world_to_tile(player.global_position))
 
 	# F8 is THE LEVER — FULL -> BROWNOUT -> ZERO -> FULL, by changing how many
 	# of the rig's generators have fuel. Nothing is built or removed, so the
@@ -1456,6 +1486,39 @@ func _spawn_electric_rig(player_tile: Vector2i) -> void:
 	# cyan body and the same dark-grey no-power tint, so the only thing that
 	# distinguishes the one under test is the pair of chests flanking it.
 	_show_toast("[rig] Ready — hero inserter at %s between two chests. F8 cycles power." % str(rig["hero"]))
+
+## Spawn the pole-tier smoke rig (Electricity Session 3, PAUSE 1).
+## Mirrors _spawn_electric_rig's dedup + toast conventions exactly. The two
+## rigs share ElectricRig's power lever, so F8 works on whichever is spawned.
+##
+## _rig_source_chest / _rig_source_seeded are reset rather than left alone: the
+## pole-tier rig has NO source chest, and a stale seeded flag left over from an
+## earlier electric rig would send _cycle_rig_power's refill_source at a chest
+## that belongs to whatever is standing at those coordinates now. Writing false
+## here is what makes that branch unreachable — verified at _cycle_rig_power,
+## which guards the refill behind `if _rig_source_seeded`.
+##
+## There is no ADOPTED branch, unlike _spawn_electric_rig. PoleTierRig.build
+## always reports adopted = false because this rig has no chest to protect from
+## re-seeding, so spawning onto an intact copy of itself is reported as
+## INCOMPLETE — accurate, since nothing was built — and cleared with Shift+F7.
+func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
+	var origin: Vector2i = player_tile + PoleTierRig.ORIGIN_OFFSET
+	var rig: Dictionary = PoleTierRig.build(grid_world, origin)
+
+	_rig_spawned = true
+	_rig_origin = origin
+	_rig_gen_anchors = rig["gen_anchors"]
+	_rig_source_chest = Vector2i.ZERO
+	_rig_source_seeded = false
+	_rig_power_state = ElectricRig.POWER_FULL
+
+	var placed: int = int(rig["placed"])
+	var skipped: int = int(rig["skipped"])
+	if skipped > 0:
+		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F7 for a clean one." % [placed, placed + skipped, skipped])
+		return
+	_show_toast("[rig] Pole tiers ready — substation at %s bridges two clusters. East block is the basic-pole MST control. F8 cycles power." % str(rig["substation"]))
 
 ## THE LEVER (F8). FULL -> BROWNOUT -> ZERO -> FULL by changing how many of the
 ## rig's generators have fuel. Builds nothing and removes nothing, which is the

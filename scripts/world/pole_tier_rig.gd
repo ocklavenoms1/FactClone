@@ -1,0 +1,319 @@
+class_name PoleTierRig
+extends RefCounted
+
+## POLE TIER SMOKE-TEST RIG (session-electricity-pole-tiers, PAUSE 1).
+##
+## Two things to look at, side by side, in one screen. Both blocks sit BELOW
+## the player and run west-to-east across five rows, so the whole rig is one
+## glance with no scrolling:
+##
+##   THE BUS (west, x -1..20) — the MIXED-TIER topology demo. Two basic-pole
+##   clusters too far apart to see each other, each with its OWN steam
+##   generator and its own consumers, plus a MEDIUM POLE and ONE SUBSTATION
+##   positioned to bridge them. Without the substation there are two networks;
+##   with it there is one. That is what makes the either-reaches rule and the
+##   substation's range 11 visible rather than merely asserted.
+##
+##   THE CONTROL BLOCK (east, x 26..29) — the MST REGRESSION CONTROL. Basic
+##   poles ONLY, four of them in a square 3 apart on both axes, which is the
+##   dense arrangement behind the original complaint: POLE_RANGE was cut from
+##   5 to 3 at Foundation PAUSE 1 because a 5-tile range "produced too many
+##   in-range pairs in dense layouts (K4 with 6 wires for 4 poles)" — see the
+##   POLE_RANGE docstring in power_network.gd. Session 3 replaces mesh
+##   rendering with a minimum spanning tree, which changes SHIPPED,
+##   GATE-APPROVED visuals, so the simple basic-pole case needs to be judged
+##   against what it looked like before. All six pairs in this square are at
+##   Chebyshev exactly 3 — still the whole K4 under the CURRENT range — so the
+##   mesh renderer draws six wires here and the MST must draw three.
+##
+## Demand is pinned at exactly 40, matching the electric rig, so the
+## satisfaction numbers read the same and the F8 lever behaves identically.
+## Composition:
+##    4 x ELECTRIC_INSERTER @ Inserter.POWER_DEMAND_BY_TYPE = 5  -> 20
+##   20 x ELECTRIC_LAMP     @ ElectricLamp.DEMAND           = 1  -> 20
+## ALL of it sits on the BUS. The control block carries no consumers at all:
+## it is a wire-rendering exhibit, and a lamp inside it would split the demand
+## total across two components and move the brownout midpoint off 0.50.
+##
+## Deliberately ABSENT, and must stay absent: ACCUMULATOR (Stage 2 charge and
+## discharge smears the crisp 1.00 / 0.50 / 0.00 states into ramps) and
+## WINDMILL (its supply arm reads state.get("output_active", TRUE) —
+## power_network.gd Stage 1 — so one touching any pole on the bus silently
+## adds 6 units and moves the midpoint off 0.50). There are also no CHESTs and
+## no BELTs anywhere in this rig: nothing here is meant to move items, and
+## Burner.try_pull_fuel reacts to exactly those two types, so their absence is
+## what makes the F8 lever the only thing that can change a generator's fuel.
+##
+## This module owns the LAYOUT. main.gd owns the key binding and the toast.
+## The power LEVER is reused verbatim from ElectricRig — the two rigs share a
+## generator contract, so there is exactly one implementation of "how many
+## generators have fuel" and it cannot drift between scenarios.
+
+# Rig origin relative to the player tile at spawn time. The rig is wide and
+# short so both blocks fit one 1280x720 screen with the bottom row clear of
+# the hotbar strip.
+#
+# MEASURED, not derived, exactly as ElectricRig.ORIGIN_OFFSET was. The
+# arithmetic that makes the measurement checkable: TILE_SIZE is 32, the
+# camera in scenes/main.tscn is authored at zoom 1.5, and the 1920x1080
+# viewport is presented in a 1280x720 window (2/3), so 32 * 1.5 * 2/3 = 32
+# screen pixels per tile at capture resolution. The camera centres on the
+# player, so the tile row N below the player has its top edge at screen
+# y = 344 + 32N, and the hotbar strip starts near y = 635.
+#
+# With y = 1 the paved rows are player+1 .. player+8 and the lowest BUILDING
+# row (rig y 6) spans screen y 568..600 — two full tiles of clearance. The
+# whole rig is below the player, so the player's own tile is never inside the
+# footprint and can never collide with a placement. x = -14 centres the
+# 33-column paved rectangle on the player's column.
+const ORIGIN_OFFSET: Vector2i = Vector2i(-14, 1)
+
+# Phase 1 paving rectangle, INCLUSIVE, in rig-relative coordinates. Strictly
+# contains every building cell (x -1..29, y 0..6) with a one-tile margin on
+# three sides. There is no margin above row 0 on purpose: a row of stone above
+# the top lamps would be the first thing the eye lands on and it borders
+# nothing.
+const PAVE_MIN: Vector2i = Vector2i(-2, 0)
+const PAVE_MAX: Vector2i = Vector2i(30, 7)
+
+# --- THE BUS: mixed-tier bridge demo ---------------------------------------
+# Everything that carries power sits on row y = 2. Cluster A basic poles at
+# x = 0 and 3 (Chebyshev 3 apart: exactly POLE_RANGE, so they join). Cluster B
+# at x = 16 and 19. The two clusters are 13 apart — far beyond basic range and
+# beyond the medium pole's reach from either side.
+#
+# THE NUMBERS ARE THE TEST. Substation range is 11, anchored at x = 12:
+#   - to cluster B's near pole at x=16: distance 4  <= 11  -> joins.
+#   - to cluster A's far pole at x=3:   distance 9  <= 11  -> joins, but ONLY
+#     because either-reaches uses max(11, 3). Under a both-reaches (min) rule
+#     it would need distance <= 3 and the bridge would not form.
+# Both links are longer than basic range 3, so BOTH of them depend on the
+# either-reaches decision. Flip the rule to min and this rig visibly splits.
+const CLUSTER_A_POLES: Array = [Vector2i(0, 2), Vector2i(3, 2)]
+const CLUSTER_B_POLES: Array = [Vector2i(16, 2), Vector2i(19, 2)]
+
+# 2x2, anchored top-left, so it occupies (12,2) (13,2) (12,3) (13,3).
+const SUBSTATION_OFFSET: Vector2i = Vector2i(12, 2)
+
+# A medium pole at x=8, 5 from cluster A's far pole (x=3). 5 > 3 and 5 <= 6,
+# so it reaches the basic pole but the basic pole cannot reach it: the
+# asymmetric case, on screen. It is 8 from cluster B's near pole (x=16), which
+# is what makes removing the substation ORPHAN cluster B rather than leaving
+# the medium pole to bridge it — 8 > 6.
+const MEDIUM_POLE_OFFSET: Vector2i = Vector2i(8, 2)
+
+# --- THE CONTROL BLOCK: MST regression control -----------------------------
+# Four basic poles, 3 apart on both axes, so all six pairs are at Chebyshev
+# exactly 3 — the K4. Mesh: six wires. MST: three.
+#
+# ITS SEPARATION FROM THE BUS IS LOAD-BEARING and is why it sits this far
+# east. A pole anywhere within 11 of the substation joins the bus under
+# either-reaches, and the substation's east footprint column is x = 13, so the
+# block has to start at x >= 25 to be out of reach at all. x = 26 gives
+# distance 13 — a margin of 2 under both an anchor-to-anchor and a
+# footprint-to-footprint reading of the range rule, so it stays isolated
+# whichever way Task 4 measures. It is also 7 from cluster B's far pole
+# (x = 19) against basic range 3.
+#
+# If this block ever merges into the bus, its wire count stops being
+# comparable to the pre-MST behaviour and the exhibit is worthless — which is
+# exactly what sub-case (3) of test_pole_tier_rig.gd pins.
+const MST_CONTROL_POLES: Array = [
+	Vector2i(26, 2), Vector2i(29, 2), Vector2i(26, 5), Vector2i(29, 5),
+]
+
+# Generators. Two steam generators (2x2, MAX_OUTPUT 20 each), one per cluster,
+# each CARDINALLY TOUCHING that cluster's near pole. Generators use
+# PowerNetwork._adjacent_component_id, NOT the consumers' wireless supply
+# area, so "near a pole" is not enough and a diagonal step off the bus
+# contributes nothing while looking perfectly correct on screen.
+#
+# The arithmetic, from Buildings.edge_cells: a 2x2 at anchor (ax, ay) has its
+# N edge at y = ay - 1 across x in {ax, ax+1}. Anchoring at y = 3 therefore
+# puts the N edge on row 2, which IS the pole row:
+#   gen A (0,3) -> N edge (0,2) (1,2); (0,2) is cluster A's near pole.
+#   gen B (16,3) -> N edge (16,2) (17,2); (16,2) is cluster B's near pole.
+#
+# Placed with dir 0 (Belt.DIR_E, the canonical orientation), which leaves the
+# fuel port on the S edge — (0,5) (1,5) and (16,5) (17,5). Those are bare
+# stone and a lamp respectively, and Burner._try_pull_fuel_at_cell reacts to
+# BELT and CHEST only, so neither generator can ever pull fuel from the world.
+# That is what makes the lever authoritative: fuel_buffer changes only because
+# the lever wrote it or because the generator burned a unit.
+#
+# One generator per cluster is also the failure mode worth seeing: in
+# BROWNOUT only gen A stays lit, so if the bridge is broken cluster B goes
+# dark instead of merely dimming.
+const GEN_A_OFFSET: Vector2i = Vector2i(0, 3)
+const GEN_B_OFFSET: Vector2i = Vector2i(16, 3)
+
+# The four ELECTRIC_INSERTERs — 5 units each, 20 total. Pure LOAD: constant
+# demand means an inserter with nothing to move still draws its full 5, which
+# is the session-inserter-electric design decision doing work here.
+#
+# Faced Belt.DIR_S so the SOURCE tile is the one to the NORTH (dest is south —
+# see the load inserters in ElectricRig.plan for the same convention). Every
+# source lands on row 0, which is bare paved stone in all four columns, so
+# there is provably nothing for them to pick up and they idle forever. Their
+# dests are lamps, which have no inventory.
+const INSERTER_OFFSETS: Array = [
+	Vector2i(-1, 1), Vector2i(4, 1), Vector2i(15, 1), Vector2i(20, 1),
+]
+
+# Power-state lever values, re-exported from ElectricRig so callers need only
+# one import. These are the SAME ints, not parallel definitions.
+const POWER_FULL: int     = ElectricRig.POWER_FULL
+const POWER_BROWNOUT: int = ElectricRig.POWER_BROWNOUT
+const POWER_ZERO: int     = ElectricRig.POWER_ZERO
+
+# The expected placement count, the expected demand total and the expected
+# supply total deliberately do NOT live here. They are literals in
+# test_pole_tier_rig.gd instead, for the reason spelled out on the equivalent
+# comment in electric_rig.gd: a constant beside the plan gets edited in the
+# same breath as the plan, so the test would ratify the new arithmetic instead
+# of failing on it. Changing this layout must mean changing a number in the
+# TEST file, on purpose.
+
+## Build the rig. Returns a dictionary with the same shape ElectricRig.build
+## returns, so main.gd's spawn/toast handling is identical for both.
+##
+## Keys: placed, skipped, gen_anchors, substation, adopted.
+##
+## `adopted` is ALWAYS false. This rig has no adoption path and does not need
+## one: adoption exists in ElectricRig to protect a player's chest from being
+## re-seeded with iron ore, and there is no chest here to protect. Re-spawning
+## onto an intact pole-tier rig reports every cell as skipped, which main.gd
+## surfaces as INCOMPLETE — honest, and recoverable by moving and pressing
+## Shift+F7. The key is kept so the two build() contracts stay interchangeable.
+static func build(world, origin: Vector2i) -> Dictionary:
+	# PHASE 1 — pave the whole rectangle BEFORE placing anything.
+	# can_place_building validates the FULL footprint, so the 2x2 generators
+	# and the 2x2 substation need their overlay on all four cells before their
+	# anchor row runs. Interleaving paving with placement makes the rig
+	# seed-dependent: it would succeed or fail based on what terrain the world
+	# happened to generate underneath. ElectricRig.build has the same split for
+	# the same reason.
+	#
+	# Writing a fresh Tile first clears a WATER base (which can_place_building
+	# rejects) and resets resource_node to its default (which is what lets the
+	# set_overlay past its deposit/tree guard). The set_overlay that follows
+	# records the WHOLE tile into tile_modifications, so the base reset is
+	# saved too — that only holds because the Tile written here carries
+	# Overlay.NONE, which keeps set_overlay off its idempotent early return.
+	#
+	# STONE is legal for every type this rig places: POWER_POLE, MEDIUM_POLE,
+	# SUBSTATION, ELECTRIC_LAMP and ELECTRIC_INSERTER all accept
+	# [NONE, STONE, PATH, SOIL_TILLED], and STEAM_GENERATOR — the strict one —
+	# accepts [STONE, PATH]. STONE is the intersection, and it reads as a
+	# deliberate pad against the surrounding grass.
+	for y in range(PAVE_MIN.y, PAVE_MAX.y + 1):
+		for x in range(PAVE_MIN.x, PAVE_MAX.x + 1):
+			var cell: Vector2i = origin + Vector2i(x, y)
+			# Never repaint under someone else's building. set_overlay would
+			# refuse anyway, but the Tile.new above it would already have
+			# stripped that building's terrain out from under it.
+			if world.has_building_at(cell):
+				continue
+			world.tiles[cell] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE)
+			world.set_overlay(cell, Terrain.Overlay.STONE)
+
+	# PHASE 2 — place.
+	var placed: int = 0
+	var skipped: int = 0
+	var gen_anchors: Array = []
+
+	for entry in _placements():
+		var t: int = int(entry[0])
+		var pos: Vector2i = origin + (entry[1] as Vector2i)
+		var dir: int = int(entry[2])
+		if world.place_building(t, pos, dir):
+			placed += 1
+			if t == Buildings.Type.STEAM_GENERATOR:
+				gen_anchors.append(pos)
+		else:
+			skipped += 1
+
+	# PHASE 3 — light the generators. Same contract as ElectricRig: seed
+	# fuel_buffer directly and let the generator's own tick flip output_active
+	# from there. seed_output is true because update_supply_demand is a
+	# PRE-PASS that runs before the generators' own tick, so without it the rig
+	# is dark for its first two ticks.
+	ElectricRig.apply_power_state(world, gen_anchors, POWER_FULL, true)
+	# Belt and braces — every pole already set the flag inside place_building,
+	# but topology correctness is the whole rig.
+	world.mark_power_network_dirty()
+
+	return {
+		"placed": placed,
+		"skipped": skipped,
+		"gen_anchors": gen_anchors,
+		"substation": origin + SUBSTATION_OFFSET,
+		"adopted": false,
+	}
+
+## The full placement list as [type, rig_relative_offset, dir] triples.
+## Walked by build() and asserted against by test_pole_tier_rig.gd, so the
+## test and the game can never disagree about what the rig contains.
+##
+## dir is 0 (Belt.DIR_E, canonical) for everything that does not care, and is
+## explicit rather than defaulted for the two types that DO: STEAM_GENERATOR,
+## whose fuel port rotates, and ELECTRIC_INSERTER, whose source and dest tiles
+## rotate together.
+static func _placements() -> Array:
+	var out: Array = []
+	for p in CLUSTER_A_POLES:
+		out.append([Buildings.Type.POWER_POLE, p, 0])
+	for p in CLUSTER_B_POLES:
+		out.append([Buildings.Type.POWER_POLE, p, 0])
+	for p in MST_CONTROL_POLES:
+		out.append([Buildings.Type.POWER_POLE, p, 0])
+	out.append([Buildings.Type.MEDIUM_POLE, MEDIUM_POLE_OFFSET, 0])
+	out.append([Buildings.Type.SUBSTATION, SUBSTATION_OFFSET, 0])
+	# Generators before consumers so gen_anchors comes out in A, B order —
+	# the lever fuels the FIRST N anchors, so index 0 is the generator that
+	# stays lit in BROWNOUT.
+	out.append([Buildings.Type.STEAM_GENERATOR, GEN_A_OFFSET, Belt.DIR_E])
+	out.append([Buildings.Type.STEAM_GENERATOR, GEN_B_OFFSET, Belt.DIR_E])
+	for p in INSERTER_OFFSETS:
+		out.append([Buildings.Type.ELECTRIC_INSERTER, p, Belt.DIR_S])
+	for p in _lamp_offsets():
+		out.append([Buildings.Type.ELECTRIC_LAMP, p, 0])
+	return out
+
+## The 20 lamp positions. Each must sit within the supply radius of SOME pole
+## on the BUS or it contributes no demand and the 40 total is missed.
+##
+## Ten of them are placed at EXACTLY the radius of the tier that owns them and
+## outside every other pole's area, so the wide supply radii are load-bearing
+## rather than decorative:
+##
+##   - the six medium-pole lamps are all at Chebyshev exactly 2 from (8,2) and
+##     all at x <= 7, which puts them outside the substation's area (x 8..16)
+##     and 3+ from cluster A's far pole. Only SUPPLY_RADIUS 2 reaches them.
+##   - the four substation lamps are all at Chebyshev exactly 4 from the
+##     substation ANCHOR (12,2) and none is within 2 of the medium pole or 1
+##     of a basic pole. Only SUPPLY_RADIUS 4 reaches them.
+##
+## The substation four are measured from the ANCHOR rather than from the
+## nearest footprint cell on purpose: that is the conservative reading, so
+## they land inside the supply area whether Task 5 projects the radius from
+## the anchor alone or from all four footprint cells.
+##
+## The cluster lamps overlap other areas and that is fine — a consumer resolves
+## to the FIRST pole found and every pole here is on the same component, so
+## overlap changes nothing. (15,2) and the inserter at (15,1) happen to fall
+## inside both cluster B's basic area and the substation's.
+static func _lamp_offsets() -> Array:
+	return [
+		# Cluster A basic poles (0,2) and (3,2), radius 1: 6 lamps.
+		Vector2i(0, 1), Vector2i(-1, 2), Vector2i(1, 2),
+		Vector2i(2, 2), Vector2i(3, 1), Vector2i(4, 2),
+		# Medium pole (8,2), radius 2: 6 lamps, every one at Chebyshev 2.
+		Vector2i(6, 0), Vector2i(6, 1), Vector2i(6, 2),
+		Vector2i(6, 3), Vector2i(6, 4), Vector2i(7, 0),
+		# Substation (12,2), radius 4: 4 lamps, every one at Chebyshev 4 from
+		# the anchor and out of reach of every other pole in the rig.
+		Vector2i(8, 5), Vector2i(16, 5), Vector2i(10, 6), Vector2i(14, 6),
+		# Cluster B basic poles (16,2) and (19,2), radius 1: 4 lamps.
+		Vector2i(15, 2), Vector2i(17, 2), Vector2i(18, 2), Vector2i(20, 2),
+	]
