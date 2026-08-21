@@ -119,6 +119,15 @@ func _build_categories() -> void:
 			# tier. 2-tile reach (bridges 1-tile gap), 1.5s cycle, no filter.
 			# Reuses basic InserterPanel via main.gd dispatch (no filter row).
 			{ "kind": "building", "value": Buildings.Type.LONG_REACH_INSERTER },
+			# Inserter Arc Session 4 (session-inserter-electric): electric
+			# tier. POWER-driven, not fuel-driven — no fuel slot at all; it
+			# draws 5 units/tick from its power network and slows in
+			# proportion when that network browns out. 0.25s cycle at full
+			# satisfaction (the fastest tier), 1-tile reach, and a filter
+			# slot like fast — so it reuses FastInserterPanel via main.gd
+			# dispatch. Needs a pole in range to run: unpowered it parks in
+			# NO POWER rather than NO FUEL.
+			{ "kind": "building", "value": Buildings.Type.ELECTRIC_INSERTER },
 		],
 		"selected": 0,
 	})

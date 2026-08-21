@@ -7,7 +7,8 @@ extends RefCounted
 ## so the sub-case list below is the running index:
 ##
 ##   1. Registry + parametric tables (Task 4).
-##   2. Existing-tier regression — adding rows disturbed nothing (Task 4).
+##   2. Existing-tier regression — the three burner tiers came through the
+##      whole session untouched (Task 4, widened at Task 9).
 ##   3. No fuel path — the tier has no fuel slot, so it must never report a
 ##      fuel problem and must never burn fuel (Task 5).
 ##   4. Constant power demand — registered on the component, and identical
@@ -36,6 +37,8 @@ extends RefCounted
 ##  15. Panel routing — main.gd sends this tier to FastInserterPanel (Task 8).
 ##  16. Supply-area boundary — Chebyshev 1 runs, Chebyshev 2 stalls (Task 8).
 ##  17. Save round-trip of a MID-SWING inserter with a filter set (Task 8).
+##  18. The hotbar slot — the tier is reachable without the dev console
+##      (Task 9).
 ##
 ## Sub-cases 5 and 6 are a PAIR and neither is sufficient alone: correct
 ## duration proves the arithmetic, strictly-increasing progress proves the
@@ -49,6 +52,16 @@ extends RefCounted
 ## mode Task 7 was most at risk of introducing — see 9's own header.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
+
+# Sub-case 18. Preloaded as a CLASS rather than instantiated ad hoc so the
+# slot-budget constant can be read off the script itself.
+const HotbarScript = preload("res://scripts/ui/hotbar.gd")
+
+# The hotbar category the inserter tiers live in. Named, not indexed: the
+# category ORDER is a presentation choice that future sessions may reshuffle,
+# whereas "the electric inserter sits with the other inserters" is the claim
+# worth pinning.
+const HOTBAR_CATEGORY: String = "Inserters"
 
 # Power units drawn by one ELECTRIC_INSERTER. Asserted as a LITERAL rather
 # than read back from Inserter's own table: the point of sub-case 4 is to
@@ -358,7 +371,7 @@ class StubPowerWorld extends RefCounted:
 		return sat
 
 static func test_name() -> String:
-	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling + STATE_NO_POWER + filter end-to-end + panel wiring + supply area + save)"
+	return "electric inserter (registry + tables + no-fuel path + constant power demand + brownout scaling + STATE_NO_POWER + filter end-to-end + panel wiring + supply area + save + hotbar slot)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -380,9 +393,10 @@ static func run(parent: Node) -> Dictionary:
 	_case_panel_routing(failures)
 	_case_supply_area_boundary(parent, failures)
 	_case_save_roundtrip(parent, failures)
+	_case_hotbar_slot(parent, failures)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "17 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected + no-power stall/hold + resume after long outage + epsilon boundary + ceil rounding + status/display regressions + filter gates pickup + panel filter UI + panel routing + supply-area boundary + save round-trip" }
+		return { "ok": true, "message": "18 sub-cases pass: registry/tables + existing-tier regression + no-fuel path + constant power demand + brownout duration + brownout smoothness + fuel tiers unaffected + no-power stall/hold + resume after long outage + epsilon boundary + ceil rounding + status/display regressions + filter gates pickup + panel filter UI + panel routing + supply-area boundary + save round-trip + hotbar slot" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -432,34 +446,130 @@ static func _case_registry_and_tables(parent: Node, failures: Array) -> void:
 
 # ===========================================================================
 # (2) EXISTING-TIER REGRESSION.
-# Cheap insurance that adding the four ELECTRIC_INSERTER rows did not
-# disturb the neighbouring rows in CYCLE_TICKS_BY_TYPE / REACH_BY_TYPE.
+#
+# Session 4 added a tier AND rewrote tick(), draw(), info_lines(), a panel
+# and PowerNetwork. This is the sweep that says the three PRE-EXISTING
+# burner tiers came through all of it unchanged. Widened at Task 9 from
+# "the table rows still read back" to the full tier contract, in two halves:
+#
+#   2a — on a bare world, per tier: the rated cycle_ticks and reach, that the
+#        tier is still a BURNER (is_electric false, power_demand 0), and that
+#        its DATA still declares the `fuel` slot it is fuelled through.
+#   2b — brownout immunity, on a LIVE network really running at 0.5.
+#
+# HONEST SCOPE OF 2b, because its first draft oversold itself. It is a
+# CONTRACT assertion, not a mutation-catcher. effective_cycle_ticks returns at
+# inserter.gd:262 — `if not is_electric(b): return base_ticks` — BEFORE it
+# reads b.anchor or touches `world` at all. So the burner never reaches the
+# satisfaction lookup, and every single-line mutation 2b could catch is caught
+# first by sub-case 7 (basic, satisfaction 0.0 -> 20 would become 400) or by
+# 2a's is_electric/power_demand rows above. Its actual contribution is
+# generality: it states "rated ticks regardless of the world handed in" for
+# all THREE burner tiers, where 7 states it behaviourally for one. The live
+# 0.5 network is used so the claim is made against a non-trivial satisfaction
+# rather than a vacuous 0.0 — not because the code path reads it.
+#
+# The upgrade, if this is ever worth more: tick a fuelled FAST_INSERTER and
+# LONG_REACH_INSERTER on this same rig and pin their delivery ticks. That
+# would exercise tick()'s SEPARATE `if not electric:` fuel gate, which
+# sub-case 7 covers for the basic tier only.
 # ===========================================================================
 static func _case_existing_tier_regression(parent: Node, failures: Array) -> void:
-	var world = _make_world(parent)
-	var placements: Array = [
+	# [type, bare-world position, rated cycle_ticks, reach, label]. Walked
+	# twice below; the position belongs to 2a only.
+	var tiers: Array = [
 		[Buildings.Type.INSERTER,            Vector2i(8, 9),  20, 1, "basic"],
 		[Buildings.Type.FAST_INSERTER,       Vector2i(10, 9), 10, 1, "fast"],
 		[Buildings.Type.LONG_REACH_INSERTER, Vector2i(12, 9), 30, 2, "long-reach"],
 	]
-	for p in placements:
-		var t: int = int(p[0])
-		var pos: Vector2i = p[1]
-		var want_ticks: int = int(p[2])
-		var want_reach: int = int(p[3])
-		var label: String = String(p[4])
+
+	# --- 2a: tables, burner identity and DATA, on a bare world ---
+	var world = _make_world(parent)
+	for row in tiers:
+		var t: int = int(row[0])
+		var pos: Vector2i = row[1]
+		var want_ticks: int = int(row[2])
+		var want_reach: int = int(row[3])
+		var label: String = String(row[4])
 		if not world.place_building(t, pos, Belt.DIR_E):
-			_check(failures, false, "(2) %s inserter placement failed at %s" % [label, str(pos)])
+			_check(failures, false, "(2a) %s inserter placement failed at %s" % [label, str(pos)])
 			continue
 		var b: Building = world.building_at(pos)
 		if b == null:
-			_check(failures, false, "(2) no building at %s after placing %s inserter" % [str(pos), label])
+			_check(failures, false, "(2a) no building at %s after placing %s inserter" % [str(pos), label])
 			continue
 		_check(failures, Inserter.cycle_ticks(b) == want_ticks,
-			"(2) cycle_ticks(%s) should be %d, got %d" % [label, want_ticks, Inserter.cycle_ticks(b)])
+			"(2a) cycle_ticks(%s) should be %d, got %d" % [label, want_ticks, Inserter.cycle_ticks(b)])
 		_check(failures, Inserter.reach(b) == want_reach,
-			"(2) reach(%s) should be %d, got %d" % [label, want_reach, Inserter.reach(b)])
+			"(2a) reach(%s) should be %d, got %d" % [label, want_reach, Inserter.reach(b)])
+		# Still a BURNER. The two assertions are NOT redundant, because the
+		# two functions read POWER_DEMAND_BY_TYPE differently: power_demand
+		# uses .get(type, 0) (inserter.gd:231) and is_electric uses .has(type)
+		# (inserter.gd:238). A stray row with a NONZERO demand trips both; a
+		# stray row valued 0 trips only is_electric — and that is the worse
+		# case, since it silently routes the tier away from the fuel path in
+		# tick() while still looking like it draws nothing.
+		_check(failures, Inserter.is_electric(b) == false,
+			"(2a) is_electric(%s) must stay false — a burner tier that reports electric skips the whole fuel path in tick()" % label)
+		_check(failures, Inserter.power_demand(b) == 0,
+			"(2a) power_demand(%s) must stay 0, got %d — a burner tier that registers demand would drag down the satisfaction of every real consumer on its network" % [label, Inserter.power_demand(b)])
+		# ...and is still fuelled THROUGH a `fuel` slot in its DATA. Without
+		# that row the tier can never receive the fuel its tick() demands and
+		# parks in STATE_NO_FUEL forever — the exact bug the electric tier hit
+		# at Task 4, from the opposite direction.
+		var fuel_slots: int = 0
+		for slot in Buildings.slot_layout_for(t):
+			if str(slot.get("kind", "")) == "fuel":
+				fuel_slots += 1
+		_check(failures, fuel_slots == 1,
+			"(2a) slot_layout_for(%s) must still declare exactly ONE 'fuel' slot, found %d" % [label, fuel_slots])
+	# The electric tier asserted from the OPPOSITE side of the same two
+	# properties, so "burner" and "electric" cannot quietly converge on each
+	# other. Its no-fuel-slot half is sub-case 3's opening assertion and is
+	# deliberately NOT repeated here.
+	var elec: Building = Inserter.make(Vector2i(0, 0), Belt.DIR_E, Buildings.Type.ELECTRIC_INSERTER)
+	_check(failures, Inserter.is_electric(elec) == true,
+		"(2a) is_electric(electric) should be true — the tier is defined by its POWER_DEMAND_BY_TYPE row")
+	_check(failures, Inserter.power_demand(elec) == ELECTRIC_DEMAND,
+		"(2a) power_demand(electric) should be %d, got %d" % [ELECTRIC_DEMAND, Inserter.power_demand(elec)])
 	_disconnect(world); world.queue_free()
+
+	# --- 2b: brownout immunity on a LIVE, browning-out network ---
+	var bw = _build_brownout_world(parent, failures, "(2b)")
+	if bw == null:
+		return
+	_verified_satisfaction(bw, failures, "(2b)", BROWNOUT_SAT, BROWNOUT_DEMAND)
+	# The exact lookup effective_cycle_ticks makes, asserted at the exact tile
+	# the burners below are anchored to — so "immune" is being measured
+	# against a real brownout rather than an accidental 1.0.
+	var sat: float = bw.power_satisfaction_at(ELEC_INS_POS)
+	_check(failures, is_equal_approx(sat, BROWNOUT_SAT),
+		"(2b) SETUP: the tile under test should report satisfaction %.3f, got %.6f — an immunity assertion at full power proves nothing" % [BROWNOUT_SAT, sat])
+	for row2 in tiers:
+		var t2: int = int(row2[0])
+		var want2: int = int(row2[2])
+		var label2: String = String(row2[4])
+		# Built with Inserter.make rather than placed, and that is SAFE rather
+		# than clever: Inserter.make only constructs a Building, registering
+		# it with nothing, and effective_cycle_ticks reads just b.type (via
+		# cycle_ticks and is_electric) before returning for a burner. So an
+		# unplaced ghost sharing a tile with the real electric inserter
+		# disturbs neither the tile map nor the power network. Anchoring it at
+		# ELEC_INS_POS is presentation, not mechanism — it is the tile whose
+		# 0.5 satisfaction was just verified above, so the assertion below
+		# reads as "at the very tile where an electric inserter is measurably
+		# at half speed" rather than at some arbitrary coordinate.
+		var ghost: Building = Inserter.make(ELEC_INS_POS, Belt.DIR_E, t2)
+		var eff: int = Inserter.effective_cycle_ticks(ghost, bw)
+		var if_leaked: int = int(ceil(float(want2) / maxf(Inserter.POWER_EPSILON, sat)))
+		# One assertion, not two. A second `eff == cycle_ticks(ghost)` check
+		# was dropped as dead weight: cycle_ticks reads only b.type, so it can
+		# never disagree with the `want2` literal this already pins without
+		# 2a's cycle_ticks row failing first.
+		_check(failures, eff == want2,
+			"(2b) a burner tier must be completely immune to brownout: effective_cycle_ticks(%s) at satisfaction %.2f should stay %d, got %d (%d would mean the satisfaction divisor reached the fuel path)"
+				% [label2, sat, want2, eff, if_leaked])
+	_disconnect(bw); bw.queue_free()
 
 # ===========================================================================
 # (3) NO FUEL PATH.
@@ -1484,7 +1594,93 @@ static func _case_save_roundtrip(parent: Node, failures: Array) -> void:
 			"(17) the state machine's state should survive the round-trip, saved %d and loaded %d" % [state_before, int(ins_b.state.get("state", -99))])
 	_save_cleanup(world, player_a, world_b, player_b, orig_path)
 
+# ===========================================================================
+# (18) THE HOTBAR SLOT — the tier is reachable without the dev console.
+#
+# Every sub-case above this one tests a building the player had no way to
+# build. Until Task 9 ELECTRIC_INSERTER was placeable ONLY via the dev
+# console's `place` command: the tick logic, the panel, the filter and the
+# whole power integration were correct and unreachable.
+#
+# WHY THIS ONE USES THE REAL DATA STRUCTURE, unlike sub-case 15's file scan.
+# Hotbar's _build_categories() has no scene dependencies — no @onready
+# lookups, no grid_world, no player, no inventory — so the Control
+# instantiates headless and `categories` reads straight back. That is the
+# same technique test_building_ui.gd's hotbar sub-case already uses. Sub-case
+# 15 has to scan main.gd's source precisely because the dispatch it pins does
+# NOT have that property.
+#
+# main.gd needs no new arm for this and deliberately did not get one:
+# _try_place's "building" branch is type-generic — it forwards
+# hotbar.current_value() straight to grid_world.place_building — so the slot
+# alone makes the tier placeable, and its `supports_direction` row in
+# buildings.gd already makes R rotate it before placement.
+# ===========================================================================
+static func _case_hotbar_slot(parent: Node, failures: Array) -> void:
+	var hotbar = HotbarScript.new()
+	parent.add_child(hotbar)
+	hotbar._build_categories()
+
+	var cat: Dictionary = {}
+	for entry in hotbar.categories:
+		if String(entry.get("name", "")) == HOTBAR_CATEGORY:
+			cat = entry
+			break
+	if cat.is_empty():
+		_check(failures, false,
+			"(18) the hotbar has no `%s` category at all, so the tier cannot be placed by a player. Categories present: %s"
+				% [HOTBAR_CATEGORY, str(_category_names(hotbar))])
+		hotbar.queue_free()
+		return
+
+	var slots: Array = cat.get("slots", [])
+	var electric_slots: int = 0
+	for slot in slots:
+		if String(slot.get("kind", "")) == "building" and int(slot.get("value", -1)) == Buildings.Type.ELECTRIC_INSERTER:
+			electric_slots += 1
+	_check(failures, electric_slots == 1,
+		"(18) the `%s` category should hold exactly ONE building slot pointing at ELECTRIC_INSERTER, found %d — with none the tier stays dev-console-only" % [HOTBAR_CATEGORY, electric_slots])
+
+	# The three older tiers are still reachable too. Without this the sub-case
+	# would pass just as happily on a category rewritten to hold the electric
+	# tier ALONE, which is the likeliest way a fourth slot gets made to fit.
+	var older: Array = [
+		[Buildings.Type.INSERTER, "basic"],
+		[Buildings.Type.FAST_INSERTER, "fast"],
+		[Buildings.Type.LONG_REACH_INSERTER, "long-reach"],
+	]
+	for pair in older:
+		var want: int = int(pair[0])
+		var name_of: String = String(pair[1])
+		var present: bool = false
+		for slot2 in slots:
+			if String(slot2.get("kind", "")) == "building" and int(slot2.get("value", -1)) == want:
+				present = true
+				break
+		_check(failures, present,
+			"(18) the %s inserter slot is gone from the `%s` category" % [name_of, HOTBAR_CATEGORY])
+
+	# Slot budget. SLOTS_PER_CATEGORY_MAX is read in exactly ONE place in the
+	# whole codebase besides its own definition — the number-key loop at
+	# hotbar.gd:260 — so overflowing it makes slot 10 UNSELECTABLE, not
+	# invisible: _max_row_width (hotbar.gd:241) sizes the row to the largest
+	# category's real slot count with no ceiling, and _draw iterates
+	# slots.size(), so a 10th slot is drawn perfectly and simply cannot be
+	# reached by keyboard. A silent way to lose a tier either way.
+	_check(failures, slots.size() <= HotbarScript.SLOTS_PER_CATEGORY_MAX,
+		"(18) the `%s` category holds %d slots, past the %d the hotbar draws and the number keys can reach" % [HOTBAR_CATEGORY, slots.size(), HotbarScript.SLOTS_PER_CATEGORY_MAX])
+
+	hotbar.queue_free()
+
 # ---------- helpers (house style, copied from test_inserter.gd) ----------
+
+## Category names in hotbar order — failure-message material for sub-case 18,
+## so a renamed category is diagnosed by name rather than as a bare absence.
+static func _category_names(hotbar) -> Array:
+	var out: Array = []
+	for entry in hotbar.categories:
+		out.append(String(entry.get("name", "")))
+	return out
 
 ## Place an electric inserter at `pos` facing east, with chests on its
 ## source and destination tiles (asked for via Inserter.source_tile /
