@@ -3,9 +3,19 @@ extends RefCounted
 
 ## Substation — the backbone wire tier (Electricity Session 3).
 ##
-## 2x2, wire range 11, supply radius 4 (a 9x9 covered area measured from the
-## FOOTPRINT, not the anchor). It is the piece that bridges two separate pole
-## clusters into one network.
+## 2x2, wire range 11, supply radius 4. It is the piece that bridges two
+## separate pole clusters into one network.
+##
+## Coverage is measured from the FOOTPRINT, not the anchor: radius 4 beyond
+## every one of the four footprint cells reaches anchor-4 .. anchor+1+4 on
+## each axis, which is TEN cells per axis — a 10x10 covered area.
+##
+## Beware the two different 9s in this session. 9x9 is (2*4+1)^2, the 1x1
+## formula, and it is what a CONSUMER searches: power_satisfaction_at scans
+## (2 * SUPPLY_RADIUS + 1)^2 outward from the consumer itself, independent of
+## any pole's footprint. That box is odd-sided because it centres on a single
+## cell — which is exactly why it cannot describe an even-sided footprint.
+## Sizing a substation's scan box to 9 silently drops its far edge.
 ##
 ## This is the project's first MULTI-CELL POLE. Every distance computation in
 ## power_network.gd that assumes a pole occupies exactly one cell has to be
@@ -21,18 +31,20 @@ static func make(pos: Vector2i) -> Building:
 	return Building.new(Buildings.Type.SUBSTATION, pos, {})
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	# Spans the full 2x2 footprint. world_pos is the ANCHOR cell's top-left,
-	# so the body is 2 tiles on a side.
-	var span: float = float(tile_size) * 2.0
-	var inset: float = float(tile_size) * 0.18
-	var body: Rect2 = Rect2(
-		world_pos + Vector2(inset, inset),
-		Vector2(span - inset * 2.0, span - inset * 2.0)
-	)
+	# Edge-to-edge across the full 2x2 footprint: world_pos is the ANCHOR
+	# cell's top-left and the body really is 2 tiles on a side, so a hover
+	# outline or ghost-preview rect built as Rect2(world_pos, tile_size * 2)
+	# aligns with it exactly. Matches every other 2x2 building — water_wheel,
+	# windmill and steam_generator all draw that same rect. It matters more
+	# here than for them: the substation is the only non-walkable pole tier,
+	# so any unpainted margin would read as ground the player can neither
+	# stand on nor build in.
+	var body: Rect2 = Rect2(world_pos, Vector2(float(tile_size) * 2.0, float(tile_size) * 2.0))
 	canvas.draw_rect(body, BODY_COLOR, true)
 	canvas.draw_rect(body, FRAME_COLOR, false, 2.0)
-	# Four insulators at the corners of the housing — reads as high-voltage
-	# gear rather than a big box, and marks the four cells it occupies.
+	# One insulator at each of the four CELL CENTRES — not the body's corners
+	# — so the piece reads as high-voltage gear rather than a big box while
+	# marking the four cells it occupies.
 	var r: float = float(tile_size) * 0.13
-	for corner in [Vector2(0.5, 0.5), Vector2(1.5, 0.5), Vector2(0.5, 1.5), Vector2(1.5, 1.5)]:
-		canvas.draw_circle(world_pos + corner * float(tile_size), r, INSULATOR_COLOR)
+	for cell_center in [Vector2(0.5, 0.5), Vector2(1.5, 0.5), Vector2(0.5, 1.5), Vector2(1.5, 1.5)]:
+		canvas.draw_circle(world_pos + cell_center * float(tile_size), r, INSULATOR_COLOR)

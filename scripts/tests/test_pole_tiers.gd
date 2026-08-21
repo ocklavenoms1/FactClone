@@ -10,6 +10,7 @@ extends RefCounted
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
+const HotbarScript = preload("res://scripts/ui/hotbar.gd")
 
 static func test_name() -> String:
 	return "pole tiers (network-type set + registration)"
@@ -123,6 +124,46 @@ static func _case_registration(parent: Node, failures: Array) -> void:
 		_check(failures, world.has_building_at(Vector2i(15, 5) + d),
 			"(2) substation cell %s is not marked occupied" % str(Vector2i(15, 5) + d))
 	_teardown(world)
+	_check_hotbar_budget(failures, parent)
+
+## Registration is not finished until a PLAYER can reach the tier, so the
+## hotbar is part of sub-case (2) rather than a case of its own.
+##
+## The budget check matters because overflow is silent: SLOTS_PER_CATEGORY_MAX
+## is read in exactly one place besides its own definition — hotbar.gd's
+## number-key loop — while _draw iterates slots.size() with no ceiling. A 10th
+## slot is therefore drawn perfectly and simply cannot be selected. Power sits
+## at 8 of 9 and is the category most likely to overflow next. Same guard as
+## test_electric_inserter.gd's "Inserters" sub-case.
+static func _check_hotbar_budget(failures: Array, parent: Node) -> void:
+	var hotbar = HotbarScript.new()
+	parent.add_child(hotbar)
+	hotbar._build_categories()
+	var slots: Array = []
+	var found: bool = false
+	for entry in hotbar.categories:
+		if String(entry.get("name", "")) == "Power":
+			slots = entry.get("slots", [])
+			found = true
+			break
+	if not found:
+		_check(failures, false,
+			"(2) the hotbar has no `Power` category at all, so neither wire tier is placeable by a player")
+		hotbar.queue_free()
+		return
+	for pair in [[Buildings.Type.MEDIUM_POLE, "medium pole"], [Buildings.Type.SUBSTATION, "substation"]]:
+		var want: int = int(pair[0])
+		var label: String = String(pair[1])
+		var present: bool = false
+		for slot in slots:
+			if String(slot.get("kind", "")) == "building" and int(slot.get("value", -1)) == want:
+				present = true
+				break
+		_check(failures, present,
+			"(2) no `Power` hotbar slot points at the %s, so the tier stays dev-console-only" % label)
+	_check(failures, slots.size() <= HotbarScript.SLOTS_PER_CATEGORY_MAX,
+		"(2) the `Power` category holds %d slots, past the %d that the number keys can reach" % [slots.size(), HotbarScript.SLOTS_PER_CATEGORY_MAX])
+	hotbar.queue_free()
 
 static func _check(failures: Array, condition: bool, label: String) -> void:
 	if not condition:
@@ -139,7 +180,16 @@ static func _make_world(parent: Node):
 	parent.add_child(world)
 	return world
 
+## Disconnect BEFORE freeing, mirroring test_electric_rig.gd's _teardown.
+##
+## queue_free() is deferred until after the runner's synchronous run()
+## returns, and test_runner.gd's _disconnect_all(TickSystem.tick) fires only
+## between test FILES, never between sub-cases. Without the disconnect a torn
+## down world stays subscribed for the rest of this file, so the first
+## sub-case that advances ticks would tick this one alongside it.
 static func _teardown(world) -> void:
 	if world == null:
 		return
+	if TickSystem.tick.is_connected(world._on_tick):
+		TickSystem.tick.disconnect(world._on_tick)
 	world.queue_free()

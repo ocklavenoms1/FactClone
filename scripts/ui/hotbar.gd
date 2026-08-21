@@ -132,11 +132,13 @@ func _build_categories() -> void:
 		"selected": 0,
 	})
 
-	# Electricity Arc Session 1 (session-electricity-foundation): NEW Power
-	# category. Three slots — pole (connector), water wheel (generator),
-	# electric lamp (test consumer). Future sessions extend with more
-	# generators (windmill, steam engine), storage (accumulator), and
-	# tier variants (medium pole, substation).
+	# Electricity Arc: the Power category. Session 1
+	# (session-electricity-foundation) opened it with three slots — pole
+	# (connector), water wheel (generator), electric lamp (test consumer).
+	# Session 2 added the windmill, steam generator and accumulator; Session 3
+	# added the medium pole and substation tiers. That is 8 of the 9 slots
+	# SLOTS_PER_CATEGORY_MAX allows, so the next addition here is the last one
+	# the number keys can reach — test_pole_tiers.gd asserts the budget.
 	categories.append({
 		"name": "Power",
 		"slots": [

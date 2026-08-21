@@ -131,10 +131,12 @@ enum Type {
 	# DATA row, and its own make(), so `b.type` is never POWER_POLE for them.
 	# Every `type == POWER_POLE` test is therefore a place the tiers must be
 	# added by hand — see POLE_TYPES below, and the guards in power_network.gd.
-	# The parametric POLE_RANGE_BY_TYPE / SUPPLY_RADIUS_BY_TYPE tables land in
-	# a later task, along with the DATA entries — until then these two are enum
-	# slots only and are NOT placeable. Appended at the END of the enum so
-	# every previously-saved type keeps its integer value.
+	# Both became placeable in Task 2: DATA rows, make/draw/info_lines dispatch
+	# and hotbar slots all exist now. What does NOT exist yet is the parametric
+	# POLE_RANGE_BY_TYPE / SUPPLY_RADIUS_BY_TYPE pair, so rebuild_topology
+	# still collects POWER_POLE alone and a placed tier forms no network and
+	# powers nothing. Those tables land in a later task. Appended at the END of
+	# the enum so every previously-saved type keeps its integer value.
 	MEDIUM_POLE,
 	SUBSTATION,
 }
