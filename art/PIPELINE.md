@@ -270,6 +270,35 @@ downsample lives in system Python with Pillow rather than in Blender.
 
 ---
 
+## 6a. Containment — the overhang measurement
+
+```bash
+python art/tools/overhang.py smelter_idle --flag-pct 10
+```
+
+An appendage steals scale from the building it hangs off. The tool takes the
+per-column opaque-height profile of the 4× master, walks outward from the
+tallest column, and finds the first **notch** — a column below 35% of the
+body's median height. Anything past the notch is an appendage.
+
+Height alone cannot find it: the smelter's bellows is a *tall* leather panel
+reaching 187 px against a body of 267 px, so a height threshold keeps it inside
+the body. The notch is the real signal.
+
+| asset | overhang | verdict |
+|---|---|---|
+| first kiln (rejected) | 38% of silhouette | outrigger |
+| **approved smelter** — bellows, left | **10.2%** (24 px past the notch at x=34) | **flagged, marginal** |
+| approved smelter, right | 0.4% | ok |
+| chest (proxy) | 1.7% each side | ok |
+| power_pole (proxy) | 18.5% each side | flagged — but see below |
+
+The pole's flag is the metric working as designed on a shape it was not meant
+for: a crossarm on a thin post *is* mostly overhang. Containment is a rule for
+**block-form buildings**; a pole is judged on `fit: height` instead.
+
+---
+
 ## 6b. Detail-density conformance
 
 Two numbers, both from `art/tools/detail_density.py`. Conformance is judged per
@@ -279,35 +308,45 @@ asset against the budget; it does not need the other assets to exist.
 python art/tools/detail_density.py smelter_idle chest power_pole
 ```
 
-**Feature count per tile**, against the cap of six. Counted at *final* sprite
-resolution, because that is where "readable" is decided: Sobel edge magnitude →
-threshold → connected components of ≥3 px, reported at three thresholds so the
-figure is not one lucky cutoff.
+**Feature count per OCCUPIED tile**, against the cap of six. Counted at *final*
+sprite resolution, because that is where "readable" is decided: Sobel edge
+magnitude → threshold → connected components of ≥3 px, at three thresholds so
+the figure is not one lucky cutoff. The denominator is opaque area ÷ 32², not
+footprint area — what the eye reads is the silhouette, not the tile.
 
-**High-frequency survival.** Rendering at 4× and downsampling cannot carry any
-spatial frequency above one quarter of the master's Nyquist limit. The tool
-takes the 4× master, measures its power spectrum, and reports the fraction of
-AC energy above that cutoff — energy destroyed no matter how good the filter
-is. The opaque region is cropped, its surround filled with the mean opaque
-luminance so the silhouette does not ring, and a Hann window applied.
+**High-frequency survival**, as a **ratio against the flat-geometry floor**.
+Rendering at 4× and downsampling cannot carry any spatial frequency above one
+quarter of the master's Nyquist limit; the tool measures the 4× master's power
+spectrum and reports the AC energy above that cutoff. The pass mark is **under
+3× the floor**, where the floor is the mean of the flat untextured proxies —
+so the budget recalibrates itself instead of being a magic percentage.
 
-Measured:
+Measured (floor = **2.35%**, budget = 7.1%):
 
-| asset | features/tile (p85) | HF energy destroyed |
-|---|---|---|
-| **smelter** (real, cobbled) | **8.75** — 1.46× over cap | **14.3%** |
-| chest (proxy, flat-shaded) | 3.00 | 2.1% |
-| power_pole (proxy, flat-shaded) | 11.00 | 2.6% |
+| asset | features/occupied tile (p85) | HF destroyed | ratio | verdict |
+|---|---|---|---|---|
+| first kiln (rejected) | 8.75 | 14.3% | 6.1× | **FAIL** both |
+| **approved smelter** | **5.92** | **5.2%** | **2.21×** | **PASS** both |
+| chest (proxy) | 3.21 | 2.1% | 0.89× | pass |
+| power_pole (proxy) | 17.77 | 2.6% | 1.11× | see below |
 
-The kiln throws away roughly **seven times** the spectral energy of flat-shaded
-geometry. That 14.3% is generation effort that provably cannot reach the
-screen — the cobble problem as a number.
+### The denominator fix did not do what was expected
 
-Two caveats worth stating. The proxies are untextured flat-shaded geometry, so
-~2% is a *floor*, not a realistic target for a textured asset; the real
-threshold should be set when the first compliant Tripo asset lands. And the
-power pole's high feature count is an artefact of a thin object being measured
-per-tile — density metrics need care on assets that do not fill their footprint.
+Switching from footprint area to occupied area is correct in principle, but it
+made the pole score *worse*, not better — 11.00 → 17.77. The pole occupies only
+0.62 tile-equivalents, so a smaller denominator raises the ratio.
+
+The pole's real problem is not the denominator: **a thin object is nearly all
+edge**. A 3 px-wide post has a perimeter-to-area ratio that inflates any
+edge-based feature count regardless of how it is normalized. The honest reading
+is that feature density is meaningful for assets that fill their footprint and
+misleading for ones that do not, so the tool now reports `fill_ratio` alongside
+the count. Judge thin assets on absolute feature count instead: the pole's 11
+features spread over a tall thin silhouette read as one object, not as clutter.
+
+The smelter fills 101% of its footprint, so both denominators agree on it
+(5.92 vs 6.00) — the fix changes nothing where the metric is trustworthy, which
+is a reasonable sign it is the right denominator.
 
 ---
 
@@ -374,15 +413,94 @@ Baseline on the current kiln (generated before the mask existed): **0.000%** of
 texels within 0.6 of the key, 100% out beyond 1.2 — correctly reported as
 `NO MASK PRESENT`.
 
-### What ships today
+### Live on the approved smelter — and two traps it exposed
 
-Until the mask passes on a real generation, the smelter ships on the **emitter
-fallback**: a warm point light placed in the furnace mouth from `glow_at` in the
-manifest. One coordinate per asset, nothing required of the texture, and it
-lights the real recessed geometry rather than faking a glow. It is not
-deprecated — per-asset emitter placement goes away only once the mask is
-validated. `smelter_idle` and `smelter_smelting` are otherwise pixel-identical,
-which is the whole point.
+The mask path is **on**. `glow_at` and the emitter fallback are gone from the
+smelter. Two things had to be fixed to get there, both of which would have
+silently produced a mask that never fires:
+
+**Trap 1 — Tripo does not return the colour it was given.** The `#FF00FF`
+panel came back as **`#9D009A`**, roughly half brightness, sitting 0.80–1.00
+from the key. No absolute-distance tolerance works: wide enough to catch it
+also caught 30% of the texture. So the mask is detected by **chroma**, not
+colour: `score = min(R, B) − G`, which is invariant to the brightness shift.
+
+**Trap 2 — the thresholds must be in LINEAR space.** An Image Texture node
+outputs linear; the file is sRGB and Blender converts on read. Thresholds
+derived from the sRGB values of the same texture are ~2× too high and the mask
+never fires — which is exactly what happened on the first attempt.
+
+Measured on the approved smelter, in linear:
+
+| | linear chroma score |
+|---|---|
+| every palette member | −0.014 … −0.066 (all negative) |
+| observed panel | **+0.323** |
+| pure magenta | +1.000 |
+
+### Two masks, not one
+
+Neutralization and emission have different requirements, so they get different
+cuts off the same score:
+
+- **Neutralize generously** (normalized score > 0.13). Magenta bled onto the
+  hearth stones is an artifact; removing it everywhere is correct. This uses
+  the score divided by the brightest channel, which is genuinely
+  brightness-invariant and so also catches the shaded dark panel edge Tripo
+  adds despite "flat".
+- **Emit tightly** (raw score > 0.16). A stone with a magenta tint must not
+  glow. Measured: the cut admits **0.670%** of texels and excludes **0.425%**
+  of spill.
+
+A dark panel rim therefore ends up neutralized but unlit — which is what an
+arch mouth edge should look like anyway. Residual tint in the idle render fell
+from 759 px to **177 px** (median `#29181D`, a dark warm interior).
+
+`keymask.py` verdict on this asset: **PASS** — panel population 0.670% of
+texels with an empty band at score 0.442–1.050 separating it from the material
+bulk.
+
+---
+
+## 7b. The glow ships as a separate layer
+
+The fire is **not baked into the smelting sprite**. Godot draws the body
+sprite, then a transparent glow layer on top with additive blending, and pulses
+`modulate.a` for flicker — the Factorio "alive" read for zero animation frames.
+
+```bash
+python art/tools/glow_layer.py --name smelter --body idle --lit smelting
+```
+
+The layer is derived as `lit_render − body_render`, clamped at zero, on the 4×
+masters in premultiplied space, then downsampled by the same premultiplied
+LANCZOS path as everything else. That difference *is* the light the fire adds,
+so it carries for free what a hand-painted glow could not: the spill onto the
+surrounding stones, correct occlusion (both renders share geometry and camera),
+and real falloff instead of a guessed gradient.
+
+RGB stores the fire colour normalized to its brightest channel and A stores
+intensity, so additive compositing reconstructs the lit render exactly:
+
+```
+dst += rgb * a
+```
+
+and scaling `a` dims the fire without shifting its hue. Verified: additive
+recomposition against the baked smelting sprite differs by **0.60/255 mean**
+(p99 12/255), with 3.5% of pixels off by more than 4/255 — all of them at the
+antialiased rim.
+
+| | |
+|---|---|
+| file | `art/sprites/smelter_glow.png` |
+| body | `art/sprites/smelter_idle.png` |
+| lit pixels | 174 (2.83% of the sprite) |
+| bbox | `[24, 73, 43, 82]` |
+| blend | additive; pulse `modulate.a` |
+
+`smelter_smelting.png` is kept as the derivation input and a visual reference.
+It is **not** a shipping sprite — shipping is body + glow layer.
 
 ---
 

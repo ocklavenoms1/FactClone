@@ -243,7 +243,6 @@ def neutralize_mask(meshes, neutral=(0.055, 0.045, 0.040)):
     the mask and 0.0 outside. The state hook reuses that same socket to drive
     emission, so the lit region and the neutralized region cannot disagree.
     """
-    key = _hex_to_linear(lock.MASK_MAGENTA)
     sockets = {}
     seen = set()
 
@@ -262,33 +261,87 @@ def neutralize_mask(meshes, neutral=(0.055, 0.045, 0.040)):
                 continue
             src = base.links[0].from_socket
 
-            keyrgb = nt.nodes.new("ShaderNodeRGB")
-            keyrgb.outputs[0].default_value = (*key, 1.0)
-            dist = nt.nodes.new("ShaderNodeVectorMath")
-            dist.operation = "DISTANCE"
-            dist.label = "distance from mask key"
-            nt.links.new(src, dist.inputs[0])
-            nt.links.new(keyrgb.outputs[0], dist.inputs[1])
+            # Chroma score = min(R, B) - G. Brightness-invariant, because
+            # Tripo returns the mask darkened (#FF00FF painted -> #9D009A
+            # returned) and an absolute colour distance misses it entirely.
+            sep = nt.nodes.new("ShaderNodeSeparateColor")
+            sep.mode = "RGB"
+            nt.links.new(src, sep.inputs["Color"])
 
-            # inside tolerance -> 1, outside -> 0
-            m = nt.nodes.new("ShaderNodeMapRange")
-            m.label = f"mask {lock.MASK_MAGENTA} tol {lock.MASK_TOLERANCE}"
-            m.clamp = True
-            m.inputs["From Min"].default_value = 0.0
-            m.inputs["From Max"].default_value = lock.MASK_TOLERANCE
-            m.inputs["To Min"].default_value = 1.0
-            m.inputs["To Max"].default_value = 0.0
-            nt.links.new(dist.outputs["Value"], m.inputs["Value"])
+            minrb = nt.nodes.new("ShaderNodeMath")
+            minrb.operation = "MINIMUM"
+            minrb.label = "min(R,B)"
+            nt.links.new(sep.outputs["Red"], minrb.inputs[0])
+            nt.links.new(sep.outputs["Blue"], minrb.inputs[1])
+
+            score = nt.nodes.new("ShaderNodeMath")
+            score.operation = "SUBTRACT"
+            score.label = "chroma score = min(R,B) - G"
+            nt.links.new(minrb.outputs["Value"], score.inputs[0])
+            nt.links.new(sep.outputs["Green"], score.inputs[1])
+
+            # TWO masks off the same score, because the requirements differ.
+            #
+            # NEUTRALIZE generously. Magenta that has bled onto the hearth
+            # stones is an artifact; removing it everywhere is correct. This
+            # uses the score normalized by the brightest channel, so a shaded
+            # dark edge of the panel (which Tripo adds despite "flat") is
+            # caught as readily as the core.
+            #
+            # EMIT tightly. Only near-pure panel should light up - a stone with
+            # a magenta tint must not glow. This uses the RAW score, whose
+            # magnitude still carries how much magenta is present.
+            #
+            # A dark panel rim therefore ends up neutralized but unlit, which
+            # is what an arch mouth edge should look like anyway.
+            mx1 = nt.nodes.new("ShaderNodeMath")
+            mx1.operation = "MAXIMUM"
+            nt.links.new(sep.outputs["Red"], mx1.inputs[0])
+            nt.links.new(sep.outputs["Green"], mx1.inputs[1])
+            mx2 = nt.nodes.new("ShaderNodeMath")
+            mx2.operation = "MAXIMUM"
+            mx2.label = "max(R,G,B)"
+            nt.links.new(mx1.outputs["Value"], mx2.inputs[0])
+            nt.links.new(sep.outputs["Blue"], mx2.inputs[1])
+            guard = nt.nodes.new("ShaderNodeMath")
+            guard.operation = "MAXIMUM"
+            guard.label = "guard /0"
+            guard.inputs[1].default_value = 1e-3
+            nt.links.new(mx2.outputs["Value"], guard.inputs[0])
+
+            norm = nt.nodes.new("ShaderNodeMath")
+            norm.operation = "DIVIDE"
+            norm.label = "score / max(R,G,B)"
+            nt.links.new(score.outputs["Value"], norm.inputs[0])
+            nt.links.new(guard.outputs["Value"], norm.inputs[1])
+
+            m_neutral = nt.nodes.new("ShaderNodeMapRange")
+            m_neutral.label = f"neutralize {lock.MASK_NEUTRAL_LO}..{lock.MASK_NEUTRAL_HI}"
+            m_neutral.clamp = True
+            m_neutral.inputs["From Min"].default_value = lock.MASK_NEUTRAL_LO
+            m_neutral.inputs["From Max"].default_value = lock.MASK_NEUTRAL_HI
+            m_neutral.inputs["To Min"].default_value = 0.0
+            m_neutral.inputs["To Max"].default_value = 1.0
+            nt.links.new(norm.outputs["Value"], m_neutral.inputs["Value"])
+
+            m_emit = nt.nodes.new("ShaderNodeMapRange")
+            m_emit.label = f"emit {lock.MASK_SCORE_LO}..{lock.MASK_SCORE_HI}"
+            m_emit.clamp = True
+            m_emit.inputs["From Min"].default_value = lock.MASK_SCORE_LO
+            m_emit.inputs["From Max"].default_value = lock.MASK_SCORE_HI
+            m_emit.inputs["To Min"].default_value = 0.0
+            m_emit.inputs["To Max"].default_value = 1.0
+            nt.links.new(score.outputs["Value"], m_emit.inputs["Value"])
 
             mix = nt.nodes.new("ShaderNodeMix")
             mix.data_type = "RGBA"
             mix.label = "neutralize mask"
             mix.inputs["B"].default_value = (*neutral, 1.0)
-            nt.links.new(m.outputs["Result"], mix.inputs["Factor"])
+            nt.links.new(m_neutral.outputs["Result"], mix.inputs["Factor"])
             nt.links.new(src, mix.inputs["A"])
             nt.links.new(mix.outputs["Result"], base)
 
-            sockets[mat.name] = m.outputs["Result"]
+            sockets[mat.name] = m_emit.outputs["Result"]
     return sockets
 
 

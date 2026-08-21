@@ -95,8 +95,53 @@ PALETTE = {
 # palette's own internal spread. The tolerance stops being a knife-edge:
 # anything up to ~0.60 is safe.
 MASK_MAGENTA = "#FF00FF"
-MASK_TOLERANCE = 0.45        # well inside the 1.194 margin, wide enough for JPEG smear
 MASK_FIRE_COLOR = (1.0, 0.42, 0.10)   # what the mask is replaced WITH
+
+# HOW THE MASK IS DETECTED — measured, not assumed.
+#
+# Absolute colour distance does NOT work. Tripo does not return the magenta it
+# was given: on the approved smelter the #FF00FF panel came back as #9D009A,
+# roughly half brightness, sitting 0.80-1.00 away from the key. A tolerance
+# wide enough to catch it also caught 30% of the texture.
+#
+# So the mask is detected by CHROMA, not colour: score = min(R, B) - G, which
+# is invariant to Tripo's brightness shift.
+#
+# SECOND TRAP: these thresholds are in LINEAR space, because that is what an
+# Image Texture node outputs - the file is sRGB but Blender converts on read.
+# Thresholds derived from the sRGB values of the same texture are ~2x too high
+# and the mask silently never fires.
+#
+# Measured on the approved smelter, in linear:
+#
+#     every palette member   -0.014 .. -0.066   (all negative)
+#     observed panel         +0.323
+#     pure magenta           +1.000
+#
+# Zero already separates the palette. The cut is set well above zero anyway to
+# exclude the magenta that has bled onto the hearth stones under the arch:
+# those texels are panel/stone mixtures scoring in proportion to the mix, so
+# LO=0.16 admits only texels that are at least ~50% panel.
+#
+#     score > 0.02 -> 1.095% of texels   (panel + spill)
+#     score > 0.10 -> 0.695%             (spill essentially gone)
+#     score > 0.16 -> 0.670%             (the cut)
+#     score > 0.32 -> 0.396%             (starts eating the panel itself)
+MASK_SCORE_LO = 0.16         # below this = spill, excluded from EMISSION
+MASK_SCORE_HI = 0.26         # above this = panel core; between = antialiased edge
+
+# Neutralization uses the score divided by the brightest channel, which is
+# genuinely brightness-invariant and so also catches the shaded dark edge Tripo
+# adds to the panel despite "flat magenta". Measured on this normalized score:
+#     every palette member   <= -0.12
+#     10/90 stone-spill       +0.15   (left alone; too faint to see)
+#     25/75 stone-spill       +0.44
+#     dark panel edge         +0.42
+#     panel core              +0.96
+# Neutralizing spill is CORRECT - it is an artifact that should not be there in
+# any state. Only emission needs the tight cut.
+MASK_NEUTRAL_LO = 0.13
+MASK_NEUTRAL_HI = 0.22
 
 
 def _lock_payload():

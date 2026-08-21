@@ -20,20 +20,14 @@
       "source": "smelter.glb",
       "footprint": 2,
       "fit": "footprint",
-      "yaw_correction": 45,
+      "yaw_correction": 0,
       "states": {
         "idle": null,
         "smelting": "smelter_smelting.py"
       },
       "yaws": [],
       "status": "real",
-      "note": "Tripo 'stone kiln 3d model'. REJECTED on art direction: conical, outrigger outside the footprint (38% of sprite width, building rendered 1.69x smaller), cobbled stone (8.75 features/tile vs cap 6; 14.3% of HF energy destroyed by the downsample). No magenta mask - keymask.py reports NO MASK PRESENT - so it ships on the glow_at emitter. Regenerate from PROMPTS.md.",
-      "glow_at": [
-        -0.28,
-        -0.46,
-        0.16
-      ],
-      "_glow_at_note": "furnace-mouth position after yaw_correction, in tiles. Used by the smelting state's emitter fallback."
+      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite."
     },
     {
       "name": "chest",
@@ -63,7 +57,7 @@
       "source": "smelter.glb",
       "footprint": 2,
       "fit": "footprint",
-      "yaw_correction": 45,
+      "yaw_correction": 0,
       "states": {},
       "yaws": [
         0,

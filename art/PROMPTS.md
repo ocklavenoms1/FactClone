@@ -186,10 +186,26 @@ scale, off-centre origin, wrong roughness/metallic, slightly-off saturation.
 
 ## Subject blocks
 
-### smelter — REGENERATE
+### smelter — ACCEPTED (`stone furnace 3d model.glb`)
 
-The shipped kiln (`stone kiln 3d model.glb`) is rejected: conical, outrigger
-outside the footprint, cobbled stone. See the measured costs above.
+Fixes all three rejects on the first kiln. Measured, not eyeballed:
+
+| check | first kiln | approved | verdict |
+|---|---|---|---|
+| form | conical beehive | squared block, square plan | fixed |
+| containment | outrigger **38%** of width | bellows **10.2%** | flagged, marginal |
+| detail density | 8.75 features/tile | **5.92** per occupied tile (cap 6) | pass |
+| HF destroyed | 14.3% (6.1× floor) | **5.2%** (2.21× floor, cap 3×) | pass |
+| magenta mask | absent | **present, keymask PASS** | live |
+
+The bellows is 0.2 points over the 10% containment threshold — not worth a
+regeneration on its own, but on any future revision tuck it flush to the flank
+inside the corner posts.
+
+**Note for every future asset: Tripo darkens the mask.** The `#FF00FF` panel
+came back as **`#9D009A`**, roughly half brightness. Detection is by chroma
+rather than absolute colour so this is handled — but paint the mask flat and
+fully saturated, and never assume the returned colour is the one you painted.
 
 ```
 Subject: a bloomery smelter that melts ore into iron blooms.

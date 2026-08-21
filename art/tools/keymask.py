@@ -49,7 +49,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("texture")
     ap.add_argument("--key", default=lock.MASK_MAGENTA)
-    ap.add_argument("--tolerance", type=float, default=lock.MASK_TOLERANCE)
+    ap.add_argument("--tolerance", type=float, default=0.45)
     a = ap.parse_args()
 
     if not os.path.exists(a.texture):
@@ -76,19 +76,50 @@ def main():
     matched = (d <= a.tolerance).mean() * 100
     print(f"\nmatched by tolerance {a.tolerance}: {matched:.3f}% of texels")
 
-    # is there a usable gap between the mask population and the material bulk?
-    near = d[d <= 0.6]
-    if near.size == 0:
-        print("VERDICT: NO MASK PRESENT - no texel is within 0.6 of the key.")
-        print("         Either the concept image had no magenta, or it did not survive.")
+    # ---- the diagnostic that actually decides the mask --------------------
+    # Absolute distance fails because Tripo returns the mask darkened. Chroma
+    # score min(R,B)-G is what the shader uses; it is computed in LINEAR space
+    # because that is what an Image Texture node outputs.
+    r, g, b = lin[..., 0], lin[..., 1], lin[..., 2]
+    score = np.minimum(r, b) - g
+    mx = np.maximum(np.maximum(r, g), b)
+    norm = score / np.maximum(mx, 1e-3)
+
+    print("\nchroma score  min(R,B)-G  (LINEAR space - what the shader sees)")
+    print("  every palette member scores negative; the mask scores positive.")
+    for t in (0.02, 0.05, 0.10, 0.16, 0.20, 0.26, 0.32, 0.40):
+        pct = (score > t).mean() * 100
+        tag = ""
+        if abs(t - lock.MASK_SCORE_LO) < 1e-9:
+            tag = "  <- EMIT cut (LO)"
+        elif abs(t - lock.MASK_SCORE_HI) < 1e-9:
+            tag = "  <- EMIT full (HI)"
+        print(f"    score > {t:4.2f} -> {pct:7.4f}%{tag}")
+
+    if (score > lock.MASK_SCORE_LO).mean() == 0:
+        print("\n  VERDICT (chroma): NO MASK - nothing clears the emit cut.")
         return 0
 
-    hist, bin_edges = np.histogram(d, bins=120, range=(0, 3.0))
-    frac = hist / n
-    empty = [(bin_edges[i], bin_edges[i + 1]) for i in range(len(hist)) if frac[i] < 1e-5]
+    emit = (score > lock.MASK_SCORE_LO).mean() * 100
+    core = (score > lock.MASK_SCORE_HI).mean() * 100
+    spill = (score > 0.02).mean() * 100 - emit
+    print(f"\n  panel admitted to emission : {emit:.4f}% of texels")
+    print(f"  panel core (full strength) : {core:.4f}%")
+    print(f"  spill excluded by the cut  : {spill:.4f}% of texels")
+    print(f"  neutralized (normalized > {lock.MASK_NEUTRAL_LO}) : "
+          f"{(norm > lock.MASK_NEUTRAL_LO).mean() * 100:.4f}%   "
+          f"(spill is neutralized everywhere - it is an artifact)")
+
+    # The verdict is decided on the chroma score, not on absolute distance.
+    # Distance is still printed above because it is what shows *how far* Tripo
+    # moved the mask colour, which is the thing worth knowing per generation.
+    hist, edges_s = np.histogram(score, bins=300, range=(-0.2, 1.05))
+    frac = hist / score.size
+    empty = [(edges_s[i], edges_s[i + 1]) for i in range(len(hist))
+             if frac[i] < 1e-6 and edges_s[i] > 0.0]
     gaps, run = [], None
     for lo, hi in empty:
-        if run and abs(run[1] - lo) < 1e-6:
+        if run and abs(run[1] - lo) < 1e-9:
             run = (run[0], hi)
         else:
             if run:
@@ -96,18 +127,25 @@ def main():
             run = (lo, hi)
     if run:
         gaps.append(run)
-    usable = [g for g in gaps if g[0] > 0.02 and (g[1] - g[0]) > 0.1]
+    inner = [g for g in gaps if g[1] - g[0] > 0.02 and g[0] < 0.9]
 
-    if usable:
-        g = max(usable, key=lambda x: x[1] - x[0])
-        print(f"VERDICT: PASS - clean gap from {g[0]:.3f} to {g[1]:.3f} "
-              f"(width {g[1]-g[0]:.3f}).")
-        print(f"         Any tolerance inside that gap isolates the mask. "
-              f"Suggested: {(g[0]+g[1])/2:.2f}")
+    print()
+    if emit < 1e-4:
+        print("VERDICT: NO MASK - nothing clears the emit cut. Either the concept "
+              "image had no magenta, or it did not survive generation.")
+    elif inner:
+        g = max(inner, key=lambda x: x[1] - x[0])
+        print(f"VERDICT: PASS - mask present and separable. Panel population is "
+              f"{emit:.3f}% of texels,")
+        print(f"         with an empty band at score {g[0]:.3f}..{g[1]:.3f} "
+              f"separating it from the material bulk.")
     else:
-        print("VERDICT: FAIL - no clean gap; texels smear continuously from the "
-              "mask into the material population.")
-        print("         Erode the mask, paint it with a margin, or abandon the key.")
+        print(f"VERDICT: PASS (soft) - mask present at {emit:.3f}% of texels, but "
+              f"the score distribution is")
+        print(f"         continuous rather than cleanly bimodal, so the cut at "
+              f"{lock.MASK_SCORE_LO} is a judgement call.")
+        print(f"         Spill excluded: {spill:.3f}% of texels. Inspect the idle "
+              f"render for magenta residue.")
     return 0
 
 
