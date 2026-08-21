@@ -59,13 +59,22 @@ extends RefCounted
 # viewport is presented in a 1280x720 window (2/3), so 32 * 1.5 * 2/3 = 32
 # screen pixels per tile at capture resolution. The camera centres on the
 # player, so the tile row N below the player has its top edge at screen
-# y = 344 + 32N, and the hotbar strip starts near y = 635.
+# y = 344 + 32N.
+#
+# The hotbar's top edge, derived from hotbar.gd rather than eyeballed: its
+# height is HEADER_HEIGHT 22 + SLOT_SIZE 64 + LABEL_AREA_HEIGHT 32 + 8 = 126,
+# and _apply_layout anchors it to the viewport bottom with offset_top =
+# -h - 12. So it starts at 1080 - 138 = 942 in viewport units, which is
+# 942 * 2/3 = 628 on the captured 720-px frame.
 #
 # With y = 1 the paved rows are player+1 .. player+8 and the lowest BUILDING
-# row (rig y 6) spans screen y 568..600 — two full tiles of clearance. The
-# whole rig is below the player, so the player's own tile is never inside the
-# footprint and can never collide with a placement. x = -14 centres the
-# 33-column paved rectangle on the player's column.
+# row (rig y 6) spans screen y 568..600, clearing the hotbar by 28 px. That is
+# under a full tile, so this offset is not free to drift downward — but it is
+# comfortably more than the ~8 px that had the electric rig's bottom-row fill
+# bars reading as cut off. The whole rig is below the player, so the player's
+# own tile is never inside the footprint and can never collide with a
+# placement. x = -14 centres the 33-column paved rectangle on the player's
+# column.
 const ORIGIN_OFFSET: Vector2i = Vector2i(-14, 1)
 
 # Phase 1 paving rectangle, INCLUSIVE, in rig-relative coordinates. Strictly
@@ -79,16 +88,37 @@ const PAVE_MAX: Vector2i = Vector2i(30, 7)
 # --- THE BUS: mixed-tier bridge demo ---------------------------------------
 # Everything that carries power sits on row y = 2. Cluster A basic poles at
 # x = 0 and 3 (Chebyshev 3 apart: exactly POLE_RANGE, so they join). Cluster B
-# at x = 16 and 19. The two clusters are 13 apart — far beyond basic range and
-# beyond the medium pole's reach from either side.
+# at x = 16 and 19. The clusters are 13 apart, far beyond basic range 3, and
+# the medium pole cannot bridge them either: it reaches cluster A at 5 but is
+# 8 from cluster B. Only the substation closes that gap.
 #
-# THE NUMBERS ARE THE TEST. Substation range is 11, anchored at x = 12:
-#   - to cluster B's near pole at x=16: distance 4  <= 11  -> joins.
-#   - to cluster A's far pole at x=3:   distance 9  <= 11  -> joins, but ONLY
-#     because either-reaches uses max(11, 3). Under a both-reaches (min) rule
-#     it would need distance <= 3 and the bridge would not form.
-# Both links are longer than basic range 3, so BOTH of them depend on the
-# either-reaches decision. Flip the rule to min and this rig visibly splits.
+# CLUSTER B SITS AT 16/19 FOR SCREEN FIT, not for the topology. The plan put
+# it at 22/25, which collides with the MST control block's isolation distance
+# (see MST_CONTROL_POLES) and pushes the rig past one 1280x720 screen. Do NOT
+# "restore" it eastward without re-measuring both — and read the next
+# paragraph first, because the short B link is a consequence of this choice.
+#
+# THE NUMBERS ARE THE TEST. Distances below are FOOTPRINT to FOOTPRINT, per
+# PowerNetwork._pole_distance (Task 4): the substation is 2x2 and occupies
+# x 12..13, so anchor-to-anchor under-measures its links westward by 1.
+#
+# Two links, and ONLY these two, are min-rule TRIPWIRES — they exist because
+# the joining rule is either-reaches, max(range_a, range_b), and vanish under
+# a both-reaches min():
+#
+#   substation <-> cluster A's far pole (3,2): distance 9.
+#     max(11, 3) = 11 -> joins.   min(11, 3) = 3 -> 9 > 3, does NOT join.
+#   medium pole <-> cluster A's far pole (3,2): distance 5.
+#     max(6, 3)  = 6  -> joins.   min(6, 3)  = 3 -> 5 > 3, does NOT join.
+#
+# The substation's link to cluster B's near pole (16,2) is NOT a tripwire.
+# It is only 3 (4 anchor-to-anchor), which is inside basic range, so it forms
+# under either rule — a direct consequence of pulling cluster B west for
+# screen fit. Do not cite it as evidence for the either-reaches decision.
+#
+# The exhibit still works, through cluster A. Flip the rule to min and both
+# tripwire links vanish at once, severing cluster A from everything: the rig
+# goes from 2 components to 3 and visibly splits on screen.
 const CLUSTER_A_POLES: Array = [Vector2i(0, 2), Vector2i(3, 2)]
 const CLUSTER_B_POLES: Array = [Vector2i(16, 2), Vector2i(19, 2)]
 
@@ -288,8 +318,10 @@ static func _placements() -> Array:
 ## rather than decorative:
 ##
 ##   - the six medium-pole lamps are all at Chebyshev exactly 2 from (8,2) and
-##     all at x <= 7, which puts them outside the substation's area (x 8..16)
-##     and 3+ from cluster A's far pole. Only SUPPLY_RADIUS 2 reaches them.
+##     all at x <= 7, which puts them outside the substation's area (x 8..17 —
+##     TEN columns, anchor-4 .. anchor+1+4, per the 10x10 coverage corrected in
+##     commit f476ef7) and 3+ from cluster A's far pole. Only SUPPLY_RADIUS 2
+##     reaches them.
 ##   - the four substation lamps are all at Chebyshev exactly 4 from the
 ##     substation ANCHOR (12,2) and none is within 2 of the medium pole or 1
 ##     of a basic pole. Only SUPPLY_RADIUS 4 reaches them.

@@ -146,9 +146,15 @@ static func _case_demand(parent: Node, failures: Array) -> void:
 # orphaned — it is 8 from the medium pole and 13 from cluster A. So removing
 # one building goes 2 components -> 3.
 #
-# This sub-case IS the either-reaches decision. Both of the substation's links
-# are longer than basic range 3 (9 to cluster A, 4 to cluster B), so under a
-# both-reaches rule neither would form and the first count would be wrong.
+# This sub-case IS the either-reaches decision, but through CLUSTER A only.
+# Two links are min-rule tripwires — substation <-> cluster A's far pole at
+# distance 9, and medium pole <-> that same pole at distance 5 — and both
+# vanish under a both-reaches min(), severing cluster A and making this count
+# 3 instead of 2. The substation's link to cluster B is only 3 footprint to
+# footprint, which is inside basic range, so it forms under EITHER rule and is
+# not evidence for anything. See the THE NUMBERS ARE THE TEST block in
+# pole_tier_rig.gd, which carries the full arithmetic and the reason cluster B
+# sits close enough for that to be true.
 #
 # NOTE for the Task 4 GREEN step: the SECOND half of this sub-case passes today
 # for the wrong reason. Before Task 4 the substation is not in the topology at
