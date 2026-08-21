@@ -82,7 +82,18 @@ static func run(parent: Node) -> Dictionary:
 	# ---------- 3. Multi-session arc COMPLETE: every interactive building has a panel ----------
 	# All Buildings.Type values EXCEPT passive infrastructure should have
 	# has_interaction_ui == true.
-	var passive: Array = [Buildings.Type.PIPE, Buildings.Type.PUMP, Buildings.Type.BELT, Buildings.Type.POWER_POLE, Buildings.Type.WATER_WHEEL, Buildings.Type.ELECTRIC_LAMP, Buildings.Type.WINDMILL, Buildings.Type.ACCUMULATOR]
+	# Membership is driven by "has no slot_layout in DATA" — has_interaction_ui
+	# is exactly `not slot_layout_for(t).is_empty()`. Any new type that carries
+	# no inventory has to be listed here or the else-branch below reddens.
+	var passive: Array = [
+		Buildings.Type.PIPE, Buildings.Type.PUMP, Buildings.Type.BELT,
+		Buildings.Type.WATER_WHEEL, Buildings.Type.ELECTRIC_LAMP,
+		Buildings.Type.WINDMILL, Buildings.Type.ACCUMULATOR,
+		# All three wire tiers are passive: Q-inspect shows network state via
+		# info_lines, but there is nothing to put items into. MEDIUM_POLE and
+		# SUBSTATION joined in Electricity Session 3.
+		Buildings.Type.POWER_POLE, Buildings.Type.MEDIUM_POLE, Buildings.Type.SUBSTATION,
+	]
 	for type_value in Buildings.DATA.keys():
 		var t: int = int(type_value)
 		if t in passive:

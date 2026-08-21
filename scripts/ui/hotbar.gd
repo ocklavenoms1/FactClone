@@ -147,6 +147,14 @@ func _build_categories() -> void:
 			{ "kind": "building", "value": Buildings.Type.WINDMILL },
 			{ "kind": "building", "value": Buildings.Type.STEAM_GENERATOR },
 			{ "kind": "building", "value": Buildings.Type.ACCUMULATOR },
+			# Electricity Session 3 (session-electricity-pole-tiers): wire tiers.
+			# Target numbers are medium = range 6 / supply radius 2, substation
+			# = range 11 / radius 4 on a 2x2 footprint. Only the footprint is
+			# live so far: the range/radius tables land in power_network.gd in a
+			# later task, so placing either of these forms no network yet. The
+			# substation is the tier meant to bridge two separate pole clusters.
+			{ "kind": "building", "value": Buildings.Type.MEDIUM_POLE },
+			{ "kind": "building", "value": Buildings.Type.SUBSTATION },
 		],
 		"selected": 0,
 	})

@@ -5,20 +5,21 @@ extends RefCounted
 ##
 ## Sub-case index (each task appends its own _case_* and wires it into run()):
 ##   1. POWER_NETWORK_TYPES / POLE_TYPES membership (Task 1).
+##   2. Registration — DATA rows, footprints, placement (Task 2).
 
-# Unused at Task 1 — the sub-cases from Task 2 onward build a world through
-# _make_world(parent). Kept here so those tasks append a case rather than also
-# having to restore the preload; do not "clean up" as dead code.
+# Used from Task 2 on: the world-building sub-cases instantiate GridWorld
+# through _make_world(parent).
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
 static func test_name() -> String:
-	return "pole tiers (network-type set)"
+	return "pole tiers (network-type set + registration)"
 
-static func run(_parent: Node) -> Dictionary:
+static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
 	_case_network_type_set(failures)
+	_case_registration(parent, failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "1 sub-case passes: network-type set" }
+		return { "ok": true, "message": "2 sub-cases pass: network-type set, registration" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -86,6 +87,59 @@ static func _case_network_type_set(failures: Array) -> void:
 	_check(failures, not Buildings.POLE_TYPES.has(Buildings.Type.ELECTRIC_LAMP),
 		"(1) POLE_TYPES contains ELECTRIC_LAMP, but a consumer is not a pole")
 
+# ===========================================================================
+# (2) REGISTRATION — both tiers exist, are placeable, and carry the numbers
+# the whole session's arithmetic depends on.
+#
+# Footprint is asserted as a LITERAL rather than read back from DATA: the
+# point is to pin the design decision (substation is 2x2) independently of
+# the implementation, so a silent edit to DATA reddens here.
+# ===========================================================================
+static func _case_registration(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var rows: Array = [
+		[Buildings.Type.POWER_POLE,  Vector2i(1, 1), Vector2i(5, 5),  "basic"],
+		[Buildings.Type.MEDIUM_POLE, Vector2i(1, 1), Vector2i(10, 5), "medium"],
+		[Buildings.Type.SUBSTATION,  Vector2i(2, 2), Vector2i(15, 5), "substation"],
+	]
+	for row in rows:
+		var t: int = int(row[0])
+		var want_fp: Vector2i = row[1]
+		var pos: Vector2i = row[2]
+		var label: String = String(row[3])
+		_check(failures, Buildings.footprint_of(t) == want_fp,
+			"(2) footprint_of(%s) should be %s, got %s" % [label, str(want_fp), str(Buildings.footprint_of(t))])
+		_check(failures, Buildings.POLE_TYPES.has(t),
+			"(2) POLE_TYPES is missing %s, so BFS will never treat it as a pole" % label)
+		_check(failures, world.place_building(t, pos),
+			"(2) placing a %s at %s failed: %s" % [label, str(pos), str(world.last_building_place_error)])
+		var b: Building = world.building_at(pos)
+		_check(failures, b != null and b.type == t,
+			"(2) no %s building at %s after placement" % [label, str(pos)])
+	# The substation occupies all FOUR of its cells, not just the anchor.
+	# occupied is what save/load rehydrates from, so a wrong footprint here
+	# silently corrupts collision after a reload.
+	for d in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+		_check(failures, world.has_building_at(Vector2i(15, 5) + d),
+			"(2) substation cell %s is not marked occupied" % str(Vector2i(15, 5) + d))
+	_teardown(world)
+
 static func _check(failures: Array, condition: bool, label: String) -> void:
 	if not condition:
 		failures.append(label)
+
+## A fresh GridWorld parented to `parent` so its _ready() runs.
+##
+## No terrain is laid: a new GridWorld has an empty `tiles` dict, so every
+## cell reads back Terrain.DEFAULT_OVERLAY (NONE) and Terrain.DEFAULT_BASE
+## (GRASS). All three pole tiers list Overlay.NONE in requires_overlay, and
+## GRASS is not WATER, so can_place_building passes on bare ground.
+static func _make_world(parent: Node):
+	var world = GridWorldScript.new()
+	parent.add_child(world)
+	return world
+
+static func _teardown(world) -> void:
+	if world == null:
+		return
+	world.queue_free()

@@ -745,6 +745,29 @@ const DATA: Dictionary = {
 		# No slot_layout — pole is passive infrastructure, no inventory UI.
 		# Info-only via Q-inspect (info_lines shows network ID + capacity).
 	},
+	Type.MEDIUM_POLE: {
+		"name": "Medium Pole",
+		"swatch_color": Color(0.45, 0.42, 0.38),    # weathered grey-brown
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+		# Walkable like the basic pole — player walks under the wires.
+		"walkable": true,
+		# No slot_layout — passive infrastructure, Q-inspect only.
+	},
+	Type.SUBSTATION: {
+		"name": "Substation",
+		"swatch_color": Color(0.38, 0.40, 0.46),    # cold steel-blue
+		"footprint": Vector2i(2, 2),
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": false,
+		"player_drainable": false,
+		# NOT walkable, unlike the two thin pole tiers — this is a 2x2 fenced
+		# installation, not a post. Deliberate divergence from POWER_POLE.
+		"walkable": false,
+		# No slot_layout — passive infrastructure, Q-inspect only.
+	},
 	Type.WATER_WHEEL: {
 		"name": "Water Wheel",
 		"swatch_color": Color(0.40, 0.55, 0.65),    # wet wood-teal
@@ -1024,6 +1047,10 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Inserter.make(pos, dir, Type.ELECTRIC_INSERTER)
 		Type.POWER_POLE:
 			return PowerPole.make(pos)
+		Type.MEDIUM_POLE:
+			return MediumPole.make(pos)
+		Type.SUBSTATION:
+			return Substation.make(pos)
 		Type.WATER_WHEEL:
 			return WaterWheel.make(pos, dir)
 		Type.ELECTRIC_LAMP:
@@ -1141,6 +1168,10 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Inserter.draw(b, canvas, world_pos, tile_size)
 		Type.POWER_POLE:
 			PowerPole.draw(b, canvas, world_pos, tile_size)
+		Type.MEDIUM_POLE:
+			MediumPole.draw(b, canvas, world_pos, tile_size)
+		Type.SUBSTATION:
+			Substation.draw(b, canvas, world_pos, tile_size)
 		Type.WATER_WHEEL:
 			WaterWheel.draw(b, canvas, world_pos, tile_size)
 		Type.ELECTRIC_LAMP:
@@ -1356,7 +1387,12 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return MiningDrill.info_lines(b, world)
 		Type.SMELTER:
 			return Smelter.info_lines(b, world)
-		Type.POWER_POLE:
+		# All three wire tiers share PowerPole.info_lines: it reads nothing
+		# tier-specific, only network membership at b.anchor via
+		# PowerNetwork.network_id_at. Until the resolver learns about the new
+		# tiers, network_id_at returns -1 for them and the panel reads
+		# "Network: (not connected)" — correct, not a crash.
+		Type.POWER_POLE, Type.MEDIUM_POLE, Type.SUBSTATION:
 			return PowerPole.info_lines(b, world)
 		Type.WATER_WHEEL:
 			return WaterWheel.info_lines(b, world)
