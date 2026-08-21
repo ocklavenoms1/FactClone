@@ -99,8 +99,12 @@ const PAVE_MAX: Vector2i = Vector2i(30, 7)
 # paragraph first, because the short B link is a consequence of this choice.
 #
 # THE NUMBERS ARE THE TEST. Distances below are FOOTPRINT to FOOTPRINT, per
-# PowerNetwork._pole_distance (Task 4): the substation is 2x2 and occupies
-# x 12..13, so anchor-to-anchor under-measures its links westward by 1.
+# PowerNetwork._pole_distance (Task 4). The substation is 2x2 occupying
+# x 12..13 with its ANCHOR on the west column, so the two metrics disagree
+# in one direction only: westward they are identical (a pole at x=3 is 9
+# away by either), while eastward anchor-to-anchor OVER-measures by 1 (a
+# pole at x=16 is 4 by anchor, 3 by footprint) and therefore understates the
+# substation's real eastward reach.
 #
 # Two links, and ONLY these two, are min-rule TRIPWIRES — they exist because
 # the joining rule is either-reaches, max(range_a, range_b), and vanish under

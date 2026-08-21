@@ -1188,9 +1188,11 @@ static func poles_connected(world, anchor_a: Vector2i, anchor_b: Vector2i) -> bo
 ## Chebyshev distance between two poles, measured FOOTPRINT to FOOTPRINT
 ## rather than anchor to anchor.
 ##
-## For 1x1 poles these are identical. For the 2x2 substation, anchor-to-anchor
-## under-measures by up to 1 per axis depending on which side the other pole
-## sits — so a substation would reach further "up-left" than "down-right",
+## For 1x1 poles these are identical. For the 2x2 substation they diverge in
+## one direction per axis, because the anchor sits on the footprint's west/north
+## edge: toward -x/-y the two metrics AGREE, while toward +x/+y anchor-to-anchor
+## OVER-measures by 1 and so understates the substation's real reach. Left
+## uncorrected, a substation reaches further "up-left" than "down-right",
 ## which is invisible in tests built around a single orientation and obvious
 ## on screen. Footprint-to-footprint is orientation-independent.
 static func _pole_distance(a: Building, b: Building) -> int:
