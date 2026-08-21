@@ -106,8 +106,15 @@ static func _case_layout(parent: Node, failures: Array) -> void:
 	# one of placed/skipped per plan entry, so skipped == 0 and placed == 36
 	# already force the plan to hold 36. Kept anyway, because that invariant is
 	# a property of build()'s LOOP, not of the plan — an added `continue` that
-	# skips an entry without counting it would break the chain, and this is the
-	# assertion that would still notice. No single-line mutation reddens it
+	# skips an entry without counting it breaks the chain, after which this
+	# assertion stops being implied and starts carrying its own weight.
+	#
+	# It does NOT catch that mutation today, and the claim that it does was
+	# wrong when first written here. Verified by running it (an uncounted
+	# `continue` on one lamp): `placed 35, expected exactly 36` fires two lines
+	# above, while this assertion stays silent because plan() still returns 36.
+	# What it guards is the case where the plan and the loop disagree in the
+	# OTHER direction. No single-line mutation reddens it
 	# alone, and that is expected.
 	_check(failures, PoleTierRig.plan().size() == EXPECTED_PLACEMENTS,
 		"(1) the placement plan lists %d entries, expected exactly %d" % [PoleTierRig.plan().size(), EXPECTED_PLACEMENTS])

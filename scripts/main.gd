@@ -1599,7 +1599,7 @@ func _cycle_rig_power() -> void:
 		_show_toast("[rig] No rig registered this session. Press F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
 		return
 	if _rig_gen_anchors.is_empty():
-		_show_toast("[rig] The registered rig has no generators. Press %s to re-attach to the one on the ground." % RIG_RESPAWN_KEY[_rig_kind])
+		_show_toast("[rig] The registered rig has no generators. Press %s to re-attach — only works if you have not moved since spawning it." % RIG_RESPAWN_KEY[_rig_kind])
 		return
 	_rig_power_state = (_rig_power_state + 1) % ElectricRig.POWER_STATE_COUNT
 	ElectricRig.apply_power_state(grid_world, _rig_gen_anchors, _rig_power_state)
