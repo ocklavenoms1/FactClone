@@ -59,7 +59,18 @@ Expected: `42 passed, 0 failed` and **zero** `Parse Error` lines.
 |---|---|---|---|---|
 | `POWER_POLE` | 3 | 1 | 3×3 | 1×1 |
 | `MEDIUM_POLE` | 6 | 2 | 5×5 | 1×1 |
-| `SUBSTATION` | 11 | 4 | 9×9 | 2×2 |
+| `SUBSTATION` | 11 | 4 | **10×10** | 2×2 |
+
+**Note the substation's covered area is 10×10, not 9×9** — corrected at Task 2. `(2r+1)²` is the
+**1×1** formula. Coverage is measured from the FOOTPRINT, so a 2×2 pole at anchor `(a, a)` with
+radius 4 spans `a-4 .. a+1+4` = **10 cells per axis**. A 9×9 box cannot even be centred on an
+even-sided footprint. Task 5's test already encodes the correct figure (x from 6 to 15 for an
+anchor at `(10,10)`); the table was the thing that was wrong.
+
+**Consumer-side scan box is a separate number.** `power_satisfaction_at` scans outward from the
+CONSUMER, so its box is `(2 * max_supply_radius + 1)²` = **9×9 = 81 checks**, regardless of the
+poles' footprints. Do not conflate the two: 10×10 is what a substation covers; 9×9 is what a
+consumer searches.
 
 Substation wire range is 11 rather than the 8 originally proposed because MST rendering decouples wire *count* from wire *range* — the K4 density complaint that forced `POLE_RANGE` from 5 down to 3 no longer applies. Supply radius stays capped at 4 because consumer-side query cost is `(2r+1)²` and every consumer pays the maximum tier's box.
 
@@ -304,7 +315,10 @@ static func _case_registration(parent: Node, failures: Array) -> void:
 		_check(failures, Buildings.POLE_TYPES.has(t),
 			"(2) POLE_TYPES is missing %s, so BFS will never treat it as a pole" % label)
 		_check(failures, world.place_building(t, pos),
-			"(2) placing a %s at %s failed: %s" % [label, str(pos), str(world.last_place_error)])
+			"(2) placing a %s at %s failed: %s" % [label, str(pos), str(world.last_building_place_error)])
+			# ^ CORRECTED at Task 2: `last_place_error` (grid_world.gd:201) is the
+			# TERRAIN-painting field, set by set_overlay. Building placement sets
+			# `last_building_place_error` (:203). The wrong one prints empty.
 		var b: Building = world.building_at(pos)
 		_check(failures, b != null and b.type == t,
 			"(2) no %s building at %s after placement" % [label, str(pos)])
@@ -316,10 +330,14 @@ static func _case_registration(parent: Node, failures: Array) -> void:
 			"(2) substation cell %s is not marked occupied" % str(Vector2i(15, 5) + d))
 	_teardown(world)
 
+## CORRECTED at Task 2: there is NO `generate_default_world()` on GridWorld —
+## it does not exist anywhere in the repo. A fresh GridWorld has an empty
+## `tiles` dict, so every cell reads DEFAULT_BASE (GRASS) / DEFAULT_OVERLAY
+## (NONE), which all three pole tiers accept. This is the house pattern used
+## by ~37 other test files.
 static func _make_world(parent: Node):
 	var world = GridWorldScript.new()
 	parent.add_child(world)
-	world.generate_default_world()
 	return world
 
 static func _teardown(world) -> void:
@@ -397,7 +415,7 @@ extends RefCounted
 
 ## Substation — the backbone wire tier (Electricity Session 3).
 ##
-## 2x2, wire range 11, supply radius 4 (a 9x9 covered area measured from the
+## 2x2, wire range 11, supply radius 4 (a 10x10 covered area measured from the
 ## FOOTPRINT, not the anchor — see PowerNetwork._pole_cells). It is the piece
 ## that bridges two separate pole clusters into one network.
 ##
@@ -497,8 +515,11 @@ In `scripts/ui/hotbar.gd`, inside the `"Power"` category's `slots` array, after 
 ```gdscript
 			# Electricity Session 3 (session-electricity-pole-tiers): wire tiers.
 			# Medium = range 6 / supply radius 2. Substation = range 11 / radius 4
-			# and 2x2. Both cost more than the basic pole; the substation is the
-			# piece that bridges two separate clusters into one network.
+			# and 2x2. The substation is the piece that bridges two separate
+			# clusters into one network.
+			# (CORRECTED at Task 2: the original said "both cost more than the
+			# basic pole". There is NO build-cost system in this project —
+			# placement is free — so that would have been a false comment.)
 			{ "kind": "building", "value": Buildings.Type.MEDIUM_POLE },
 			{ "kind": "building", "value": Buildings.Type.SUBSTATION },
 ```
@@ -835,10 +856,14 @@ static func _unique_components(world) -> Array:
 		seen[int(world._pole_component[pos])] = true
 	return seen.keys()
 
+## CORRECTED at Task 2: there is NO `generate_default_world()` on GridWorld —
+## it does not exist anywhere in the repo. A fresh GridWorld has an empty
+## `tiles` dict, so every cell reads DEFAULT_BASE (GRASS) / DEFAULT_OVERLAY
+## (NONE), which all three pole tiers accept. This is the house pattern used
+## by ~37 other test files.
 static func _make_world(parent: Node):
 	var world = GridWorldScript.new()
 	parent.add_child(world)
-	world.generate_default_world()
 	return world
 
 static func _teardown(world) -> void:
