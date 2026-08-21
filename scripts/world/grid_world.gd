@@ -471,7 +471,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 		occupied[cell] = pos
 	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
-	if t == Buildings.Type.POWER_POLE or t == Buildings.Type.WATER_WHEEL or t == Buildings.Type.ELECTRIC_LAMP or t == Buildings.Type.WINDMILL or t == Buildings.Type.STEAM_GENERATOR or t == Buildings.Type.ACCUMULATOR:
+	if Buildings.POWER_NETWORK_TYPES.has(t):
 		_power_network_dirty = true
 	# Post-make placement hooks: building types that need world context to
 	# finish their initial state populate it here. (make() runs before the
@@ -492,7 +492,7 @@ func remove_building_at(pos: Vector2i) -> bool:
 	buildings.erase(anchor)
 	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
-	if b.type == Buildings.Type.POWER_POLE or b.type == Buildings.Type.WATER_WHEEL or b.type == Buildings.Type.ELECTRIC_LAMP or b.type == Buildings.Type.WINDMILL or b.type == Buildings.Type.STEAM_GENERATOR or b.type == Buildings.Type.ACCUMULATOR:
+	if Buildings.POWER_NETWORK_TYPES.has(b.type):
 		_power_network_dirty = true
 	return true
 

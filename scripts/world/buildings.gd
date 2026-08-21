@@ -19,6 +19,10 @@ extends RefCounted
 ##   8. Add case in `drain_into_player()` if `player_drainable: true`.
 ##   9. Add case in `info_lines_for()` if you want a custom info panel display.
 ##  10. Add a hotbar slot in scripts/ui/hotbar.gd if it should be placeable.
+##  11. Add to POWER_NETWORK_TYPES below if placing or removing it changes the
+##      power topology or the supply/demand totals — and additionally to
+##      POLE_TYPES if it is a pole. Miss this and the building works, but the
+##      network silently never rebuilds when you place one.
 ##
 ## Future processor machines (Oven, Press, etc.) are usually just steps 1-4
 ## + 7 + 9-10 because they reuse Processor.tick.
@@ -119,6 +123,20 @@ enum Type {
 	# bundled in. Same parametric code path as the other tiers via the
 	# *_BY_TYPE tables in inserter.gd.
 	ELECTRIC_INSERTER,
+	# Electricity Arc Session 3 (session-electricity-pole-tiers): pole tiers.
+	# Medium Pole — 1x1, wire range 6, supply radius 2.
+	# Substation  — 2x2, wire range 11, supply radius 4. The backbone piece.
+	# Both BEHAVE like POWER_POLE, differing only in the range/radius numbers.
+	# They are NOT the POWER_POLE type: each gets its own enum value, its own
+	# DATA row, and its own make(), so `b.type` is never POWER_POLE for them.
+	# Every `type == POWER_POLE` test is therefore a place the tiers must be
+	# added by hand — see POLE_TYPES below, and the guards in power_network.gd.
+	# The parametric POLE_RANGE_BY_TYPE / SUPPLY_RADIUS_BY_TYPE tables land in
+	# a later task, along with the DATA entries — until then these two are enum
+	# slots only and are NOT placeable. Appended at the END of the enum so
+	# every previously-saved type keeps its integer value.
+	MEDIUM_POLE,
+	SUBSTATION,
 }
 
 const DATA: Dictionary = {
@@ -783,6 +801,40 @@ const DATA: Dictionary = {
 		"walkable": false,
 		# No slot_layout — accumulator has no items; charge state is internal.
 	},
+}
+
+## Every building type whose placement or removal changes the POWER topology
+## or the supply/demand totals, and therefore must set world._power_network_dirty.
+##
+## Single source of truth. This replaces two hand-maintained `or` chains that
+## used to live at grid_world.gd's place and remove paths. They had already
+## drifted: ELECTRIC_INSERTER was in neither, which was benign only because
+## consumer demand is rescanned from scratch every tick. A POLE missing from
+## this set is NOT benign — topology is cached until something marks it dirty,
+## so the new pole would sit inert until anything else marked the network
+## dirty: any place/remove of a type in this set, or an explicit
+## GridWorld.mark_power_network_dirty().
+##
+## Dictionary-as-set (Godot 4 has no built-in Set); values are ignored.
+const POWER_NETWORK_TYPES: Dictionary = {
+	Type.POWER_POLE: true,
+	Type.MEDIUM_POLE: true,
+	Type.SUBSTATION: true,
+	Type.WATER_WHEEL: true,
+	Type.WINDMILL: true,
+	Type.STEAM_GENERATOR: true,
+	Type.ACCUMULATOR: true,
+	Type.ELECTRIC_LAMP: true,
+	Type.ELECTRIC_INSERTER: true,
+}
+
+## The subset of POWER_NETWORK_TYPES that are POLES — the buildings that form
+## network components via BFS and project a supply area. Generators and
+## consumers are in POWER_NETWORK_TYPES but not here.
+const POLE_TYPES: Dictionary = {
+	Type.POWER_POLE: true,
+	Type.MEDIUM_POLE: true,
+	Type.SUBSTATION: true,
 }
 
 static func name_of(t: int) -> String:
