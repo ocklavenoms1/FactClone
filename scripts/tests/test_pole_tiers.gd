@@ -2,7 +2,14 @@ extends RefCounted
 
 ## Pole tiers (Electricity Session 3) — parametric POLE_RANGE_BY_TYPE /
 ## SUPPLY_RADIUS_BY_TYPE, either-reaches connection, multi-cell poles,
-## nearest-pole supply tie-break.
+## per-tier supply areas.
+##
+## NOT the nearest-pole tie-break, which an earlier draft of this line
+## advertised. No sub-case exercises it and none CAN: any two poles covering
+## one cell are already in the same component, so every candidate answers with
+## the same id — see the invariant proved in _covering_component_id's
+## docstring. Claiming coverage this file cannot have is worse than claiming
+## none.
 ##
 ## Sub-case index (each task appends its own _case_* and wires it into run()):
 ##   1. POWER_NETWORK_TYPES / POLE_TYPES membership (Task 1).
@@ -23,19 +30,28 @@ extends RefCounted
 ##      component's demand total (Task 5).
 ##   8. The generator path sees the new tiers — a steam generator flush against
 ##      a substation feeds its supply in (Task 5).
+##   9. The panel row that renders the tier table still FITS the info panel —
+##      adding a tier widens a player-facing string (Task 5 review).
 
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const HotbarScript = preload("res://scripts/ui/hotbar.gd")
+# Sub-case (9) reads LINE_BUDGET / BODY_FONT_SIZE off the panel itself rather
+# than restating them, so the guard and the thing guarded cannot drift.
+const InfoPanelScript = preload("res://scripts/ui/info_panel.gd")
 
-## Short on purpose. The sub-case index in this file's header is the list, and
-## it is the thing that stays accurate — a name that concatenates every
-## sub-case grows unreadable across Tasks 5-7 and drifts the moment one is
-## added without renaming. Failures print their own "(N) ..." prefix, so the
-## runner line never needs to enumerate what passed.
+## Short on purpose, and NO LONGER AN ENUMERATION. The sub-case index in this
+## file's header is the list, and it is the thing that stays accurate — a name
+## that concatenates every sub-case grows unreadable across Tasks 5-7 and
+## drifts the moment one is added without renaming. Which is exactly what
+## happened: this read "tables + either-reaches + shared predicate" while Task
+## 5 added three sub-cases and the review a fourth, so the three named had
+## become the minority and the name argued against its own docstring. Failures
+## print their own "(N) ..." prefix, so the runner line never needs to say what
+## passed.
 static func test_name() -> String:
-	return "pole tiers (tables + either-reaches + shared predicate)"
+	return "pole tiers"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -47,8 +63,9 @@ static func run(parent: Node) -> Dictionary:
 	_case_multicell_supply_symmetry(parent, failures)
 	_case_consumer_paths_agree(parent, failures)
 	_case_generator_against_substation(parent, failures)
+	_case_reach_row_fits_panel(failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "8 sub-cases pass: network-type set, registration, either-reaches, order independence, predicate is the graph, multi-cell supply symmetry, consumer paths agree at the wide radius, generator feeds a substation" }
+		return { "ok": true, "message": "9 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -708,6 +725,92 @@ static func _case_generator_against_substation(parent: Node, failures: Array) ->
 	_check(failures, got_supply == SteamGenerator.MAX_OUTPUT,
 		"(8) the substation's component carries %d supply, expected exactly %d — a fuelled steam generator cardinally touching a SUBSTATION must feed it exactly as it would a basic pole" % [got_supply, SteamGenerator.MAX_OUTPUT])
 	_teardown(world)
+
+# ===========================================================================
+# (9) THE PANEL ROW THAT RENDERS THE TIER TABLE STILL FITS THE PANEL.
+#
+# Inserter.info_lines' STATE_NO_POWER arm composes one row listing every tier
+# in Buildings.POLE_TYPES with its supply radius — "Power 1, Medium 2,
+# Substation 4". ADDING A TIER WIDENS A PLAYER-FACING STRING, by roughly 55-90
+# px against 24 px of headroom, and info_panel.gd draws body rows through
+# draw_string, whose overrun behaviour defaults to OVERRUN_NO_TRIMMING: an
+# over-long row is not clipped, it spills across the panel border and then off
+# the right of the viewport. So the failure is silent and it is invisible to
+# every other test in the project.
+#
+# THIS SUB-CASE EXISTS BECAUSE THAT DEFECT ALREADY SHIPPED ONCE. Task 5a
+# replaced the flat "connect a pole within 1 tile" with a per-tier string that
+# measured 457 px against a 220 px budget and read, on screen, as "NO POWER —
+# no pole in ran" — both numbers, the entire point of the change, off-viewport.
+# A reviewer caught it, not the suite. This is the guard the suite did not
+# have, placed with the TRIGGER rather than with the panel: what breaks the
+# row is a change to the pole tiers, so it reddens in the pole-tiers file.
+#
+# IT MEASURES, IT DOES NOT COUNT CHARACTERS. Width comes from
+# ThemeDB.fallback_font — the same object info_panel.gd draws with, not a
+# stand-in — at InfoPanelScript.BODY_FONT_SIZE, against
+# InfoPanelScript.LINE_BUDGET. Both constants were extracted from that file's
+# draw_string calls for this, so the budget cannot drift from the thing being
+# budgeted. Character count would have been the dishonest version: "Substation
+# 4" and "Illlllllll 4" are the same length and nowhere near the same width.
+#
+# DELIBERATELY NARROW. This is NOT a panel-wide audit. Two sibling status
+# strings are over budget right now and are not asserted here — BLOCKED at 303
+# px and NO FUEL at 305 px, both predating this session and both visibly cut —
+# because pinning them would either redden the suite on someone else's bug or
+# require fixing player-facing copy this task has no mandate over. A general
+# info-panel width guard is a real task and this is not it. What this pins is
+# the two rows Task 5 added and the one edit that silently breaks them.
+# ===========================================================================
+static func _case_reach_row_fits_panel(failures: Array) -> void:
+	var font: Font = ThemeDB.fallback_font
+	if font == null:
+		_check(failures, false,
+			"(9) ThemeDB.fallback_font is null, so no row width can be measured. Failing loudly rather than passing vacuously — a width guard that silently measures nothing is worse than none")
+		return
+	# No world needed: info_lines' own signature allows a null world, and the
+	# reach rows read only Buildings.POLE_TYPES and SUPPLY_RADIUS_BY_TYPE.
+	var ins: Building = Inserter.make(Vector2i(0, 0), 0, Buildings.Type.ELECTRIC_INSERTER)
+	ins.state["state"] = Inserter.STATE_NO_POWER
+	var lines: Array = Inserter.info_lines(ins, null)
+	var label_idx: int = -1
+	for i in range(lines.size()):
+		if str(lines[i]).begins_with("Pole reach"):
+			label_idx = i
+			break
+	_check(failures, label_idx >= 0 and label_idx + 1 < lines.size(),
+		"(9) the STATE_NO_POWER panel has no `Pole reach` row followed by a data row, so this sub-case is measuring nothing. If those rows were removed on purpose, delete this sub-case in the same breath. Got %s" % str(lines))
+	if label_idx < 0 or label_idx + 1 >= lines.size():
+		return
+
+	# EVERY tier must appear, checked before the width is. A tier added to the
+	# table but dropped from the panel would leave a SHORTER string that sails
+	# through the width assertion while being exactly the bug — the player
+	# holding the new pole is told nothing about its reach.
+	#
+	# DELIBERATELY FORMAT-TOLERANT: it accepts the tier's DATA name either in
+	# full or with the " Pole" suffix the panel trims, because which of the two
+	# is rendered is a layout decision and this assertion is about CONTENT. An
+	# earlier draft hardcoded the trimmed form, and when the width mutation
+	# below was run it fired here too, reporting "the player is told nothing
+	# about its supply radius" about a row that named every tier and every
+	# radius. A presence check that reddens on a relabel is a presence check
+	# that lies about what broke. Width is the other assertion's job.
+	var data: String = str(lines[label_idx + 1])
+	for pole_t in Buildings.POLE_TYPES:
+		var pt: int = int(pole_t)
+		var full: String = Buildings.name_of(pt)
+		var r: int = PowerNetwork.supply_radius(pt)
+		var present: bool = data.contains("%s %d" % [full, r]) or data.contains("%s %d" % [full.trim_suffix(" Pole"), r])
+		_check(failures, present,
+			"(9) the panel's pole-reach row never pairs `%s` with its supply radius %d, so a player holding that tier is told nothing about its reach. The row reads \"%s\"" % [full, r, data])
+
+	var budget: int = int(InfoPanelScript.LINE_BUDGET)
+	for idx in [label_idx, label_idx + 1]:
+		var text: String = str(lines[idx])
+		var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(InfoPanelScript.BODY_FONT_SIZE)).x
+		_check(failures, w <= float(budget),
+			"(9) the info-panel row \"%s\" measures %.0f px against info_panel.gd's %d px line budget. draw_string does NOT trim, so it spills past the panel border and off the right of the viewport — which is the exact regression adding a pole tier recreates. Split the row or shorten the labels" % [text, w, budget])
 
 ## Lay STONE over a `size` rectangle anchored at `anchor`.
 ##

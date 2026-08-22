@@ -445,10 +445,15 @@ static func _adjacent_component_id(world, b: Building) -> int:
 ##
 ## FIRST COVERED FOOTPRINT CELL WINS, and it stops there. The nearest-pole
 ## tie-break inside _covering_component_id is per-cell, so a 2x2 consumer
-## straddling two components takes whichever component covers its lex-first
-## covered cell. That is the same documented v1 simplification
-## _adjacent_component_id carries, and no consumer in the project is larger
-## than 1x1 yet.
+## straddling two components takes whichever component covers the first cell
+## this walk reaches. That order is ROW-MAJOR — `fy` outer, `fx` inner — and
+## deliberately NOT the x-major lex order rebuild_topology sorts its pole
+## anchors by (see its sort_custom). Do not call this one "lex-first": the two
+## orders disagree for any footprint wider and taller than one cell, and the
+## only reason that costs nothing today is that every consumer in the project
+## is 1x1, which makes this loop a single iteration. A 2x2 consumer would make
+## the difference real. Same documented v1 simplification
+## _adjacent_component_id carries.
 static func _supply_component_id(world, b: Building) -> int:
 	var fp: Vector2i = Buildings.footprint_of(b.type)
 	for fy in range(fp.y):
@@ -500,13 +505,50 @@ static func power_satisfaction_at(world, pos: Vector2i) -> float:
 ## the (2r+2)-per-axis coverage SUPPLY_RADIUS_BY_TYPE's docstring describes —
 ## ten cells per axis at radius 4, not nine.
 ##
-## NOTE: this cannot early-return on the first hit, because a nearer pole may
-## appear later in the scan order. It evaluates every candidate in the box and
-## picks.
+## THE TIE-BREAK IS CURRENTLY UNOBSERVABLE, AND TASK 6 NEEDS TO KNOW THAT.
+## The scan cannot early-return on the first hit *in principle*, because a
+## nearer pole may appear later in the scan order — so it evaluates every
+## candidate in the box and picks. But which candidate it picks cannot change
+## the ANSWER today, because of this invariant:
+##
+##   ANY TWO POLES COVERING THE SAME CELL ARE ALREADY IN THE SAME COMPONENT.
+##
+## Proof. If A and B both cover `pos` then, Chebyshev being a metric and
+## _pole_distance being footprint-to-footprint, the triangle inequality gives
+## _pole_distance(A, B) <= dist(A, pos) + dist(pos, B) <= rA + rB. And every
+## tier pair clears its own wire range with room to spare:
+##
+##   pair             rA + rB   max(range)
+##   basic  + basic     1+1=2       3
+##   basic  + medium    1+2=3       6
+##   medium + medium    2+2=4       6
+##   basic  + sub       1+4=5      11
+##   medium + sub       2+4=6      11
+##   sub    + sub       4+4=8      11
+##
+## So poles_connected() is true for every covering pair, the BFS put them in
+## one component, and _pole_component[anchor] is the same integer whichever one
+## wins. MUTATION RUN: replacing this whole block with a first-hit `return`
+## leaves the suite at 45 passed, 0 failed.
+##
+## WHAT WOULD BREAK IT: a tier pair with rA + rB > max(range_A, range_B) — in
+## the same-tier form, any tier whose supply radius exceeds HALF its own wire
+## range. None of the three does (2 vs 3, 4 vs 6, 8 vs 11). Add one that does
+## and this tie-break becomes load-bearing immediately, with nothing in the
+## suite to notice it had been dead.
+##
+## DO NOT restore the early return on the strength of the above alone. It is
+## an 81-cell scan whose cost Task 6 is about to measure, and the trade —
+## exhaustive-but-dead versus fast-but-fragile — is a decision for that gate,
+## with the measured number in hand. This docstring exists so whoever stands
+## at that gate has the invariant in front of them.
 static func _covering_component_id(world, pos: Vector2i) -> int:
 	var radius: int = max_supply_radius()
 	var best_comp: int = -1
-	var best_dist: int = 0x7FFFFFFF
+	# radius + 1 is one past the largest distance the box can produce (dx and
+	# dy are both bounded by radius, so dist = max(|dx|, |dy|) <= radius), so
+	# it is a sentinel the first candidate always beats.
+	var best_dist: int = radius + 1
 	var best_radius: int = -1
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
@@ -514,6 +556,17 @@ static func _covering_component_id(world, pos: Vector2i) -> int:
 			if not world._pole_cells.has(cell):
 				continue
 			var anchor: Vector2i = world._pole_cells[cell]
+			# Defensive: confirm the anchor really still holds a pole. These
+			# three probes CANNOT fire while the caches agree with
+			# world.buildings — rebuild_topology clears and repopulates
+			# _pole_cells and _pole_component on the same two lines, from a
+			# pole_anchors list it filtered out of world.buildings by
+			# POLE_TYPES. They are kept because "the caches agree" is an
+			# assumption this repo has already broken once: audit finding #1
+			# was world.buildings being cleared and rewritten with no dirty
+			# flag, which leaves exactly these maps pointing at anchors that no
+			# longer hold poles. Cheap insurance on a path that already costs
+			# up to 81 cell probes.
 			if not world._pole_component.has(anchor):
 				continue
 			var pole: Building = world.buildings.get(anchor, null)
@@ -523,8 +576,15 @@ static func _covering_component_id(world, pos: Vector2i) -> int:
 			var r: int = supply_radius(pole.type)
 			if dist > r:
 				continue
-			# Nearest wins; ties go to the larger supply radius. Both keys are
-			# deterministic, so no iteration-order dependence survives.
+			# Nearest wins, then the larger supply radius — and then, when a
+			# pair ties on BOTH, whichever the box reached first, because the
+			# comparison below is strict. So the real third key is the dy-then-
+			# dx scan order above. It is deterministic only for as long as that
+			# walk is: swapping the box scan for an iteration over a pole list
+			# (the obvious Task 6 optimisation) silently changes which pole
+			# wins a two-way tie. Harmless today — see the invariant in the
+			# docstring, which makes every covering pole answer the same
+			# component — but do not read the first two keys as the whole rule.
 			if dist < best_dist or (dist == best_dist and r > best_radius):
 				best_dist = dist
 				best_radius = r

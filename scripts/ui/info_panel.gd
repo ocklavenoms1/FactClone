@@ -17,6 +17,21 @@ const PANEL_WIDTH: int = 240
 const PADDING: int = 10
 const HEADER_HEIGHT: int = 22
 const LINE_HEIGHT: int = 18
+
+## Body-row text metrics, NAMED rather than inlined so a width guard can
+## measure exactly what _draw uses instead of a copy that can drift from it.
+## Every body row in this file is drawn at LINE_BUDGET wide and
+## BODY_FONT_SIZE tall through ThemeDB.fallback_font.
+##
+## LINE_BUDGET DOES NOT CLIP. draw_string's overrun behaviour defaults to
+## OVERRUN_NO_TRIMMING, so the width argument only positions the row — an
+## over-long one is drawn in full, spilling across the panel border and then
+## off the right of the viewport, since _ready anchors the panel
+## VIEWPORT_MARGIN px in from it. Two of Inserter's status strings are over
+## budget today and are visibly cut for that reason.
+const BODY_FONT_SIZE: int = 12
+const LINE_BUDGET: int = PANEL_WIDTH - PADDING * 2
+const VIEWPORT_MARGIN: int = 16
 const BG_COLOR: Color = Color(0.10, 0.10, 0.10, 0.88)
 const BORDER_COLOR: Color = Color(0.65, 0.55, 0.35, 0.95)
 const HEADER_COLOR: Color = Color(1.00, 0.92, 0.55)
@@ -43,8 +58,8 @@ func _ready() -> void:
 	anchor_right = 1.0
 	anchor_top = 0.0
 	anchor_bottom = 0.0
-	offset_right = -16
-	offset_left = -16 - PANEL_WIDTH
+	offset_right = -VIEWPORT_MARGIN
+	offset_left = -VIEWPORT_MARGIN - PANEL_WIDTH
 	# Below the inventory panel, which sits below the minimap.
 	# Layout: minimap top=10..234, gap, inventory top=244..~440 (varies by
 	# item count), gap, info panel top=560.
@@ -156,7 +171,7 @@ func _draw_building() -> void:
 	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
 	var y: float = PADDING + HEADER_HEIGHT + 14
 	for line in lines:
-		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
+		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, TEXT_COLOR)
 		y += LINE_HEIGHT
 	_draw_soil_footer(font, y)
 
@@ -181,7 +196,7 @@ func _draw_resource() -> void:
 	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
 	var y: float = PADDING + HEADER_HEIGHT + 14
 	for line in lines:
-		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
+		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, TEXT_COLOR)
 		y += LINE_HEIGHT
 	_draw_soil_footer(font, y)
 
@@ -210,7 +225,7 @@ func _draw_tile() -> void:
 	draw_line(Vector2(PADDING, PADDING + HEADER_HEIGHT - 2), Vector2(PANEL_WIDTH - PADDING, PADDING + HEADER_HEIGHT - 2), SUBTEXT_COLOR, 1.0)
 	var y: float = PADDING + HEADER_HEIGHT + 14
 	for line in lines:
-		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, TEXT_COLOR)
+		draw_string(font, Vector2(PADDING, y), str(line), HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, TEXT_COLOR)
 		y += LINE_HEIGHT
 	_draw_soil_footer(font, y)
 
@@ -273,7 +288,7 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 	var soil_text: String = "Soil: %d / %d%s%s" % [
 		soil, GridWorld.TILE_SOIL_FULL, level_label, activity_label]
 	draw_string(font, Vector2(PADDING, y), soil_text,
-		HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, soil_color)
+		HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, soil_color)
 
 	# Wasteland action prompt (session-soil-exhaustion-4): tells the
 	# player how to recover. Shown directly under the soil line, replaces
@@ -283,7 +298,7 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 	if is_wasteland:
 		draw_string(font, Vector2(PADDING, prompt_y),
 			"Apply Premium Compost to restore.",
-			HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, SOIL_DEPLETED_COLOR)
+			HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, SOIL_DEPLETED_COLOR)
 		return   # don't render fertilizer line on wasteland
 
 	# Fertilizer line (session-soil-exhaustion-3) — only when active boost
@@ -297,7 +312,7 @@ func _draw_soil_footer(font: Font, y: float) -> void:
 		var fert_text: String = "Fertilizer: %s (%.0fs remaining, %.1fx regen)" % [
 			Items.name_of(fert_tier), remaining, multiplier]
 		draw_string(font, Vector2(PADDING, prompt_y), fert_text,
-			HORIZONTAL_ALIGNMENT_LEFT, PANEL_WIDTH - PADDING * 2, 12, SOIL_REGEN_COLOR)
+			HORIZONTAL_ALIGNMENT_LEFT, LINE_BUDGET, BODY_FONT_SIZE, SOIL_REGEN_COLOR)
 
 func _resource_lines(t: Tile) -> Array:
 	var lines: Array = []

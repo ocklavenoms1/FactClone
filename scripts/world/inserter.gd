@@ -338,10 +338,22 @@ static func tick(b: Building, world) -> void:
 		# only through a direct effective_cycle_ticks call.
 		#
 		# The satisfaction lookup happens twice on a powered tick (here and
-		# inside effective_cycle_ticks below). Accepted deliberately: it is a
-		# dictionary read behind a small fixed scan, and the alternative —
+		# inside effective_cycle_ticks below), and it is NO LONGER CHEAP. When
+		# this trade was accepted the scan behind power_satisfaction_at was the
+		# basic pole's 3x3 — 9 cell probes. Pole Tiers Task 5 sized that box to
+		# the WIDEST tier's radius so a consumer can be found by a substation,
+		# and every consumer now pays 9x9 = 81 probes per lookup whether or not
+		# a substation exists anywhere on the map. SUPPLY_RADIUS_BY_TYPE's
+		# docstring carries that arithmetic and the reason 4 is the ceiling.
+		#
+		# So this is 162 probes per powered inserter per tick, not 18. Still
+		# accepted, but on the OTHER side of the trade: the alternative —
 		# threading the value into effective_cycle_ticks — would cost that
-		# function the world-free purity InserterPanel depends on.
+		# function the world-free purity InserterPanel depends on. Task 6
+		# measures the scan itself. If it makes the scan cheap, this doubling
+		# stops mattering. If it does not, this is the first call site to
+		# revisit, and the fix is a per-tick cache on the world rather than a
+		# signature change here.
 		if world.power_satisfaction_at(b.anchor) <= POWER_EPSILON:
 			b.state["state"] = STATE_NO_POWER
 			return
@@ -792,6 +804,17 @@ static func info_lines(b: Building, world) -> Array:
 	# substation shipped. Names come from DATA through name_of() with a
 	# trailing " Pole" trimmed: it costs five characters each on "Power Pole"
 	# and "Medium Pole" and "Substation" has no suffix to lose.
+	#
+	# THE DERIVATION BUYS CORRECTNESS, NOT FIT, and the difference matters
+	# here. A fourth tier keeps this row TRUE automatically and makes it
+	# roughly 55-90 px LONGER, against the 24 px of headroom measured above —
+	# silently re-creating the overflow this whole block was written to fix.
+	# Nothing about deriving the string protects its width.
+	# What protects its width is test_pole_tiers.gd sub-case (9), which
+	# measures both rows through ThemeDB.fallback_font against
+	# InfoPanel.LINE_BUDGET and reddens on exactly that edit. If you are adding
+	# a tier and it just went red, split this into one row per tier — do not
+	# widen the panel, and do not delete the assertion.
 	if s == STATE_NO_POWER:
 		var reaches: PackedStringArray = PackedStringArray()
 		for pole_t in Buildings.POLE_TYPES:
