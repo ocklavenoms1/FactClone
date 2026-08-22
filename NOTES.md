@@ -15,10 +15,17 @@ Discovered 2026-08-21 during Electricity Session 3 Task 1, when a code reviewer 
 passing that `save_system.gd` repopulates `grid_world.buildings` on load without marking
 either network cache dirty. That is audit finding **#1** (HIGH), described verbatim in
 `docs/audits/2026-07-19-flaw-review.md:55` — including the detail that
-`mark_fluid_network_dirty()` "is never called anywhere in the codebase." It still has zero
-callers today.
+`mark_fluid_network_dirty()` "is never called anywhere in the codebase."
 
-The fix exists. It is not on main:
+**#1 itself is now CLOSED on main** — `SaveSystem.load_game` calls both
+`mark_power_network_dirty()` and `mark_fluid_network_dirty()` at the end of its world-mutation
+section, covered by `scripts/tests/test_load_network_invalidation.gd`
+(Electricity Session 3 Task 5b). It was fixed here, not merged from the branch below, because
+Task 5 added `world._pole_cells` — a second cache on the same lifecycle — and shipping that
+into a known-live invalidation hole would have widened the finding. **The rest of the branch is
+still unapplied**, which is the whole point of this entry.
+
+The other fixes exist. They are not on main:
 
 ```
 git merge-base --is-ancestor 497b5ce HEAD   ->  NO
@@ -46,6 +53,7 @@ mentally filed as superseded. It is not superseded; it is *unapplied*.
 ### Which findings are actually closed on main is UNKNOWN
 
 Confirmed closed on main, re-fixed in later sessions:
+- **#1** — load_game not invalidating the network caches (`session-electricity-pole-tiers` Task 5b, `scripts/tests/test_load_network_invalidation.gd`). Fixed on main directly, NOT cherry-picked.
 - **#2 / #6** — mid-swing fuel outage destroying the held item (`session-inserter-electric`, `37ff498`)
 - **#8 / #9** — shared-buffer slot rendering (the diagnostic reframed it, then the resolver landed)
 - **#10** — placement terrain guards (`test_placement_terrain_guards.gd` is on main)
@@ -63,8 +71,8 @@ radius had **grown** since the audit was written.
 Immediate priority is the load-correctness cluster, because those are the ones with a
 confirmed-live HIGH: **#11** save-field shape validation, **#12** atomic save write,
 **#13** vision/map refresh after quick-load, **#21** load-failure fallthrough overwriting a
-recoverable save. (**#1** itself is being closed inside Electricity Session 3 Task 5, which is
-already opening that lifecycle to add a second cache — see that plan.)
+recoverable save. (**#1** is already closed — see above. It was the one member of this cluster
+that a feature session happened to be standing on top of.)
 
 ---
 

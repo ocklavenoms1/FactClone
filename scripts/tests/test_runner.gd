@@ -56,6 +56,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_electric_rig.gd"),
 	preload("res://scripts/tests/test_pole_tiers.gd"),
 	preload("res://scripts/tests/test_pole_tier_rig.gd"),
+	preload("res://scripts/tests/test_load_network_invalidation.gd"),
 ]
 
 func _ready() -> void:

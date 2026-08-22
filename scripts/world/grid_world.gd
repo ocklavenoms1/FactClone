@@ -508,14 +508,23 @@ func remove_building_at(pos: Vector2i) -> bool:
 const _CARDINALS: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]
 
 ## Mark the fluid network as needing a rebuild on next query.
-## Useful for tests or future code paths that mutate buildings without
-## going through place_building / remove_building.
+##
+## For code paths that mutate `buildings` without going through
+## place_building / remove_building — those two are the ONLY ones that set the
+## flag themselves. SaveSystem.load_game is the real one: it clears and
+## repopulates `buildings` and `occupied` directly, and until it called this
+## (audit finding #1) a mid-session quick-load answered pipe connectivity
+## questions about the world it had just replaced.
 func mark_fluid_network_dirty() -> void:
 	_fluid_network_dirty = true
 
 ## Mark the power network as needing a topology rebuild on next query.
-## Useful for tests or future code paths that mutate buildings without
-## going through place_building / remove_building.
+##
+## Same contract and the same caller as mark_fluid_network_dirty above, and it
+## invalidates BOTH power caches at once — _pole_component and _pole_cells are
+## rebuilt together by PowerNetwork.rebuild_topology off this one flag. Also
+## called belt-and-braces at the end of both rigs' build() (ElectricRig,
+## PoleTierRig), which covers their adopt-an-existing-layout path.
 func mark_power_network_dirty() -> void:
 	_power_network_dirty = true
 

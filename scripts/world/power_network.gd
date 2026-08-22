@@ -28,7 +28,8 @@ extends RefCounted
 ## rebuild_topology: world._pole_component (anchor -> component id) and
 ## world._pole_cells (any pole footprint cell -> that pole's anchor). Anything
 ## that repopulates world.buildings behind place_building's back has to mark
-## the network dirty or BOTH go stale — see GridWorld.mark_power_network_dirty.
+## the network dirty or BOTH go stale — see GridWorld.mark_power_network_dirty
+## and its caller at the end of SaveSystem.load_game's world-mutation section.
 
 # Per-tier maximum Chebyshev distance for pole-to-pole auto-connection.
 #

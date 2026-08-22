@@ -481,6 +481,32 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			for dy in fp.y:
 				grid_world.occupied[Vector2i(b.anchor.x + dx, b.anchor.y + dy)] = b.anchor
 
+	# LAST WORLD MUTATION ABOVE. Everything from here down touches the player's
+	# inventory and the LoadResult, not grid_world — so this is the end of the
+	# world-mutation section and the only correct place for the two lines below.
+	#
+	# The buildings loop rewrote grid_world.buildings and .occupied DIRECTLY.
+	# place_building and remove_building_at are the only paths that set the
+	# network dirty flags, and this function goes through neither, so without
+	# these calls every cache keyed off the building set stays describing the
+	# world we just replaced: GridWorld._pipe_component / _component_has_pump
+	# on the fluid side, and PowerNetwork's _pole_component / _pole_cells on
+	# the power side.
+	#
+	# A BOOT-TIME load was always safe — both flags initialise true — which is
+	# why this survived to be audit finding #1 (HIGH,
+	# docs/audits/2026-07-19-flaw-review.md). The live failure is the
+	# MID-SESSION F9 quick-load: main.gd reuses the standing GridWorld, whose
+	# flags were cleared to false by any earlier query (a pipe draw, a lamp
+	# tick), so the loaded world answers connectivity questions about the
+	# previous one until the player happens to place or remove something.
+	#
+	# BOTH halves, deliberately. They are one defect at one site, and fixing
+	# the half whose symptom was reported is how the other gets forgotten.
+	# Regression coverage: scripts/tests/test_load_network_invalidation.gd.
+	grid_world.mark_power_network_dirty()
+	grid_world.mark_fluid_network_dirty()
+
 	if data.has("player_inventory"):
 		player_inventory.load_array(data["player_inventory"])
 
