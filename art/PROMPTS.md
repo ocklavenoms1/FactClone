@@ -194,6 +194,26 @@ python art/tools/detail_density.py <sprite_name>
 
 ---
 
+## The hexes are advisory — material separation is not
+
+**Getting a palette hex slightly wrong costs nothing.** `SMELTER.glb` was
+prompted with `#3C4650` blue iron and `#7A5A33` olive oak against a locked
+palette of `#46504E` and `#6B4E32`, and both matched — oak, the most wrongly
+prompted member, matched *best* of the four. Re-verified at the derived K after
+the original measurement proved contaminated; all four declared members clear
+with zero drops.
+
+**What binds instead: every material an asset claims must appear as a visually
+distinct region with real area.** Declare it in `palette_members` and prompt so
+the materials separate. A member with no area gets skipped; a member that reads
+as a shade of its neighbour is ambiguous and gets dropped.
+
+So write the colours in the prompt as guidance, not as a specification — but be
+strict about *which* materials appear and that they look different from each
+other.
+
+---
+
 ## Tripo settings
 
 | Setting | Value | Why |

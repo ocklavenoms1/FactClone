@@ -832,55 +832,64 @@ a correction, not a palette.
 
 ---
 
-## 14. Does the PROMPT palette bind? No - it is advisory
+## 14. Does the PROMPT palette bind? No - it is advisory (re-verified at K=24)
 
-A free controlled test arrived: `SMELTER.glb` was prompted with the superseded
-draft palette (`#3C4650` blue iron, `#7A5A33` olive oak) but measured against
-the locked `natural-5` targets. If the prompt palette bound, iron and oak would
-be the anchors that failed.
+`SMELTER.glb` was prompted with the superseded draft palette (`#3C4650` blue
+iron, `#7A5A33` olive oak) and measured against the locked `natural-5` targets.
+If the prompt palette bound, iron and oak would be the anchors that failed.
 
-| member | prompt delta from locked | match d/min-pair | d1/d2 | result |
-|---|---|---|---|---|
-| fieldstone | **0.0000** (prompted exactly) | 0.92 | 0.73 | clears |
-| wrought iron | 0.0252 (prompted **wrong**) | **0.42** | 0.63 | **clears** |
-| weathered oak | **0.0543** (prompted **most wrong**) | **0.33** | 0.36 | **clears best** |
-| leather | 0.0154 (near-identical) | 1.27 | 0.92 | drop |
-| verdigris | **0.0000** (prompted exactly) | 1.92 | 0.72 | drop |
+**The original version of this test ran at K=10 and was therefore contaminated**
+- the same K bug that later turned out to be merging the two near-neutrals into
+one cluster. One row of it (leather's drop) was already retracted, so the whole
+table was re-run at the derived K.
 
-**There is no correlation between prompt fidelity and match quality — if
-anything it inverts.** The member prompted *most* wrongly matched *best*; both
-members prompted *exactly* did worst. Variance explained 74%, against 79% on
-the previous asset, which was prompted with a different palette again.
+| member | prompt delta from locked | K=10 match d | K=24 match d | K=24 d1/d2 | K=24 |
+|---|---|---|---|---|---|
+| fieldstone | **0.0000** (prompted exactly) | 0.0474 | 0.0228 | 0.50 | clears |
+| wrought iron | 0.0252 (prompted **wrong**) | 0.0219 | **0.0215** | 0.40 | **clears** |
+| weathered oak | **0.0543** (prompted **most wrong**) | 0.0168 | **0.0111** | 0.24 | **clears best** |
+| leather | 0.0154 (near-identical) | 0.0656 | 0.0270 | 0.74 | clears |
 
-### What actually binds: presence and distinctness
+**The answer is (a), and it is stronger at K=24 than it was at K=10.** At the
+correct resolution **all four declared members clear with zero drops**, and the
+ordering is unchanged: the member prompted *most* wrongly matches *best*, and
+the member prompted *exactly* is third of four. Rank correlation between prompt
+delta and match distance is **-0.80 at both K=10 and K=24** - identical, and
+negative, where a binding prompt would give a positive one.
 
-The two drops are content, not colour:
-
-- **verdigris** — the asset contains no green cluster at all. Prompted with the
-  identical hex, so the prompt cannot be the cause; Tripo simply did not give
-  the accent any area.
-- **leather** — its best candidate cluster sits at `d1/d2 = 0.92`, i.e. almost
-  exactly as close to `weathered_oak`. The asset's browns form a continuum, so
-  leather is not *distinguishable*, whatever hex was asked for.
+> **Honest limit:** n = 4, so the rank correlation alone is weak evidence. The
+> claim does not rest on it. The robust fact is that **both** members prompted
+> with materially wrong hexes (iron 0.025 off, oak 0.054 off) clear comfortably,
+> while exact prompting bought fieldstone nothing.
 
 **Conclusion for assets 4-20: the prompt palette is advisory.** Getting a hex
-slightly wrong costs nothing once the remap exists. What is binding is that
-every material the asset claims appears as a **visually distinct region with
-real area**. Prompt for separation of materials, not for exact hexes.
+slightly wrong costs nothing once the remap exists. What binds is that every
+material an asset claims appears as a **visually distinct region with real
+area** - see `palette_members` below. Prompt for material separation, not for
+exact hexes.
 
-### The trust rule needed both halves
+### Was the palette rebuilt for the right reason? Half of the evidence was contaminated
 
-This asset forced a fix. An anchor is trusted only if **both** hold:
+The legacy-6 palette was retired on two measurements, both taken at K=10:
+`forge_brown` mismatching at 0.279, and `fired_clay` needing a 4.4x gain clamp.
+Re-run on the original kiln at the derived K=36:
 
-```
-d1 < 1.0 x palette min-pair      "is it close at all?"
-d1 / d2 < 0.8                    "is it decisively closest?"
-```
+| member | K=12 | K=36 | |
+|---|---|---|---|
+| fieldstone | keep | keep | |
+| fired_clay | keep, but **4.4x clamp at K=10** | keep, gain **[1.33, 1.38, 1.65]** | **no clamp - the 4.4x was a K artifact** |
+| weathered oak | keep | keep | |
+| wrought iron | **DROP** | keep | K artifact |
+| leather | keep | keep | |
+| forge_brown | **DROP** | **DROP** (d1/d2 = 1.31) | **real at every K** |
 
-Absolute-only (the old `d1 < 0.5 x min_pair`) dropped **fieldstone** - the
-largest cluster on a stone building. Ratio-only kept **verdigris**, calling a
-grey cluster green on an asset with no green in it. Each question alone is
-wrong; the pair keeps exactly the three materials the asset actually contains.
+So: **`fired_clay`'s 4.4x clamp was an artifact and should not have counted.
+`forge_brown`'s drop is real** - it fails at every resolution from 3 clusters
+per member upward, because at 0.079 from leather it is genuinely inseparable.
+
+The rebuild was justified, but by one of the two numbers rather than both - and
+by the structural argument that never depended on K at all: four members at hue
+17-30 degrees separated only by value is a bad palette on its own merits.
 
 ---
 
@@ -960,6 +969,17 @@ shading. **A negative sign fails the build.** Magnitude stays advisory until
 three assets exist to calibrate a threshold against - a limit picked from n=1
 is a guess.
 
+> **The magnitude is not comparable across pipeline versions.** The same asset
+> measured **+0.443** and later **+0.296** with no re-render and no change to
+> the concept image - only the correction pipeline moved underneath it (K=10 to
+> derived K, pruned membership, different per-cluster gains). The sign was
+> unaffected, which is why the sign is the gate.
+>
+> When the magnitude threshold is set at n=3, set it on **final corrected
+> renders of all three assets measured under one pipeline version**, and re-measure
+> all three whenever the correction changes. A magnitude carried forward from an
+> older pipeline version is not evidence.
+
 Negative-tested by synthesising an asset with `real = rig^0.5`, whose implied
 albedo opposes the rig by construction: the gate returns `-0.999` and exits 1.
 The real smelter reads **+0.296** and passes.
@@ -990,13 +1010,24 @@ tried and all three behaved erratically:
 
 But the erratic behaviour was not really the algorithm. **With K=10 clusters the
 two near-neutrals kept merging into ONE cluster**, and which member won it then
-swung with membership, gain, and strategy. Trusted-anchor count on the smelter:
+swung with membership, gain, and strategy.
 
-| K | 10 | 14 | **20** | 28 | 40 |
-|---|---|---|---|---|---|
-| anchors trusted (of 4) | 2 | 2 | **4** | 4 | 4 |
+### K is DERIVED, not chosen
 
-Everything from K=20 up is stable; K is now **24**. With that fixed and
+24 would have been a magic number tuned on one asset. The rule is
+**K = 6 x declared palette members**, so a three-material chest gets 18 and a
+six-material building gets 36 instead of one constant over- or under-resolving
+both. Swept on two assets with different member counts:
+
+| clusters per member | 2 | 3 | 4 | **5** | **6** | 8 | 10 |
+|---|---|---|---|---|---|---|---|
+| SMELTER x natural-5 (4 members) | 2/4 | 2/4 | 3/4 | **4/4** | **4/4** | 4/4 | 4/4 |
+| original kiln x legacy-6 (6 members) | 4/6 | 5/6 | 5/6 | **5/6** | **5/6** | 5/6 | 5/6 |
+
+Both plateau at or below 5 per member, so **6x sits inside the plateau with
+margin on both**, at different absolute K (24 and 36). The kiln's remaining
+drop is `forge_brown`, which fails at every resolution - that one is the
+palette, not the clustering. With that fixed and
 membership pruned, the smelter matches **all four declared members with zero
 drops and 90% variance explained** - the best result of the project.
 

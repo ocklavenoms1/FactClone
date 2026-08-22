@@ -40,13 +40,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "blender"))
 import lock  # noqa: E402
 
+# K IS DERIVED, NOT CHOSEN.
+#
 # K=10 was too few and was the real source of every matching instability chased
-# before it: with only ten clusters, the two near-neutrals (stone and iron) kept
+# before it: with only ten clusters the two near-neutrals (stone and iron) kept
 # merging into ONE cluster, and which member won it then swung with membership,
-# gain, and assignment strategy. Measured trusted-anchor count on the smelter:
+# gain and assignment strategy. Measured trusted-anchor count on the smelter
+# with four declared members:
 #     K=10  2/4      K=14  2/4      K=20  4/4      K=28  4/4      K=40  4/4
-# Everything from K=20 up is stable. 24 sits inside that plateau.
-K = 24
+#
+# The break is at K>=20 for four members, i.e. about five clusters per member.
+# Six per member sits inside the plateau with margin, and - unlike a fixed 24 -
+# it scales: a three-material chest gets 18, a six-material building gets 36,
+# instead of one number over- or under-resolving both.
+CLUSTERS_PER_MEMBER = 6
+K_MIN, K_MAX = 12, 64
+
+
+def clusters_for(n_members):
+    """K derived from how many palette members the asset actually declares."""
+    return max(K_MIN, min(K_MAX, CLUSTERS_PER_MEMBER * max(1, n_members)))
+
+
 ITERS = 40
 # An anchor is trusted only if BOTH questions pass:
 #   "is it close at all?"      d1 < MATCH_ABS_RATIO * palette min-pair
@@ -149,6 +164,7 @@ def analyse(path, sample=200_000, is_render=False, members=None):
     Y = lin / np.maximum(gain, 1e-6)
 
     # (c) match on FULL LINEAR RGB - chromaticity AND value together.
+    K = clusters_for(len(P))
     cent, w = kmeans(Y, K)
 
     # INDEPENDENT nearest-cluster matching, NOT a forced one-to-one assignment.
@@ -214,6 +230,7 @@ def analyse(path, sample=200_000, is_render=False, members=None):
         "rows": rows,
         "gain": gain,
         "min_pair": min_pair,
+        "k": K,
         "declared": declared,
         "skipped": skipped,
         "resid_rms": float(np.sqrt((resid ** 2).mean())),
@@ -234,6 +251,7 @@ def report(a):
               f"{r['cluster_pct']:8.1f}%{flag}")
     g = a["gain"]
     print(f"  palette min-pair separation (linear RGB): {a['min_pair']:.4f}")
+    print(f"  K = {a['k']} clusters ({CLUSTERS_PER_MEMBER} x {len(a['declared'])} declared members)")
     print(f"  (a) aggregate global gain, no matching: R {g[0]:.3f}  G {g[1]:.3f}  B {g[2]:.3f}")
     print(f"  RMS error   raw {a['raw_rms']:.4f}  ->  after gain {a['resid_rms']:.4f}"
           f"   ({(1 - a['resid_rms'] / max(a['raw_rms'], 1e-9)) * 100:.0f}% explained)")
