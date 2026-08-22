@@ -72,31 +72,44 @@ EMISSION_CEILING = 2.5
 # `forge_brown` was called `hot_iron` and was expected to signal emission. It
 # never does again: it means "warm-toned metal" and nothing more. Heat is a
 # STATE, and states are keyed on the mask colour, not on a palette member.
-# REBUILT FOR CHROMATICITY SEPARABILITY.
+# The palette era. Every asset's manifest row must declare a matching
+# `palette_era`; the build FAILS on a mismatch rather than warning, because
+# three assets across two eras is not a consistency test - it is a
+# demonstration that eras differ.
+PALETTE_ERA = "natural-5"
+
+# NATURAL, UNDISTORTED - and it works because the ORDERING was fixed, not the
+# colours.
 #
-# The old six-member palette put four members at hue 17-30 deg, separated only
-# by VALUE. The cluster matcher is value-invariant by design, so those four were
-# mutually indistinguishable to it - which is why forge_brown mismatched at
-# 0.279 and fired_clay needed a 4.4x gain clamp. Those were not matcher
-# weaknesses; they were the palette telling us it could not be matched.
-# fired_clay and forge_brown are removed: a member Tripo cannot reproduce and
-# the pipeline cannot correct is a liability, not a member.
+# The earlier "separable-5" palette pushed iron blue and oak olive to force
+# chromaticity separation. That was solving the right problem in the wrong
+# place. Matching used to run BEFORE the global gain was removed, which forced
+# the metric to be value-invariant, and a value-invariant metric cannot tell
+# two near-neutrals apart at any hue. So the palette was being distorted to
+# compensate for an ordering mistake.
 #
-# Minimum pairwise chromaticity distance is now 0.2743 = 1.83x the matcher's
-# 0.15 confidence threshold. Every pair clears comfortably.
+# The order is now:
+#   a. estimate the global gain from AGGREGATE albedo - no matching needed
+#   b. divide it out; value is meaningful again
+#   c. match clusters on FULL linear RGB - chromaticity AND value
+#   d. per-cluster remap
 #
-# THE STRUCTURAL RULE, learned here: only ONE member may sit near the white
-# point. A near-neutral colour's chromaticity is the white point, so its
-# distance to anything else is capped by that other colour's saturation. Two
-# near-neutrals can never be told apart. fieldstone holds that slot at
-# saturation 0.06; wrought_iron was a second near-neutral at 0.25 and had to be
-# pushed to 0.43 to clear it.
+# Measured over 25 randomised trials (stone-heavy mix, random per-generation
+# gain), correct-assignment rate:
+#     this palette   old ordering 53.6%  ->  new ordering 89.6%
+#     separable-5    old ordering 78.4%  ->  new ordering 93.6%
+# The distorted palette is still 4 points better, and that is the price of
+# natural colour - paid deliberately.
+#
+# On the real smelter, both near-neutrals now clear the trust threshold
+# (fieldstone at 0.19 of min-pair, wrought iron at 0.44) where chromaticity
+# matching had them at the edge. Min-pair separation is 0.0516 in linear RGB.
 PALETTE = {
     "fieldstone": "#5A5E58",     # near-neutral green-grey - stone
-    "wrought_iron": "#36455E",   # cool blue-grey - ironwork
-    "weathered_oak": "#7A6633",  # warm yellow-brown - timber
-    "leather": "#7E3B2C",        # red-brown - leather, canvas
-    "verdigris": "#3D7A5E",      # saturated green - accents only
+    "wrought_iron": "#46504E",   # natural dark neutral - ironwork
+    "weathered_oak": "#6B4E32",  # natural brown - timber
+    "leather": "#7A4438",        # mildly red-shifted - leather, canvas
+    "verdigris": "#4E7A66",      # muted green - accents only
 }
 
 # The emission mask. Painted flat, unshaded, into the concept image on any

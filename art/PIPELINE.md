@@ -127,6 +127,8 @@ art/
     overhang.py            containment: lateral appendages past the body block
     detail_density.py      HF gate + feature/thickness diagnostics
     assert_states.py       tripwire: declared states must actually differ
+    assert_palette_era.py  gate: every real asset on the locked palette era
+    palette_board.py       renders a palette on flat proxies, no correction
 ```
 
 `template.blend` is generated from code, so the lock lives in a reviewable
@@ -771,3 +773,55 @@ states to be identical makes it fail with a non-zero exit.
 
 The general lesson, worth applying to the next transform added here: **assert on
 the output, not on the fact that the code ran.**
+
+---
+
+## 13. Palette matching: order before distortion
+
+The albedo remap needs to know which cluster is which material. That matching
+used to run **before** the global gain was removed, which forced the metric to
+be value-invariant (chromaticity only) - and a value-invariant metric cannot
+separate two near-neutrals at any hue, because a near-neutral's chromaticity
+*is* the white point.
+
+The response was almost to distort the palette: push iron blue, push oak olive,
+buy separation with colours nobody wanted. That would have been solving the
+right problem in the wrong place.
+
+**The fix is ordering, not colour:**
+
+```
+a. estimate the global gain from AGGREGATE albedo   (no matching needed)
+b. divide it out                                    (value is meaningful again)
+c. match clusters on FULL linear RGB                (chromaticity AND value)
+d. per-cluster remap
+```
+
+Step (a) needs no correspondence at all - it is just the asset's mean albedo
+against the palette's mean - so it can run first. Measured estimation error
+~9%.
+
+Correct-assignment rate, 25 randomised trials with a stone-heavy material mix
+and a random per-generation gain:
+
+| palette | old ordering | new ordering |
+|---|---|---|
+| **natural (locked)** | 53.6% | **89.6%** |
+| distorted "separable-5" | 78.4% | 93.6% |
+
+The distorted palette is still 4 points better; that gap is the price of
+natural colour and is paid deliberately. On the real smelter the two
+near-neutrals now both clear the trust threshold - fieldstone at 0.19 of
+min-pair, wrought iron at 0.44 - and variance explained rose from 67% to 79%.
+
+The trust threshold is no longer an absolute number: an anchor is trusted when
+its match sits nearer than **half the palette's own min-pair separation**, so it
+recalibrates with the palette instead of being a magic constant.
+
+### Judging a palette
+
+`palette_board.py` renders each candidate on flat proxy geometry through the
+locked rig with **no Tripo texture and no correction in the path** - chips at
+true 32 px size, at 4x, and on three proxy buildings. Every earlier look at
+these colours was through a Tripo texture and an albedo correction, which shows
+a correction, not a palette.

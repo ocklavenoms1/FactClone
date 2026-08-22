@@ -49,6 +49,18 @@ if ($Calibrate) {
 $manifest = Get-Content (Join-Path $ArtDir "assets.json") -Raw | ConvertFrom-Json
 $built = @(); $skipped = @(); $failed = @()
 
+# Hard gate, before anything renders: every real asset must be on the locked
+# palette era. Assets from a superseded palette cannot enter the verdict.
+$era = python (Join-Path $ArtDir "tools\assert_palette_era.py")
+$eraFailed = ($LASTEXITCODE -ne 0)
+$era | ForEach-Object { Write-Host $_ }
+if ($eraFailed) {
+    Write-Host ""
+    Write-Host "BUILD FAILED: palette era mismatch (see above)." -ForegroundColor Red
+    exit 1
+}
+Write-Host ""
+
 foreach ($a in $manifest.assets) {
     if ($Only -and $a.name -ne $Only) { continue }
     if ($a.status -eq "test" -and -not $Only) { continue }   # experiments are opt-in

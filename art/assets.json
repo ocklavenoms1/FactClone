@@ -15,7 +15,8 @@
     "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py.",
     "albedo_gain": "per-channel gain measured by art/tools/palette_drift.py (palette -> observed). Normalization applies its INVERSE so every asset lands on a common reference. Tripo's shift is not consistent between generations, so this cannot be fixed by prompting.",
     "albedo_correction": "'remap' (per-cluster, default for measured assets), 'gain' (single per-channel), or 'none'. NOT LOCKED: the correction stays per-asset and measured until chest and pole are in, then we decide whether a shared constant exists.",
-    "albedo_remap": "per-cluster anchors from palette_drift.py --emit. Each trusted cluster carries its own gain; a texel gets the gaussian-weighted blend. Anchors with chroma_dist > 0.15 are dropped as untrusted; gains are clamped to [0.4, 2.5]."
+    "albedo_remap": "per-cluster anchors from palette_drift.py --emit. Each trusted cluster carries its own gain; a texel gets the gaussian-weighted blend. Anchors with chroma_dist > 0.15 are dropped as untrusted; gains are clamped to [0.4, 2.5].",
+    "palette_era": "must equal lock.PALETTE_ERA. Build FAILS on mismatch - an asset generated against a superseded palette cannot enter the consistency verdict, and the albedo remap cannot retarget it (that recolours rather than corrects). Proxies are exempt."
   },
   "assets": [
     {

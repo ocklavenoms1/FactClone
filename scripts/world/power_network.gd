@@ -121,7 +121,7 @@ static func poles_connected(world, anchor_a: Vector2i, anchor_b: Vector2i) -> bo
 		return false
 	if not Buildings.POLE_TYPES.has(ba.type) or not Buildings.POLE_TYPES.has(bb.type):
 		return false
-	var reach: int = max(pole_range(ba.type), pole_range(bb.type))
+	var reach: int = pole_range(ba.type)
 	return _pole_distance(ba, bb) <= reach
 
 ## Chebyshev distance between two poles, measured FOOTPRINT to FOOTPRINT

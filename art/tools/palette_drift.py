@@ -42,7 +42,7 @@ import lock  # noqa: E402
 
 K = 10
 ITERS = 40
-MAX_CHROMA_DIST = 0.15   # above this the cluster->member match is not trusted
+MATCH_TRUST_RATIO = 0.5  # match must be nearer than half the palette min-pair
 GAIN_CLAMP = (0.4, 2.5)  # per-anchor gain limits; beyond this the cure is worse
 SEED = 12345
 
@@ -112,29 +112,40 @@ def analyse(path, sample=200_000, is_render=False):
     if len(lin) > sample:
         lin = lin[rng.choice(len(lin), sample, replace=False)]
 
-    cent, w = kmeans(lin, K)
-
     pal = {n: hexlin(h) for n, h in lock.PALETTE.items()}
-    cc = chromaticity(cent)
+    P = np.array(list(pal.values()))
 
-    # greedy one-to-one assignment on chromaticity distance
-    pairs = []
-    for name, p in pal.items():
-        pc = chromaticity(p)
-        d = np.linalg.norm(cc - pc, axis=1)
-        pairs.append((name, d))
+    # (a) GLOBAL GAIN FIRST, from aggregate albedo, with NO matching at all.
+    #     Matching before this point forces the metric to be value-invariant,
+    #     and a value-invariant metric cannot separate two near-neutrals - which
+    #     is the whole reason the old palette needed distorting. Estimating the
+    #     gain from aggregate means needs no correspondence, so it can run first.
+    gain = lin.mean(axis=0) / np.maximum(P.mean(axis=0), 1e-9)
+
+    # (b) divide it out. Value is meaningful again from here on.
+    Y = lin / np.maximum(gain, 1e-6)
+
+    # (c) match on FULL LINEAR RGB - chromaticity AND value together.
+    cent, w = kmeans(Y, K)
     used, result = set(), {}
-    flat = sorted(((d[i], name, i) for name, d in pairs for i in range(K)))
+    flat = sorted((float(np.linalg.norm(cent[i] - P[j])), list(pal)[j], i)
+                  for j in range(len(P)) for i in range(K))
     for dist, name, i in flat:
         if name in result or i in used:
             continue
         result[name] = (i, dist)
         used.add(i)
 
+    # trust threshold scales with how separable this palette actually is
+    min_pair = min(float(np.linalg.norm(P[i] - P[j]))
+                   for i, j in __import__("itertools").combinations(range(len(P)), 2))
+
     rows = []
     for name, p in pal.items():
-        i, cdist = result[name]
-        o = cent[i]
+        i, mdist = result[name]
+        # back into the ORIGINAL texture space: the shader taps the raw texture
+        o = cent[i] * gain
+        cdist = float(np.linalg.norm(chromaticity(o) - chromaticity(p)))
         delta = o - p
         rows.append({
             "member": name,
@@ -146,18 +157,19 @@ def analyse(path, sample=200_000, is_render=False):
             "delta_mag": float(np.linalg.norm(delta)),
             "lum_ratio": float((o.sum() + 1e-9) / (p.sum() + 1e-9)),
             "chroma_dist": float(cdist),
+            "match_dist": float(mdist),
+            "match_ratio": float(mdist / max(min_pair, 1e-9)),
             "cluster_pct": float(w[i] * 100),
         })
 
-    P = np.array([r["palette_lin"] for r in rows])
     O = np.array([r["observed_lin"] for r in rows])
-    gain = (P * O).sum(0) / np.maximum((P * P).sum(0), 1e-12)   # per-channel least squares
     resid = O - P * gain
     return {
         "file": os.path.basename(path),
         "mask_pct": mask_pct,
         "rows": rows,
         "gain": gain,
+        "min_pair": min_pair,
         "resid_rms": float(np.sqrt((resid ** 2).mean())),
         "raw_rms": float(np.sqrt(((O - P) ** 2).mean())),
     }
@@ -166,13 +178,15 @@ def analyse(path, sample=200_000, is_render=False):
 def report(a):
     print(f"\n=== {a['file']}   (mask texels excluded: {a['mask_pct']:.2f}%)")
     print(f"{'member':15}{'locked':9}{'observed':10}{'|delta|':>9}{'lum ratio':>11}"
-          f"{'chroma d':>10}{'cluster':>9}")
+          f"{'match d':>9}{'d/minpair':>11}{'cluster':>9}")
     for r in a["rows"]:
+        flag = "" if r["match_ratio"] < 0.5 else ("  MARGINAL" if r["match_ratio"] < 1.0 else "  UNTRUSTED")
         print(f"{r['member']:15}{r['palette_hex']:9}{r['observed_hex']:10}"
               f"{r['delta_mag']:9.4f}{r['lum_ratio']:11.3f}"
-              f"{r['chroma_dist']:10.4f}{r['cluster_pct']:8.1f}%")
+              f"{r['match_dist']:9.4f}{r['match_ratio']:11.2f}{r['cluster_pct']:8.1f}%{flag}")
     g = a["gain"]
-    print(f"  best single per-channel gain: R {g[0]:.3f}  G {g[1]:.3f}  B {g[2]:.3f}")
+    print(f"  palette min-pair separation (linear RGB): {a['min_pair']:.4f}")
+    print(f"  (a) aggregate global gain, no matching: R {g[0]:.3f}  G {g[1]:.3f}  B {g[2]:.3f}")
     print(f"  RMS error   raw {a['raw_rms']:.4f}  ->  after gain {a['resid_rms']:.4f}"
           f"   ({(1 - a['resid_rms'] / max(a['raw_rms'], 1e-9)) * 100:.0f}% explained)")
 
@@ -205,8 +219,8 @@ def build_remap(a):
         # A poor chromaticity match means we are not actually confident this
         # cluster IS that material - and a confident-looking gain built on a bad
         # match will shift hues wherever it applies. Drop it rather than trust it.
-        if r["chroma_dist"] > MAX_CHROMA_DIST:
-            dropped.append((r["member"], round(r["chroma_dist"], 4), "bad chroma match"))
+        if r["match_ratio"] > MATCH_TRUST_RATIO:
+            dropped.append((r["member"], round(r["match_ratio"], 3), "match further than half the palette min-pair"))
             continue
 
         # Clamp: an unclamped gain on a very dark cluster (fired clay wants
@@ -221,6 +235,7 @@ def build_remap(a):
             "gain_raw": [round(float(v), 4) for v in g],
             "clamped": bool(np.any(np.abs(clamped - g) > 1e-6)),
             "chroma_dist": round(r["chroma_dist"], 4),
+            "match_ratio": round(r["match_ratio"], 3),
         })
 
     if dropped:

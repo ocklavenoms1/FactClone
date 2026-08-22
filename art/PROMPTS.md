@@ -53,9 +53,8 @@ Every detail at least one eighth of the building's width - nothing thin, no
 narrow lines, no small repeated ornament. Timber is plain, no visible grain.
 Matte, light edge wear only. No grunge, no rust streaking, no dirt.
 
-Colours only: fieldstone grey #5A5E58, wrought iron blue-grey #36455E,
-weathered oak #7A6633, leather red-brown #7E3B2C, verdigris green #3D7A5E
-(accents only).
+Colours only: fieldstone grey #5A5E58, wrought iron #46504E, weathered oak
+#6B4E32, leather #7A4438, verdigris green #4E7A66 (accents only).
 
 Any region that glows when the machine is running is painted FLAT MAGENTA
 #FF00FF with no shading — it is a mask, not a colour.
@@ -69,34 +68,56 @@ Aspect **1:1**.
 
 ## The palette is a closed set
 
-**Five members, spread across hue.** `fired_clay` and `forge_brown` are
+**Five members - natural, undistorted.** `fired_clay` and `forge_brown` are
 **removed**: a member Tripo cannot reproduce and the pipeline cannot correct is
 a liability, not a member.
 
-| Role | Hex | Hue | Sat | Use |
-|---|---|---|---|---|
-| fieldstone | `#5A5E58` | 100° | 0.06 | stone |
-| wrought iron | `#36455E` | 218° | 0.43 | ironwork |
-| weathered oak | `#7A6633` | 43° | 0.58 | timber |
-| leather | `#7E3B2C` | 11° | 0.65 | leather, canvas |
-| verdigris | `#3D7A5E` | 153° | 0.50 | accents only |
+| Role | Hex | Use |
+|---|---|---|
+| fieldstone | `#5A5E58` | stone |
+| wrought iron | `#46504E` | ironwork |
+| weathered oak | `#6B4E32` | timber |
+| leather | `#7A4438` | leather, canvas |
+| verdigris | `#4E7A66` | accents only |
 
-**Minimum pairwise chromaticity distance 0.2743 = 1.83× the matcher's 0.15
-confidence threshold.** Every pair clears comfortably. The old six-member set
-had four members at hue 17–30° separated only by value; the matcher is
-value-invariant by design, so those four were mutually invisible to it — which
-is why `forge_brown` mismatched at 0.279 and `fired_clay` needed a 4.4× clamp.
-Those were the palette failing, not the matcher.
+**Palette era: `natural-5`.** Every asset declares it and the build **fails** on
+a mismatch. An asset generated against a superseded palette cannot enter the
+consistency verdict, and the albedo correction cannot retarget it - retargeting
+recolours rather than corrects, measured.
 
-> **The structural rule, learned the hard way: only ONE member may sit near the
-> white point.** A near-neutral colour's chromaticity *is* the white point, so
-> its distance to anything else is capped by that other colour's saturation.
-> Two near-neutrals can never be told apart. Fieldstone holds that slot at
-> saturation 0.06 — which is why wrought iron had to move from 0.25 to 0.43.
+### These colours are not distorted for the matcher - the ORDERING was fixed
 
-Three hexes moved from the first draft of this palette to clear the threshold:
-wrought iron `#3C4650`→`#36455E`, weathered oak `#7A5A33`→`#7A6633`, leather
-`#7E4433`→`#7E3B2C`, verdigris `#4E7A66`→`#3D7A5E`. Fieldstone was untouched.
+An earlier draft pushed iron blue and oak olive to force chromaticity
+separation. That solved the right problem in the wrong place. Matching used to
+run **before** the global gain was removed, which forced the metric to be
+value-invariant - and a value-invariant metric cannot tell two near-neutrals
+apart at any hue. The palette was being distorted to compensate for an ordering
+mistake.
+
+The order is now: estimate the global gain from **aggregate** albedo (no
+matching needed), divide it out, match on **full linear RGB** (chromaticity
+*and* value), then per-cluster remap.
+
+Correct-assignment rate over 25 randomised trials, stone-heavy mix and random
+per-generation gain:
+
+| palette | old ordering | new ordering |
+|---|---|---|
+| **this one (natural)** | 53.6% | **89.6%** |
+| distorted "separable-5" | 78.4% | 93.6% |
+
+The distorted palette remains 4 points better. That is the price of natural
+colour, paid deliberately. On the real smelter both near-neutrals now clear the
+trust threshold - fieldstone at 0.19 of min-pair, wrought iron at 0.44 - where
+chromaticity matching had them at the edge.
+
+> **The rule that survives:** a value-invariant matcher can hold only ONE
+> near-neutral. Removing the global gain first is what lets fieldstone and
+> wrought iron coexist - they differ hugely in luminance even though both sit
+> near the white point.
+
+See `art/renders/palette_board.png`: both candidate palettes rendered on flat
+proxy geometry under the locked rig, no Tripo and no correction in the path.
 
 ### Heat is a state, not a material
 
