@@ -3,12 +3,13 @@ extends RefCounted
 
 ## Power network resolver — graph + dirty-flag pattern.
 ##
-## Mirrors the fluid-network pattern at grid_world.gd:475-565. Poles of every
+## Mirrors the fluid-network resolver in grid_world.gd. Poles of every
 ## tier form components via BFS over Chebyshev adjacency, at the PER-TIER
 ## range in POLE_RANGE_BY_TYPE (basic 3, medium 6, substation 11) under the
-## either-reaches rule in poles_connected(). Generators
-## adjacent to a pole will contribute supply; consumers will contribute
-## demand (added in Task 7). Each component will have a linear
+## either-reaches rule in poles_connected(). Generators CARDINALLY TOUCHING a
+## pole of any tier contribute supply (_adjacent_component_id); consumers
+## anywhere in a pole's per-tier supply area contribute demand
+## (_supply_component_id). Each component has a linear
 ## satisfaction ratio in [0.0, 1.0]:
 ##
 ##   satisfaction = min(1.0, supply / max(1, demand))
@@ -23,8 +24,11 @@ extends RefCounted
 ## On placement/removal of pole/generator/consumer, world calls
 ## `mark_dirty(world)`. Next query triggers a rebuild.
 ##
-## TASK 2 SCOPE: topology + queries only. update_supply_demand lands in
-## Task 7 once WATER_WHEEL and ELECTRIC_LAMP enum entries exist (Tasks 5+6).
+## TWO CACHES share that dirty flag and are rebuilt together by
+## rebuild_topology: world._pole_component (anchor -> component id) and
+## world._pole_cells (any pole footprint cell -> that pole's anchor). Anything
+## that repopulates world.buildings behind place_building's back has to mark
+## the network dirty or BOTH go stale — see GridWorld.mark_power_network_dirty.
 
 # Per-tier maximum Chebyshev distance for pole-to-pole auto-connection.
 #
@@ -53,10 +57,11 @@ const POLE_RANGE_DEFAULT: int = 3
 # by design (PAUSE 1 user decision): consumers are powered wirelessly within
 # the radius, generators must touch a pole.
 #
-# NOT YET WIRED UP. Task 4 lands the table; Task 5 lands the footprint-
-# projected resolver that reads it. Until then the two consumer paths below
-# (_supply_component_id, power_satisfaction_at) are still hardcoded to
-# SUPPLY_RADIUS_DEFAULT — see the TEMPORARY note on each.
+# WIRED UP as of Task 5. Both consumer paths — power_satisfaction_at and
+# _supply_component_id — resolve through _covering_component_id, which reads
+# this table per candidate pole. Lookup miss returns SUPPLY_RADIUS_DEFAULT, so
+# a future tier that forgets its row projects the basic pole's area rather
+# than none at all.
 #
 # WHY THESE STOP AT 4. The lookup is consumer-outward: a consumer scans a box
 # around ITSELF and asks what poles are in it (power_satisfaction_at), because
@@ -73,9 +78,9 @@ const SUPPLY_RADIUS_DEFAULT: int = 1
 
 ## Widest supply radius across all pole tiers — the consumer-side scan box
 ## size. Derived from the table rather than hardcoded so it cannot drift from
-## it. NO CALLER YET: Task 5's resolver sizes its box to this and then filters
-## per-pole, because the consumer does not know what tier will answer. Landed
-## here so the table and the number derived from it stay in one file.
+## it. Its one caller is _covering_component_id, which sizes its box to this
+## and then filters each candidate against that pole's OWN radius, because the
+## consumer does not know what tier will answer.
 ##
 ## Deliberately UNCACHED. The plan suggested memoising into a static var; that
 ## is three iterations of a const Dictionary, called once per consumer scan
@@ -181,13 +186,14 @@ static func mark_dirty(world) -> void:
 
 ## Rebuild the topology: walks every pole of every tier in Buildings.POLE_TYPES,
 ## BFS over the shared poles_connected() predicate (per-tier Chebyshev range,
-## either-reaches), populates world._pole_component[anchor] = comp_id. Clears
-## supply/demand/satisfaction (they're recomputed by update_supply_demand
-## in Task 7).
+## either-reaches), populates world._pole_component[anchor] = comp_id AND
+## world._pole_cells[footprint cell] = anchor. Clears
+## supply/demand/satisfaction (they're recomputed by update_supply_demand).
 ##
 ## Deterministic via lex-sorted starting points (matches fluid network).
 static func rebuild_topology(world) -> void:
 	world._pole_component.clear()
+	world._pole_cells.clear()
 	world._component_supply.clear()
 	world._component_demand.clear()
 	world._component_satisfaction.clear()
@@ -222,6 +228,14 @@ static func rebuild_topology(world) -> void:
 			if world._pole_component.has(p):
 				continue
 			world._pole_component[p] = next_id
+			# Index EVERY footprint cell back to this anchor. Consumer
+			# queries hit raw cells and cannot know a 2x2 substation's
+			# anchor, so without this map a multi-cell pole answers only
+			# from its top-left cell and its supply box sits off-centre.
+			var pole_fp: Vector2i = Buildings.footprint_of(world.buildings[p].type)
+			for fy in range(pole_fp.y):
+				for fx in range(pole_fp.x):
+					world._pole_cells[p + Vector2i(fx, fy)] = p
 			# Find all poles this one is wired to. poles_connected is the
 			# SHARED predicate — grid_world._draw_power_wires calls the same
 			# function, so the graph the BFS builds and the graph the renderer
@@ -392,81 +406,55 @@ static func update_supply_demand(world) -> void:
 ## Consumers should use _supply_component_id instead — Factorio-style
 ## wireless supply area (PAUSE 1 user decision).
 static func _adjacent_component_id(world, b: Building) -> int:
-	# TEMPORARY (Task 4 -> Task 5), and the LEAST obvious of the three: the
-	# POWER_POLE check below rejects MEDIUM_POLE and SUBSTATION, so a
-	# generator or accumulator cardinally touching one of the new tiers
-	# resolves to -1 and is skipped entirely by update_supply_demand's Stage 1.
-	# A steam generator built flush against a substation contributes ZERO
-	# supply while looking perfectly connected — the substation is a network
-	# member, it is drawn with wires, and the generator shows no error.
+	# EVERY pole tier, via Buildings.POLE_TYPES — the same set rebuild_topology
+	# walks. Before Task 5 this read `nb.type != Buildings.Type.POWER_POLE`, so
+	# a generator or accumulator flush against a medium pole or a substation
+	# resolved to -1 and was skipped by update_supply_demand's Stage 1: zero
+	# supply, while the pole was a network member, was drawn with wires, and
+	# showed no error anywhere.
 	#
-	# Task 4 created that reachability: both tiers became network members here
-	# and have been hotbar-placeable since Task 2. Task 5 owns this function
-	# alongside _supply_component_id and power_satisfaction_at — all three
-	# carry the same filter and all three must widen to Buildings.POLE_TYPES
-	# together, or generators and consumers will disagree about which poles
-	# exist.
-	#
-	# Widening it alone here would also be UNVERIFIABLE rather than dangerous,
-	# which is the actual reason it waits: no layout in the project puts a
-	# generator or accumulator against a new tier. electric_rig places neither
-	# tier at all, and each of pole_tier_rig's two steam generators touches
-	# exactly ONE basic pole: GEN_A's N edge is (0,2) (1,2) and only (0,2) is
-	# in CLUSTER_A_POLES [(0,2) (3,2)], GEN_B's is (16,2) (17,2) and only
-	# (16,2) is in CLUSTER_B_POLES [(16,2) (19,2)]. The other cell of each pair
-	# is a LAMP. So the change would move no number in the suite, and a
-	# behaviour change nothing can observe is one nothing can review.
+	# MULTI-CELL POLES WORK HERE WITHOUT A _pole_cells LOOKUP, and it is worth
+	# saying why, because the consumer paths DO need one. The scan walks the
+	# GENERATOR's edge ring and hands each cell to world.building_at, which
+	# resolves through `occupied` — so a cell belonging to a substation's
+	# south-east quarter still returns the substation Building, whose `.anchor`
+	# is the key _pole_component holds. The consumer side has no Building to
+	# start from, only a raw cell, which is what _pole_cells exists for.
 	for cell in Buildings.all_edge_cells(b.type, b.anchor):
 		if not world.has_building_at(cell):
 			continue
 		var nb: Building = world.building_at(cell)
-		if nb == null or nb.type != Buildings.Type.POWER_POLE:
+		if nb == null or not Buildings.POLE_TYPES.has(nb.type):
 			continue
 		if world._pole_component.has(nb.anchor):
 			return int(world._pole_component[nb.anchor])
 	return -1
 
-## Find the component ID of any pole within a Chebyshev supply radius of any
-## cell of building `b`'s footprint. Returns -1 if no pole in supply area.
-## Used by CONSUMERS (lamps etc.) — Factorio-style wireless supply. A pole at
-## (5,5) with radius 1 covers consumers anywhere in the 3×3 area (4,4)..(6,6).
+## Find the component ID of a pole covering any cell of building `b`'s
+## footprint. Returns -1 if nothing covers it. Used by CONSUMERS (lamps,
+## electric inserters) — Factorio-style wireless supply. A basic pole at (5,5)
+## with radius 1 covers consumers anywhere in the 3×3 area (4,4)..(6,6); the
+## 2x2 substation with radius 4 covers ten cells per axis, not nine.
 ##
-## First pole found wins (lex iteration order of pole positions).
-## Defensive verification: only counts cells that are confirmed POWER_POLE
-## buildings (in case _pole_component has stale entries during a rebuild).
+## Every cell decision is delegated to _covering_component_id, which is the
+## single source of truth for the per-tier radius, the footprint projection
+## and the nearest-pole tie-break. This function adds exactly one thing on top
+## of it: the walk over the CONSUMER's own footprint, so a multi-cell consumer
+## is powered when any of its cells is covered.
+##
+## FIRST COVERED FOOTPRINT CELL WINS, and it stops there. The nearest-pole
+## tie-break inside _covering_component_id is per-cell, so a 2x2 consumer
+## straddling two components takes whichever component covers its lex-first
+## covered cell. That is the same documented v1 simplification
+## _adjacent_component_id carries, and no consumer in the project is larger
+## than 1x1 yet.
 static func _supply_component_id(world, b: Building) -> int:
-	# TEMPORARY (Task 4 -> Task 5): the consumer-side scan is still sized to
-	# the basic pole's radius and still takes the first pole it hits, and the
-	# POWER_POLE check below still excludes the two new tiers outright. That is
-	# behaviourally IDENTICAL to pre-Session-3, so the existing suite stays
-	# green — but it means MEDIUM_POLE and SUBSTATION now join the network
-	# without yet projecting their wider supply areas, which is why
-	# test_pole_tier_rig sub-cases (2) and (4b) still read demand 30 of 40.
-	# Task 5 replaces this function and power_satisfaction_at with the
-	# per-pole-radius, footprint-projected resolver that reads
-	# SUPPLY_RADIUS_BY_TYPE.
-	var radius: int = SUPPLY_RADIUS_DEFAULT
 	var fp: Vector2i = Buildings.footprint_of(b.type)
-	# Iterate the consumer's full footprint. For each footprint cell,
-	# scan the (2*radius+1)² area around it for a pole. 1×1 consumers
-	# (lamps) iterate 1 cell × 9 checks = 9; 2×2 future consumers would
-	# do 4 × 9 = 36 (with overlap, but the early-return on first pole
-	# found makes worst case rare).
 	for fy in range(fp.y):
 		for fx in range(fp.x):
-			var footprint_cell: Vector2i = b.anchor + Vector2i(fx, fy)
-			for dy in range(-radius, radius + 1):
-				for dx in range(-radius, radius + 1):
-					var check_pos: Vector2i = footprint_cell + Vector2i(dx, dy)
-					if not world._pole_component.has(check_pos):
-						continue
-					# Defensive: confirm it's actually a pole.
-					if not world.has_building_at(check_pos):
-						continue
-					var nb: Building = world.building_at(check_pos)
-					if nb == null or nb.type != Buildings.Type.POWER_POLE:
-						continue
-					return int(world._pole_component[check_pos])
+			var comp_id: int = _covering_component_id(world, b.anchor + Vector2i(fx, fy))
+			if comp_id >= 0:
+				return comp_id
 	return -1
 
 ## Public query: is the position within a pole's supply radius in a
@@ -476,40 +464,81 @@ static func is_powered_at(world, pos: Vector2i) -> bool:
 	return power_satisfaction_at(world, pos) > 0.0
 
 ## Public query: per-tile satisfaction for consumers. Returns 0.0 if no
-## pole within the supply radius. Returns [0.0, 1.0] otherwise.
+## pole covers `pos`. Returns [0.0, 1.0] otherwise.
 ## Consumers call this from their tick to drive brightness / throughput.
 ##
-## Scans the (2*radius+1)² area around pos for any pole. First pole found
-## wins. This is the per-position equivalent of _supply_component_id for 1×1
-## callers — lamps mostly. Multi-cell consumers should use
-## _supply_component_id with their Building.
+## A thin wrapper over _covering_component_id, which is the ONE place the
+## "which pole covers this cell" rule lives. _supply_component_id calls the
+## same function, so the two consumer-side paths cannot answer differently
+## about the same cell — before Task 5 they could and did, and a lamp beside a
+## medium pole lit up while contributing no demand.
 static func power_satisfaction_at(world, pos: Vector2i) -> float:
 	if world._power_network_dirty:
 		rebuild_topology(world)
-	# TEMPORARY (Task 4 -> Task 5): same bridge as _supply_component_id — the
-	# box is still the basic pole's radius, so the wider tiers do not yet
-	# project their supply areas. NOTE the one asymmetry this bridge leaves
-	# behind: unlike _supply_component_id, this scan has never verified the
-	# building type, and _pole_component now holds MEDIUM_POLE and SUBSTATION
-	# anchors, so at radius 1 the two functions can answer differently about a
-	# consumer next to a new tier. Task 5 rewrites both together and the
-	# question disappears. No RIG hits it in the meantime — every pole_tier_rig
-	# consumer is at Chebyshev 2 or more from the medium pole and 3 or more
-	# from the substation anchor, and electric_rig places neither tier — but a
-	# player who puts a lamp beside a medium pole between Task 4 and Task 5
-	# will see it glow while contributing no demand.
-	var radius: int = SUPPLY_RADIUS_DEFAULT
+	var comp_id: int = _covering_component_id(world, pos)
+	if comp_id < 0:
+		return 0.0
+	return float(world._component_satisfaction.get(comp_id, 0.0))
+
+## Resolve which pole component covers `pos`, applying the nearest-pole
+## tie-break. Returns -1 if nothing covers it.
+##
+## THE SCAN IS CONSUMER-OUTWARD and sized to max_supply_radius(), the widest
+## radius any tier has, because the cell being asked about cannot know which
+## tier might be covering it. Each candidate is then filtered against ITS OWN
+## radius, so a basic pole found at distance 3 in the box is rejected while a
+## substation at the same distance is not. Sizing the box to the widest tier
+## is what makes that possible: if a pole covers `pos` at all, its nearest
+## footprint cell is within its own radius, which is within the maximum, so
+## that cell is inside the box.
+##
+## DISTANCE IS MEASURED TO THE MATCHED CELL, not to the anchor. world
+## ._pole_cells maps every footprint cell back to its owner, so a 2x2
+## substation is found from all four of its cells and its supply area is
+## centred on its body rather than hanging off its top-left corner. That is
+## the (2r+2)-per-axis coverage SUPPLY_RADIUS_BY_TYPE's docstring describes —
+## ten cells per axis at radius 4, not nine.
+##
+## NOTE: this cannot early-return on the first hit, because a nearer pole may
+## appear later in the scan order. It evaluates every candidate in the box and
+## picks.
+static func _covering_component_id(world, pos: Vector2i) -> int:
+	var radius: int = max_supply_radius()
+	var best_comp: int = -1
+	var best_dist: int = 0x7FFFFFFF
+	var best_radius: int = -1
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
-			var n: Vector2i = pos + Vector2i(dx, dy)
-			if not world._pole_component.has(n):
+			var cell: Vector2i = pos + Vector2i(dx, dy)
+			if not world._pole_cells.has(cell):
 				continue
-			var comp_id: int = int(world._pole_component[n])
-			return float(world._component_satisfaction.get(comp_id, 0.0))
-	return 0.0
+			var anchor: Vector2i = world._pole_cells[cell]
+			if not world._pole_component.has(anchor):
+				continue
+			var pole: Building = world.buildings.get(anchor, null)
+			if pole == null or not Buildings.POLE_TYPES.has(pole.type):
+				continue
+			var dist: int = max(abs(dx), abs(dy))
+			var r: int = supply_radius(pole.type)
+			if dist > r:
+				continue
+			# Nearest wins; ties go to the larger supply radius. Both keys are
+			# deterministic, so no iteration-order dependence survives.
+			if dist < best_dist or (dist == best_dist and r > best_radius):
+				best_dist = dist
+				best_radius = r
+				best_comp = int(world._pole_component[anchor])
+	return best_comp
 
 ## Public query: network ID (component ID) of the pole at `pos`, or -1
 ## if not a pole or not in network. Used by Q-inspect info_lines.
+##
+## `pos` is a pole ANCHOR, not any footprint cell — this reads _pole_component
+## directly rather than going through _pole_cells. Every caller passes
+## `b.anchor` (PowerPole.info_lines) or a 1x1 pole's own position (the tests),
+## so the two are the same cell for them. A caller holding a raw cell that
+## might belong to a substation's other three quarters wants
+## _covering_component_id, or world.building_at(cell).anchor first.
 static func network_id_at(world, pos: Vector2i) -> int:
 	if world._power_network_dirty:
 		rebuild_topology(world)

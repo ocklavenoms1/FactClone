@@ -17,18 +17,20 @@ extends RefCounted
 ## which is exactly why it cannot describe an even-sided footprint. Sizing a
 ## substation's scan box to 9 silently drops its far edge.
 ##
-## The r above is NOT yet 4, or per-tier at all. Task 4 landed
-## PowerNetwork.SUPPLY_RADIUS_BY_TYPE and supply_radius() but wired neither
-## consumer path to them: power_satisfaction_at and _supply_component_id both
-## still use SUPPLY_RADIUS_DEFAULT (1). Task 5 connects them, and only then
-## does this substation project anything.
+## The r above IS 4 as of Task 5. PowerNetwork._covering_component_id sizes
+## its consumer-outward scan to max_supply_radius() and then filters each
+## candidate pole against its own SUPPLY_RADIUS_BY_TYPE row, and both consumer
+## paths (power_satisfaction_at, _supply_component_id) go through it.
 ##
 ## This is the project's first MULTI-CELL POLE. Every distance computation in
 ## power_network.gd that assumes a pole occupies exactly one cell has to be
 ## taught otherwise. The WIRE side learned in Task 4 — PowerNetwork
 ## ._pole_distance measures footprint to footprint, and
 ## grid_world._pole_wire_anchor hangs this tier's wires from its body centre
-## rather than its anchor cell. The SUPPLY side is still Task 5's.
+## rather than its anchor cell. The SUPPLY side learned in Task 5, through
+## world._pole_cells: rebuild_topology indexes all four cells back to the
+## anchor, and _covering_component_id measures to the cell it matched, so
+## coverage really is the 10x10 above and not a 9x9 hung off the anchor.
 ##
 ## State: empty {} (network membership lives at world._pole_component).
 

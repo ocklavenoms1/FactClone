@@ -15,25 +15,24 @@ extends RefCounted
 ## substation reaches a basic pole that cannot reach back; the rule lives in
 ## PowerNetwork.poles_connected and nowhere else.
 ##
-## WHERE THE TIERS ARE NOT YET EQUAL (Task 4 -> Task 5). Wiring is done: all
-## three tiers form network components and are drawn with wires. What a pole
-## does for OTHER buildings is not, and the three functions involved do not
-## even fail the same way:
+## THE TIERS ARE EQUAL as of Task 5, on all three of the paths that used to
+## treat POWER_POLE as the only pole. Wiring landed in Task 4 (all three tiers
+## form network components and are drawn with wires); what a pole does for
+## OTHER buildings landed in Task 5:
 ##
-##   _supply_component_id   hard-filters type != POWER_POLE, so a consumer
-##                          beside a medium pole or substation contributes NO
-##                          demand to the network.
-##   _adjacent_component_id hard-filters the same way, so a generator or
-##                          accumulator touching one feeds NO supply in.
-##   power_satisfaction_at  has NO type check at all — it only asks whether a
-##                          cell is in _pole_component, and Task 4 put every
-##                          tier's anchor there. It therefore ANSWERS for the
-##                          new tiers, at the basic radius of 1.
+##   _supply_component_id   walks the consumer's footprint and delegates each
+##   power_satisfaction_at  cell to _covering_component_id. ONE function, so
+##                          these two cannot answer differently about the same
+##                          cell — they used to, and a lamp beside a medium
+##                          pole lit up while contributing no demand.
+##   _adjacent_component_id filters on Buildings.POLE_TYPES, so a generator or
+##                          accumulator touching any tier feeds its supply in.
 ##
-## That last one is the mismatch worth knowing about: between Task 4 and Task
-## 5 a lamp placed next to a medium pole reads as powered and lights up, while
-## contributing nothing to that network's demand. Task 5 owns all three and
-## must widen them together.
+## _covering_component_id sizes its scan to the WIDEST tier's radius and then
+## filters each candidate against that pole's own, and it measures distance to
+## the matched FOOTPRINT CELL (via world._pole_cells) rather than to the
+## anchor — which is what makes the 2x2 substation cover equally far in all
+## four directions instead of hanging its area off its top-left corner.
 ##
 ## No tick logic; network membership is computed on demand by
 ## PowerNetwork.rebuild_topology(world). Visual: dark wood base + tall pole +

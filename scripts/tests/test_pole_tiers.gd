@@ -15,6 +15,14 @@ extends RefCounted
 ##   5. The predicate IS the graph — the BFS components are exactly the
 ##      connected components of PowerNetwork.poles_connected, the same function
 ##      grid_world._draw_power_wires calls to decide what to draw (Task 4).
+##   6. Multi-cell supply symmetry — the 2x2 substation's supply area is
+##      projected from all FOUR of its cells, so it reaches equally far east
+##      and west (Task 5).
+##   7. The consumer paths agree, and they agree at the WIDE radius — a lamp
+##      inside a medium pole's radius 2 both reads as powered AND lands in the
+##      component's demand total (Task 5).
+##   8. The generator path sees the new tiers — a steam generator flush against
+##      a substation feeds its supply in (Task 5).
 
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
@@ -36,8 +44,11 @@ static func run(parent: Node) -> Dictionary:
 	_case_either_reaches(parent, failures)
 	_case_order_independence(parent, failures)
 	_case_predicate_is_the_graph(parent, failures)
+	_case_multicell_supply_symmetry(parent, failures)
+	_case_consumer_paths_agree(parent, failures)
+	_case_generator_against_substation(parent, failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "5 sub-cases pass: network-type set, registration, either-reaches, order independence, predicate is the graph" }
+		return { "ok": true, "message": "8 sub-cases pass: network-type set, registration, either-reaches, order independence, predicate is the graph, multi-cell supply symmetry, consumer paths agree at the wide radius, generator feeds a substation" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -471,6 +482,262 @@ static func _case_predicate_is_the_graph(parent: Node, failures: Array) -> void:
 	_check(failures, int(world._pole_component.get(group_one[0], -1)) != int(world._pole_component.get(group_two[0], -2)),
 		"(5c) the two groups must stay in SEPARATE components — the closest pair across them is F basic at (45,5) and E basic at (32,5) at distance 13 against basic range 3, and F against the substation at footprint distance 24 against range 11. %s and %s came back in one component" % [String(labels[group_one[0]]), String(labels[group_two[0]])])
 	_teardown(world)
+
+# ===========================================================================
+# (6) MULTI-CELL SUPPLY SYMMETRY.
+#
+# A 2x2 substation at anchor (10,10) occupies (10,10)..(11,11). With supply
+# radius 4, coverage must extend 4 tiles beyond the FOOTPRINT in every
+# direction: x from 6 to 15, y from 6 to 15. That is TEN cells per axis, not
+# nine — (2r+1) is the 1x1 formula.
+#
+# The bug this catches: _pole_component holds only the ANCHOR, so a raw-cell
+# lookup finds the substation only at (10,10). Coverage would then run
+# (6..14, 6..14) — correct on the anchor side, one short on the far side. The
+# FAR EDGE is the direction that fails, so it is asserted explicitly. A test
+# that only probed left and up would pass against the broken code.
+#
+# MUTATION RUN, not assumed: _covering_component_id's `max(abs(dx), abs(dy))`
+# (distance to the MATCHED CELL) replaced by distance to the anchor. Exactly
+# three assertions fired — (15,10), (10,15) and (15,15) — and (6,10) and
+# (10,6) stayed silent, which is the near/far split above.
+#
+# WHY THERE IS A LAMP HERE AND NOT JUST A GENERATOR. Every probe below reads
+# the SAME number — power_satisfaction_at returns the component's
+# satisfaction, so the only thing being discriminated is covered versus not
+# covered, and that needs the covered answer to be above zero. A generator on
+# its own does not establish that, and the reason is worth writing down
+# because it is counter-intuitive: update_supply_demand's Stage 3 hands a
+# component with ZERO demand a satisfaction of 1.0 outright (`1.0 if dem ==
+# 0`), so a substation with nothing attached to it already reads powered.
+# MUTATION RUN: with the generator and the lamp both deleted and only the
+# substation standing, all nine probes below still pass. The LAMP is what puts
+# real demand on the component and the GENERATOR is what covers it — 20 units
+# against 1 — so the 1.0 the probes read is arithmetic and not that shortcut.
+# The lamp sits at (11,13), well inside coverage and off every probe cell, so
+# it cannot double as one of them.
+#
+# The generator is 2x2 at (12,10), which puts its WEST edge on (11,10) and
+# (11,11) — two of the substation's own cells. That is the cardinal touch
+# _adjacent_component_id demands. Sub-case (8) is the one that pins that rule
+# on its own, so the PREMISE check below points there when supply is missing
+# rather than letting nine coverage assertions redden for a supply reason.
+# ===========================================================================
+static func _case_multicell_supply_symmetry(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var sub: Vector2i = Vector2i(10, 10)
+	var gen: Vector2i = Vector2i(12, 10)
+	var lamp: Vector2i = Vector2i(11, 13)
+	_pave(world, gen, Vector2i(2, 2))
+	if not _place_all(world, [
+			[Buildings.Type.SUBSTATION, sub],
+			[Buildings.Type.STEAM_GENERATOR, gen],
+			[Buildings.Type.ELECTRIC_LAMP, lamp]], failures, "(6)"):
+		_teardown(world)
+		return
+	_light_generator(world, gen)
+	PowerNetwork.update_supply_demand(world)
+
+	var comp: int = int(world._pole_component.get(sub, -1))
+	_check(failures, comp >= 0,
+		"(6) PREMISE: the substation at %s is in no component at all, so every probe below reads 0.0 for a topology reason" % str(sub))
+	_check(failures, PowerNetwork.satisfaction_for(world, comp) > 0.0,
+		"(6) PREMISE: the substation's component reads satisfaction %f, so the 'powered' probes below would fail for a SUPPLY reason and not a coverage one — see sub-case (8)" % PowerNetwork.satisfaction_for(world, comp))
+
+	# Covered: the four axis extremes at exactly radius 4 from the nearest
+	# footprint cell, plus the far corner. (15,*) and (*,15) are the ones that
+	# an anchor-only lookup gets wrong.
+	for row in [
+			[Vector2i(15, 10), "the EAST edge, 4 beyond the footprint column x=11"],
+			[Vector2i(10, 15), "the SOUTH edge, 4 beyond the footprint row y=11"],
+			[Vector2i(15, 15), "the SOUTH-EAST corner, 4 beyond on both axes"],
+			[Vector2i(6, 10),  "the WEST edge, 4 beyond the anchor column x=10"],
+			[Vector2i(10, 6),  "the NORTH edge, 4 beyond the anchor row y=10"]]:
+		var cell: Vector2i = row[0]
+		var why: String = String(row[1])
+		_check(failures, PowerNetwork.power_satisfaction_at(world, cell) > 0.0,
+			"(6) %s is NOT covered by the substation at %s — %s. Radius 4 measured from the 2x2 FOOTPRINT spans x 6..15 and y 6..15, ten cells per axis" % [str(cell), str(sub), why])
+
+	# Not covered: one ring past, on all four sides. Without these the whole
+	# sub-case would pass against a resolver that simply answered "powered"
+	# everywhere.
+	for row_out in [
+			[Vector2i(16, 10), "east"],
+			[Vector2i(10, 16), "south"],
+			[Vector2i(5, 10),  "west"],
+			[Vector2i(10, 5),  "north"]]:
+		var out_cell: Vector2i = row_out[0]
+		var side: String = String(row_out[1])
+		_check(failures, PowerNetwork.power_satisfaction_at(world, out_cell) == 0.0,
+			"(6) %s is one tile PAST the substation's %s edge and must read exactly 0.0, got %f" % [str(out_cell), side, PowerNetwork.power_satisfaction_at(world, out_cell)])
+	_teardown(world)
+
+# ===========================================================================
+# (7) THE TWO CONSUMER PATHS AGREE, AND THEY AGREE AT THE WIDE RADIUS.
+#
+# Before Task 5 the two consumer-side functions disagreed with each other:
+#
+#   power_satisfaction_at   no type check at all, box sized to
+#                           SUPPLY_RADIUS_DEFAULT (1). Answers for ANY pole
+#                           whose ANCHOR is within 1.
+#   _supply_component_id    same box, plus a hard `type != POWER_POLE`. Never
+#                           answers for a medium pole or a substation.
+#
+# So a lamp at CHEBYSHEV 1 from a medium pole lit up while contributing no
+# demand: the first function said powered, the second said "no pole in supply
+# range" and update_supply_demand's ELECTRIC_LAMP arm skipped it. That is the
+# split, and it lives at Chebyshev 1 — not at 2. The plan for this task
+# asserted the same lamp at Chebyshev 2 would read powered today. It would
+# not: at 2 it is outside the radius-1 box as well, so BOTH functions return
+# nothing and there is no asymmetry to see. Chebyshev 1 is the only distance
+# where the two disagreed.
+#
+# THREE LAMPS, at Chebyshev 1, 2 and 3 from a MEDIUM_POLE (supply radius 2):
+#
+#   (5,6) at 1 — inside radius 2, and also inside a BASIC pole's radius 1.
+#                This is the lamp that reads POWERED today while contributing
+#                nothing, so it carries the asymmetry.
+#   (5,7) at 2 — inside radius 2 only. Reads unpowered today. This is the
+#                lamp that pins the medium tier's radius as 2 rather than 1.
+#   (5,8) at 3 — OUTSIDE radius 2. It is never counted, in any version, and it
+#                is here so the demand total below fails in the over-reach
+#                direction too: a resolver that used max_supply_radius() for
+#                every pole instead of the pole's own would pull it in and
+#                make the total 3. MUTATION RUN — `var r: int =
+#                supply_radius(pole.type)` replaced by `var r: int = radius`
+#                inside _covering_component_id reads demand 3, and the (5,8)
+#                probe below reads 1.0 instead of 0.0. Both fire.
+#
+# The generator is not decoration. Once the lamps DO contribute, the
+# component carries demand, and Stage 3 computes supply / demand — so without
+# a generator feeding this component the post-fix satisfaction would be 0/2 =
+# 0.0 and the two "reads as powered" assertions would go red on a correct
+# fix. 2x2 at (6,5) puts its WEST edge on (5,5) and (5,6): (5,5) is the
+# medium pole.
+# ===========================================================================
+static func _case_consumer_paths_agree(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var pole: Vector2i = Vector2i(5, 5)
+	var gen: Vector2i = Vector2i(6, 5)
+	var near: Vector2i = Vector2i(5, 6)
+	var edge: Vector2i = Vector2i(5, 7)
+	var beyond: Vector2i = Vector2i(5, 8)
+	_pave(world, gen, Vector2i(2, 2))
+	if not _place_all(world, [
+			[Buildings.Type.MEDIUM_POLE, pole],
+			[Buildings.Type.STEAM_GENERATOR, gen],
+			[Buildings.Type.ELECTRIC_LAMP, near],
+			[Buildings.Type.ELECTRIC_LAMP, edge],
+			[Buildings.Type.ELECTRIC_LAMP, beyond]], failures, "(7)"):
+		_teardown(world)
+		return
+	_light_generator(world, gen)
+	PowerNetwork.update_supply_demand(world)
+
+	var comp: int = int(world._pole_component.get(pole, -1))
+	_check(failures, comp >= 0,
+		"(7) PREMISE: the medium pole at %s is in no component at all" % str(pole))
+
+	# --- the asymmetry, from the side that already passed ---
+	_check(failures, PowerNetwork.power_satisfaction_at(world, near) > 0.0,
+		"(7) the lamp at %s is Chebyshev 1 from the medium pole at %s and must read as POWERED" % [str(near), str(pole)])
+	# --- the asymmetry, from the side that did not ---
+	var want_demand: int = 2 * ElectricLamp.DEMAND
+	var got_demand: int = PowerNetwork.demand_for(world, comp)
+	_check(failures, got_demand == want_demand,
+		"(7) the medium pole's component carries %d demand, expected exactly %d — the lamps at %s (Chebyshev 1) and %s (Chebyshev 2) are both inside its supply radius %d, and the lamp at %s (Chebyshev 3) is outside it. A lamp that reads as powered while contributing no demand is the exact split this sub-case exists for" % [got_demand, want_demand, str(near), str(edge), PowerNetwork.supply_radius(Buildings.Type.MEDIUM_POLE), str(beyond)])
+	# --- the radius itself: 2, not the basic tier's 1 ---
+	_check(failures, PowerNetwork.power_satisfaction_at(world, edge) > 0.0,
+		"(7) the lamp at %s is Chebyshev 2 from the medium pole at %s, inside its supply radius %d, and must read as POWERED — at the basic tier's radius 1 it does not" % [str(edge), str(pole), PowerNetwork.supply_radius(Buildings.Type.MEDIUM_POLE)])
+	_check(failures, PowerNetwork.power_satisfaction_at(world, beyond) == 0.0,
+		"(7) the lamp at %s is Chebyshev 3 from the medium pole at %s, one ring OUTSIDE its supply radius %d, and must read exactly 0.0 — got %f" % [str(beyond), str(pole), PowerNetwork.supply_radius(Buildings.Type.MEDIUM_POLE), PowerNetwork.power_satisfaction_at(world, beyond)])
+	_teardown(world)
+
+# ===========================================================================
+# (8) A GENERATOR FLUSH AGAINST A SUBSTATION FEEDS IT.
+#
+# Generators do NOT use the consumers' wireless supply area. They use
+# _adjacent_component_id, which walks the generator's own cardinal edge ring
+# and wants a pole standing on it. That function carried the third
+# `type != POWER_POLE` filter, so a steam generator built hard against a
+# substation contributed ZERO supply while looking perfectly connected — the
+# substation is a network member, it is drawn with wires, and nothing on
+# screen says otherwise.
+#
+# The layout: substation 2x2 at (20,20) occupying (20,20)..(21,21), steam
+# generator 2x2 at (22,20) occupying (22,20)..(23,21). The generator's WEST
+# edge is x = 21 across y 20..21, which is the substation's east column. No
+# basic pole exists anywhere in this world, so the supply below can only have
+# arrived through the substation.
+#
+# It also exercises the multi-cell half of the same function: the pole the
+# edge ring lands on is a NON-ANCHOR cell of the substation, and
+# _adjacent_component_id resolves it through world.building_at, which maps any
+# footprint cell to its owner and then keys _pole_component by nb.anchor.
+# ===========================================================================
+static func _case_generator_against_substation(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var sub: Vector2i = Vector2i(20, 20)
+	var gen: Vector2i = Vector2i(22, 20)
+	_pave(world, gen, Vector2i(2, 2))
+	if not _place_all(world, [
+			[Buildings.Type.SUBSTATION, sub],
+			[Buildings.Type.STEAM_GENERATOR, gen]], failures, "(8)"):
+		_teardown(world)
+		return
+	_light_generator(world, gen)
+	PowerNetwork.update_supply_demand(world)
+
+	# PREMISE, through Buildings.all_edge_cells rather than by eye: if the
+	# layout ever drifts so the generator no longer touches, the supply
+	# assertion below would redden and read as a filter bug.
+	var gen_b: Building = world.building_at(gen)
+	var touches: bool = false
+	for cell in Buildings.all_edge_cells(Buildings.Type.STEAM_GENERATOR, gen):
+		var nb: Building = world.building_at(cell)
+		if nb != null and nb.anchor == sub:
+			touches = true
+			break
+	_check(failures, gen_b != null and touches,
+		"(8) PREMISE: the steam generator at %s does not have the substation at %s on its cardinal edge ring, so this sub-case is testing nothing" % [str(gen), str(sub)])
+
+	var comp: int = int(world._pole_component.get(sub, -1))
+	_check(failures, comp >= 0,
+		"(8) PREMISE: the substation at %s is in no component at all" % str(sub))
+	var got_supply: int = PowerNetwork.supply_for(world, comp)
+	_check(failures, got_supply == SteamGenerator.MAX_OUTPUT,
+		"(8) the substation's component carries %d supply, expected exactly %d — a fuelled steam generator cardinally touching a SUBSTATION must feed it exactly as it would a basic pole" % [got_supply, SteamGenerator.MAX_OUTPUT])
+	_teardown(world)
+
+## Lay STONE over a `size` rectangle anchored at `anchor`.
+##
+## _make_world lays no terrain at all, so every cell reads GRASS / NONE.
+## Every pole tier and the lamp accept Overlay.NONE, but STEAM_GENERATOR's
+## requires_overlay is [STONE, PATH] — it is the strict one — so its four
+## cells have to be paved before its anchor row runs. Writing a fresh Tile
+## first keeps set_overlay off its idempotent early return, same as
+## PoleTierRig.build does.
+static func _pave(world, anchor: Vector2i, size: Vector2i) -> void:
+	for dy in range(size.y):
+		for dx in range(size.x):
+			var cell: Vector2i = anchor + Vector2i(dx, dy)
+			world.tiles[cell] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE)
+			world.set_overlay(cell, Terrain.Overlay.STONE)
+
+## Put a placed STEAM_GENERATOR into its supplying state without ticking.
+##
+## update_supply_demand's STEAM_GENERATOR arm reads exactly one field —
+## state["output_active"] — so writing it is what makes the generator supply.
+## fuel_buffer is loaded alongside it so the state is COHERENT rather than a
+## generator that claims to be running on nothing: SteamGenerator.tick would
+## rewrite output_active from Burner.consume_tick, and a sub-case that later
+## grew a tick loop would otherwise silently go dark. Nothing here ticks.
+static func _light_generator(world, anchor: Vector2i) -> void:
+	var b: Building = world.building_at(anchor)
+	if b == null:
+		return
+	b.state["fuel_buffer"] = 16
+	b.state["output_active"] = true
 
 ## Place every [type, anchor] row, reporting the world's own placement error
 ## on the first failure. Returns false if any placement was refused, so the
