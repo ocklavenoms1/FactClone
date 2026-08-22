@@ -85,16 +85,30 @@ def main():
     # Value/exposure correction. Measured per asset by art/tools/palette_drift.py
     # and stored in the manifest, because Tripo's palette shift is not consistent
     # between generations and so cannot be fixed by prompting.
+    # ORDER MATTERS. The emission mask must be detected from the RAW texture,
+    # before any albedo correction rewires Base Color - otherwise the chroma
+    # score is measured on corrected colour, no longer clears the cut, and the
+    # firebox silently never lights. neutralize_mask() taps the raw texture and
+    # inserts its mix; the albedo correction then stacks on top of that.
+    mask_sockets = normalize.neutralize_mask(norm["meshes"])
+
+    # mode: "gain" (single per-channel), "remap" (per-cluster), or "none".
+    # Overridable with --albedo-mode so the two can be rendered side by side.
     albedo_report = None
-    if cfg.get("albedo_gain") and not no_matnorm:
+    mode = a.get("albedo-mode", cfg.get("albedo_correction", "gain"))
+    if no_matnorm:
+        mode = "none"
+    if mode == "remap" and cfg.get("albedo_remap"):
+        albedo_report = normalize.apply_albedo_remap(norm["meshes"], cfg["albedo_remap"])
+        albedo_report["mode"] = "remap"
+        print(f"ALBEDO remap: {len(albedo_report['anchors'])} anchors "
+              f"{albedo_report['anchors']} sigma={albedo_report['sigma']} "
+              f"dropped={albedo_report['dropped']}")
+    elif mode == "gain" and cfg.get("albedo_gain"):
         albedo_report = normalize.apply_albedo_gain(norm["meshes"], cfg["albedo_gain"])
+        albedo_report["mode"] = "gain"
         print(f"ALBEDO gain^-1 applied to {albedo_report['materials']} material(s): "
               f"{[round(v, 3) for v in albedo_report['inverse']]}")
-    # Always neutralize the emission mask, in every state. Magenta is a mask
-    # and must never reach the screen - an idle firebox has to read as a cold
-    # dark opening. The returned sockets let the state hooks light that exact
-    # region without re-deriving it.
-    mask_sockets = normalize.neutralize_mask(norm["meshes"])
 
     scene = bpy.context.scene
     cam = scene.camera

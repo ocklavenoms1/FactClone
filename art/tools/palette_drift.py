@@ -42,6 +42,8 @@ import lock  # noqa: E402
 
 K = 10
 ITERS = 40
+MAX_CHROMA_DIST = 0.15   # above this the cluster->member match is not trusted
+GAIN_CLAMP = (0.4, 2.5)  # per-anchor gain limits; beyond this the cure is worse
 SEED = 12345
 
 
@@ -175,11 +177,93 @@ def report(a):
           f"   ({(1 - a['resid_rms'] / max(a['raw_rms'], 1e-9)) * 100:.0f}% explained)")
 
 
+def build_remap(a):
+    """Per-cluster correction anchors, for normalize.apply_albedo_remap().
+
+    The global gain explains only ~67% of the error; the residual is
+    per-material and large - on the smelter, fired clay sits at 0.229 luminance
+    against weathered oak at 0.750, a 3.3x spread INSIDE one asset. No single
+    gain can touch that, so a clay-heavy chest would still not match an
+    oak-heavy smelter after correction.
+
+    Each matched cluster therefore gets its own per-channel gain t_i / c_i, and
+    a texel is corrected by the softly-weighted blend of the anchors nearest it
+    in colour space.
+
+    MULTIPLICATIVE, not additive, and deliberately so. An additive shift moves
+    the mean but lifts blacks with it, washing out shading. A per-channel gain
+    preserves each texel's ratio to its cluster mean, so within-cluster
+    variation survives intact, shadows stay dark, and the whole thing reduces
+    exactly to the accepted global gain when every cluster agrees.
+    """
+    anchors, dropped = [], []
+    for r in a["rows"]:
+        c = np.asarray(r["observed_lin"], dtype=float)
+        t = np.asarray(r["palette_lin"], dtype=float)
+        g = np.array([t[k] / max(c[k], 1e-4) for k in range(3)])
+
+        # A poor chromaticity match means we are not actually confident this
+        # cluster IS that material - and a confident-looking gain built on a bad
+        # match will shift hues wherever it applies. Drop it rather than trust it.
+        if r["chroma_dist"] > MAX_CHROMA_DIST:
+            dropped.append((r["member"], round(r["chroma_dist"], 4), "bad chroma match"))
+            continue
+
+        # Clamp: an unclamped gain on a very dark cluster (fired clay wants
+        # 4.4x) amplifies compression noise and clips highlights. Clamping
+        # trades exact mean-matching for not destroying the texture.
+        clamped = np.clip(g, GAIN_CLAMP[0], GAIN_CLAMP[1])
+        anchors.append({
+            "member": r["member"],
+            "observed": [round(float(v), 6) for v in c],
+            "target": [round(float(v), 6) for v in t],
+            "gain": [round(float(v), 4) for v in clamped],
+            "gain_raw": [round(float(v), 4) for v in g],
+            "clamped": bool(np.any(np.abs(clamped - g) > 1e-6)),
+            "chroma_dist": round(r["chroma_dist"], 4),
+        })
+
+    if dropped:
+        print("  anchors dropped (not trusted):")
+        for m, d, why in dropped:
+            print(f"    {m:15} chroma_d {d}  - {why}")
+
+    # sigma from the anchors' own spacing: half the median nearest-neighbour
+    # distance. Too small bands at cluster boundaries; too large and every
+    # anchor blends into one average, which is just the global gain again.
+    C = np.array([an["observed"] for an in anchors])
+    d = np.linalg.norm(C[:, None, :] - C[None, :, :], axis=-1)
+    np.fill_diagonal(d, np.inf)
+    sigma = float(np.median(d.min(axis=1)) * 0.5)
+    return {"sigma": round(max(sigma, 0.02), 4), "anchors": anchors,
+            "dropped": [d[0] for d in dropped]}
+
+
+def emit(name, a):
+    import json as _json
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    p = os.path.join(repo, "art", "assets.json")
+    man = _json.load(open(p))
+    hit = False
+    for row in man["assets"]:
+        if row["name"] == name or row.get("source", "") == f"{name}.glb":
+            row["albedo_gain"] = [round(float(v), 4) for v in a["gain"]]
+            row["albedo_remap"] = build_remap(a)
+            hit = True
+    if not hit:
+        print(f"  (no manifest row matched {name!r}; nothing written)")
+        return
+    _json.dump(man, open(p, "w"), indent=2)
+    print(f"  wrote albedo_gain + albedo_remap for {name} into assets.json")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("textures", nargs="+")
     ap.add_argument("--render", action="store_true",
                     help="inputs are rendered RGBA sprites/masters, not albedo textures")
+    ap.add_argument("--emit", metavar="ASSET",
+                    help="write albedo_gain and albedo_remap for this asset into assets.json")
     a = ap.parse_args()
 
     out = []
@@ -189,6 +273,13 @@ def main():
             continue
         r = analyse(t, is_render=a.render)
         report(r)
+        if a.emit:
+            print("\n  per-cluster anchors:")
+            rm = build_remap(r)
+            for an in rm["anchors"]:
+                print(f"    {an['member']:15} gain {an['gain']}   chroma_d {an['chroma_dist']}")
+            print(f"    sigma {rm['sigma']}")
+            emit(a.emit, r)
         out.append(r)
 
     if len(out) >= 2:

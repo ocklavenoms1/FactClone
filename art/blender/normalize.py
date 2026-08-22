@@ -398,6 +398,131 @@ def apply_albedo_gain(meshes, gain, clamp=True):
     return {"gain": list(gain), "inverse": inv, "materials": n}
 
 
+def apply_albedo_remap(meshes, remap, clamp=True):
+    """Per-cluster albedo correction: a soft-weighted blend of anchor gains.
+
+    The global gain explains only ~67% of the drift. The residual is
+    per-material and large - fired clay at 0.229 luminance against weathered
+    oak at 0.750 INSIDE one asset - so a clay-heavy chest would still not match
+    an oak-heavy smelter after a single gain.
+
+    Each trusted cluster carries its own per-channel gain (target / observed).
+    A texel's correction is the gaussian-weighted average of the anchor gains,
+    weighted by distance in linear colour space:
+
+        g(c) = sum_i w_i(c) * gain_i   /   sum_i w_i(c)
+        w_i(c) = exp(-|c - observed_i|^2 / sigma^2)
+
+    MULTIPLICATIVE by design. An additive shift would move each cluster's mean
+    onto target but lift blacks with it, washing out the shading. A gain
+    preserves every texel's ratio to its cluster mean, so within-cluster
+    variation survives intact and shadows stay dark - and it degenerates
+    exactly to the global gain when the anchors agree.
+    """
+    anchors = remap.get("anchors") or []
+    if not anchors:
+        return None
+    sigma = float(remap.get("sigma", 0.05))
+    inv_s2 = -1.0 / max(sigma * sigma, 1e-6)
+
+    seen, n = set(), 0
+    for ob in meshes:
+        for slot in ob.material_slots:
+            mat = slot.material
+            if not mat or mat.name in seen or not mat.use_nodes:
+                continue
+            seen.add(mat.name)
+            nt = mat.node_tree
+            bsdf = next((x for x in nt.nodes if x.type == "BSDF_PRINCIPLED"), None)
+            if not bsdf:
+                continue
+            base = bsdf.inputs.get("Base Color")
+            if base is None or not base.is_linked:
+                continue
+            src = base.links[0].from_socket
+
+            weights = []
+            for an in anchors:
+                d = nt.nodes.new("ShaderNodeVectorMath")
+                d.operation = "DISTANCE"
+                d.label = f"d to {an['member']}"
+                d.inputs[1].default_value = an["observed"]
+                nt.links.new(src, d.inputs[0])
+
+                sq = nt.nodes.new("ShaderNodeMath")
+                sq.operation = "MULTIPLY"
+                nt.links.new(d.outputs["Value"], sq.inputs[0])
+                nt.links.new(d.outputs["Value"], sq.inputs[1])
+
+                neg = nt.nodes.new("ShaderNodeMath")
+                neg.operation = "MULTIPLY"
+                neg.inputs[1].default_value = inv_s2
+                nt.links.new(sq.outputs["Value"], neg.inputs[0])
+
+                w = nt.nodes.new("ShaderNodeMath")
+                w.operation = "EXPONENT"
+                w.label = f"w {an['member']}"
+                nt.links.new(neg.outputs["Value"], w.inputs[0])
+                weights.append(w.outputs["Value"])
+
+            total = weights[0]
+            for wsock in weights[1:]:
+                add = nt.nodes.new("ShaderNodeMath")
+                add.operation = "ADD"
+                nt.links.new(total, add.inputs[0])
+                nt.links.new(wsock, add.inputs[1])
+                total = add.outputs["Value"]
+
+            guard = nt.nodes.new("ShaderNodeMath")
+            guard.operation = "MAXIMUM"
+            guard.label = "guard /0"
+            guard.inputs[1].default_value = 1e-4
+            nt.links.new(total, guard.inputs[0])
+
+            blended = None
+            for an, wsock in zip(anchors, weights):
+                wn = nt.nodes.new("ShaderNodeMath")
+                wn.operation = "DIVIDE"
+                nt.links.new(wsock, wn.inputs[0])
+                nt.links.new(guard.outputs["Value"], wn.inputs[1])
+
+                sc = nt.nodes.new("ShaderNodeVectorMath")
+                sc.operation = "SCALE"
+                sc.label = f"gain {an['member']}"
+                sc.inputs[0].default_value = an["gain"]
+                nt.links.new(wn.outputs["Value"], sc.inputs["Scale"])
+
+                if blended is None:
+                    blended = sc.outputs["Vector"]
+                else:
+                    ad = nt.nodes.new("ShaderNodeVectorMath")
+                    ad.operation = "ADD"
+                    nt.links.new(blended, ad.inputs[0])
+                    nt.links.new(sc.outputs["Vector"], ad.inputs[1])
+                    blended = ad.outputs["Vector"]
+
+            mul = nt.nodes.new("ShaderNodeVectorMath")
+            mul.operation = "MULTIPLY"
+            mul.label = "albedo remap"
+            nt.links.new(src, mul.inputs[0])
+            nt.links.new(blended, mul.inputs[1])
+            out = mul.outputs["Vector"]
+
+            if clamp:
+                cl = nt.nodes.new("ShaderNodeVectorMath")
+                cl.operation = "MINIMUM"
+                cl.label = "clamp albedo <= 1"
+                cl.inputs[1].default_value = (1.0, 1.0, 1.0)
+                nt.links.new(out, cl.inputs[0])
+                out = cl.outputs["Vector"]
+
+            nt.links.new(out, base)
+            n += 1
+
+    return {"anchors": [a["member"] for a in anchors], "sigma": sigma,
+            "dropped": remap.get("dropped", []), "materials": n}
+
+
 def _remap_socket(mat, socket, lo, hi):
     """Insert a clamped Map Range so a linked 0..1 input lands in [lo, hi]."""
     nt = mat.node_tree

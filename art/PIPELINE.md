@@ -260,11 +260,67 @@ channel**, enormous.
 
 **Consequence: the material pass must own value and exposure.** Prompting
 cannot deliver cross-asset colour consistency when the transform varies per
-generation. `normalize.apply_albedo_gain()` therefore corrects each asset by
-the inverse of its own measured gain, stored per asset in the manifest:
+generation. The correction is stored per asset in the manifest and applied in
+normalization, in one of two modes.
+
+### Global gain vs per-cluster remap — measured, remap wins
+
+A single gain explains only ~67% of the drift. The residual is per-material and
+large: on the smelter, fired clay sits at 0.229 luminance against weathered oak
+at 0.750 — a **3.3× spread inside one asset**. No global gain can touch that, so
+a clay-heavy chest would still not match an oak-heavy smelter.
+
+`apply_albedo_remap()` gives each trusted cluster its own per-channel gain
+(`target / observed`) and corrects a texel by the gaussian-weighted blend of the
+anchors nearest it in colour space.
+
+**Multiplicative, not additive, deliberately.** An additive shift moves each
+cluster's mean onto target but lifts blacks with it, washing out shading. A
+gain preserves every texel's ratio to its cluster mean — within-cluster
+variation survives intact, shadows stay dark — and it degenerates exactly to the
+global gain when the anchors agree.
+
+Measured in render space, per-member |delta| against the locked palette:
+
+| member | global gain | per-cluster remap |
+|---|---|---|
+| fieldstone | 0.1045 (lum 0.424) | **0.0053** (lum 0.971) |
+| weathered oak | 0.1870 (lum **2.197**) | **0.0259** (lum 1.007) |
+| fired clay | 0.1094 | 0.0938 |
+| wrought iron | 0.0324 | 0.0439 |
+| leather | 0.0441 | 0.0516 |
+| **RMS** | **0.0675** | **0.0559** |
+
+The remap fixes the two worst members outright and costs a little on two small
+ones. Note what the global gain was doing to the timber: **overshooting oak to
+2.197× luminance** — that is exactly the per-material residual a single gain
+cannot see.
+
+**It does not flatten.** Detail survives in both — the HF gate actually reads
+*lower* under the remap (see below), which is what you would expect when the
+correction stops over-brightening one material.
+
+Two safeguards, both measured rather than assumed:
+
+- **Untrusted anchors are dropped.** `forge_brown` matched at chroma distance
+  0.279; a confident-looking gain built on a bad match shifts hues wherever it
+  applies. Anything above 0.15 is discarded (5 of 6 anchors survive here).
+- **Gains are clamped to [0.4, 2.5].** Fired clay wanted **4.4×**, which
+  amplifies compression noise and clips highlights. Clamping trades exact
+  mean-matching for not destroying the texture.
+
+### Not locked until n = 3
+
+The correction stays **per-asset and measured**. The two generations compared
+above differ in modality as well as content, so "varies per generation" is
+strong evidence, not a controlled result. The chest and the pole come through
+the *identical* flow as the approved smelter — those are the control. Only when
+all three are in do we decide whether a shared constant exists.
 
 ```json
-"albedo_gain": [0.417, 0.535, 0.530]
+"albedo_gain": [0.417, 0.535, 0.530],
+"albedo_correction": "remap",
+"albedo_remap": { "sigma": 0.02, "anchors": [ ... ] }
 ```
 
 The goal is not to hit the locked hexes exactly — albedo is not a lit
@@ -404,12 +460,17 @@ objects — the flat pole proxy scores *worse* under it (11.0 → 17.8) because 
 occupies only 0.62 tile-equivalents. A thin object is nearly all edge and no
 normalization changes that, which is precisely why this is not a gate.
 
-**Minimum feature size in FINAL pixels** — the candidate second gate if one is
-ever wanted, since anything under ~2 px at 32 px output is dead regardless of
-shape. Currently: smelter median thickness 1.27 px with 81% under 2 px; chest
-1.80 px with 67% under. Both high, which suggests the eventual threshold wants
-setting against a known-good asset rather than assumed — so it is reported and
-left unenforced.
+**Minimum feature thickness in FINAL pixels — this is PROMPT FEEDBACK, not a
+gate, and it is not going to become one.** Anything under ~2 px at 32 px output
+is dead regardless of the object's shape, so the number says whether the detail
+budget in the prompt is realistic for that footprint at this camera.
+
+Current: smelter median **1.15 px with 87% under 2 px**; chest 1.80 px with 67%
+under. Read that as *the prompt's detail budget is still too generous for a 2×2
+at this camera* — a thing to tighten in `PROMPTS.md` as the numbers accumulate
+across assets, not a thing to fail a build on.
+
+It is reported per asset every run and never enforced.
 
 ---
 

@@ -13,7 +13,9 @@
     "status": "real = generated in Tripo; proxy = placeholder stand-in geometry",
     "glow_at": "furnace/firebox position in tiles, after yaw_correction. Drives the emitter fallback until the magenta mask is validated on a real generation.",
     "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py.",
-    "albedo_gain": "per-channel gain measured by art/tools/palette_drift.py (palette -> observed). Normalization applies its INVERSE so every asset lands on a common reference. Tripo's shift is not consistent between generations, so this cannot be fixed by prompting."
+    "albedo_gain": "per-channel gain measured by art/tools/palette_drift.py (palette -> observed). Normalization applies its INVERSE so every asset lands on a common reference. Tripo's shift is not consistent between generations, so this cannot be fixed by prompting.",
+    "albedo_correction": "'remap' (per-cluster, default for measured assets), 'gain' (single per-channel), or 'none'. NOT LOCKED: the correction stays per-asset and measured until chest and pole are in, then we decide whether a shared constant exists.",
+    "albedo_remap": "per-cluster anchors from palette_drift.py --emit. Each trusted cluster carries its own gain; a texel gets the gaussian-weighted blend. Anchors with chroma_dist > 0.15 are dropped as untrusted; gains are clamped to [0.4, 2.5]."
   },
   "assets": [
     {
@@ -30,10 +32,144 @@
       "status": "real",
       "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite.",
       "albedo_gain": [
-        0.417,
+        0.4168,
         0.535,
-        0.53
-      ]
+        0.5304
+      ],
+      "albedo_remap": {
+        "sigma": 0.02,
+        "anchors": [
+          {
+            "member": "fieldstone",
+            "observed": [
+              0.073142,
+              0.07334,
+              0.061421
+            ],
+            "target": [
+              0.102242,
+              0.111932,
+              0.097587
+            ],
+            "gain": [
+              1.3978,
+              1.5262,
+              1.5888
+            ],
+            "gain_raw": [
+              1.3978,
+              1.5262,
+              1.5888
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0303
+          },
+          {
+            "member": "fired_clay",
+            "observed": [
+              0.057213,
+              0.034499,
+              0.017252
+            ],
+            "target": [
+              0.254152,
+              0.144128,
+              0.078187
+            ],
+            "gain": [
+              2.5,
+              2.5,
+              2.5
+            ],
+            "gain_raw": [
+              4.4422,
+              4.1777,
+              4.5322
+            ],
+            "clamped": true,
+            "chroma_dist": 0.0174
+          },
+          {
+            "member": "weathered_oak",
+            "observed": [
+              0.097346,
+              0.062264,
+              0.031697
+            ],
+            "target": [
+              0.147027,
+              0.076185,
+              0.031896
+            ],
+            "gain": [
+              1.5103,
+              1.2236,
+              1.0063
+            ],
+            "gain_raw": [
+              1.5103,
+              1.2236,
+              1.0063
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0832
+          },
+          {
+            "member": "wrought_iron",
+            "observed": [
+              0.050136,
+              0.05024,
+              0.039582
+            ],
+            "target": [
+              0.061246,
+              0.08022,
+              0.076185
+            ],
+            "gain": [
+              1.2216,
+              1.5967,
+              1.9248
+            ],
+            "gain_raw": [
+              1.2216,
+              1.5967,
+              1.9248
+            ],
+            "clamped": false,
+            "chroma_dist": 0.1025
+          },
+          {
+            "member": "leather",
+            "observed": [
+              0.080989,
+              0.0499,
+              0.024844
+            ],
+            "target": [
+              0.194618,
+              0.102242,
+              0.05448
+            ],
+            "gain": [
+              2.403,
+              2.0489,
+              2.1929
+            ],
+            "gain_raw": [
+              2.403,
+              2.0489,
+              2.1929
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0451
+          }
+        ],
+        "dropped": [
+          "forge_brown"
+        ]
+      },
+      "albedo_correction": "remap"
     },
     {
       "name": "chest",
@@ -74,10 +210,144 @@
       "status": "test",
       "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor.",
       "albedo_gain": [
-        0.417,
+        0.4168,
         0.535,
-        0.53
-      ]
+        0.5304
+      ],
+      "albedo_remap": {
+        "sigma": 0.02,
+        "anchors": [
+          {
+            "member": "fieldstone",
+            "observed": [
+              0.073142,
+              0.07334,
+              0.061421
+            ],
+            "target": [
+              0.102242,
+              0.111932,
+              0.097587
+            ],
+            "gain": [
+              1.3978,
+              1.5262,
+              1.5888
+            ],
+            "gain_raw": [
+              1.3978,
+              1.5262,
+              1.5888
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0303
+          },
+          {
+            "member": "fired_clay",
+            "observed": [
+              0.057213,
+              0.034499,
+              0.017252
+            ],
+            "target": [
+              0.254152,
+              0.144128,
+              0.078187
+            ],
+            "gain": [
+              2.5,
+              2.5,
+              2.5
+            ],
+            "gain_raw": [
+              4.4422,
+              4.1777,
+              4.5322
+            ],
+            "clamped": true,
+            "chroma_dist": 0.0174
+          },
+          {
+            "member": "weathered_oak",
+            "observed": [
+              0.097346,
+              0.062264,
+              0.031697
+            ],
+            "target": [
+              0.147027,
+              0.076185,
+              0.031896
+            ],
+            "gain": [
+              1.5103,
+              1.2236,
+              1.0063
+            ],
+            "gain_raw": [
+              1.5103,
+              1.2236,
+              1.0063
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0832
+          },
+          {
+            "member": "wrought_iron",
+            "observed": [
+              0.050136,
+              0.05024,
+              0.039582
+            ],
+            "target": [
+              0.061246,
+              0.08022,
+              0.076185
+            ],
+            "gain": [
+              1.2216,
+              1.5967,
+              1.9248
+            ],
+            "gain_raw": [
+              1.2216,
+              1.5967,
+              1.9248
+            ],
+            "clamped": false,
+            "chroma_dist": 0.1025
+          },
+          {
+            "member": "leather",
+            "observed": [
+              0.080989,
+              0.0499,
+              0.024844
+            ],
+            "target": [
+              0.194618,
+              0.102242,
+              0.05448
+            ],
+            "gain": [
+              2.403,
+              2.0489,
+              2.1929
+            ],
+            "gain_raw": [
+              2.403,
+              2.0489,
+              2.1929
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0451
+          }
+        ],
+        "dropped": [
+          "forge_brown"
+        ]
+      },
+      "albedo_correction": "remap"
     }
   ]
 }

@@ -3,8 +3,10 @@ extends RefCounted
 
 ## Power network resolver — graph + dirty-flag pattern.
 ##
-## Mirrors the fluid-network pattern at grid_world.gd:475-565. Power poles
-## form components via BFS over 5-tile Chebyshev adjacency. Generators
+## Mirrors the fluid-network pattern at grid_world.gd:475-565. Poles of every
+## tier form components via BFS over Chebyshev adjacency, at the PER-TIER
+## range in POLE_RANGE_BY_TYPE (basic 3, medium 6, substation 11) under the
+## either-reaches rule in poles_connected(). Generators
 ## adjacent to a pole will contribute supply; consumers will contribute
 ## demand (added in Task 7). Each component will have a linear
 ## satisfaction ratio in [0.0, 1.0]:
@@ -24,25 +26,122 @@ extends RefCounted
 ## TASK 2 SCOPE: topology + queries only. update_supply_demand lands in
 ## Task 7 once WATER_WHEEL and ELECTRIC_LAMP enum entries exist (Tasks 5+6).
 
-# Maximum Chebyshev distance for pole-to-pole auto-connection.
-# Reduced from 5 to 3 at PAUSE 1 user request: 5-tile range produced too
-# many in-range pairs in dense layouts (K4 with 6 wires for 4 poles),
-# even though that was the locked mesh-within-network rule. Tighter
-# range forces denser pole placement but produces visually cleaner
-# topology — direct neighbors only, no long diagonals that "skip over"
-# intermediate poles.
-const POLE_RANGE: int = 3
+# Per-tier maximum Chebyshev distance for pole-to-pole auto-connection.
+#
+# The basic pole's 3 is a PAUSE 1 user decision, reduced from 5 because
+# "5-tile range produced too many in-range pairs in dense layouts (K4 with 6
+# wires for 4 poles)". That complaint was about WIRE COUNT, not about reach,
+# and Session 3 removes its cause in Task 7 by rendering a minimum spanning
+# tree per component instead of the full mesh grid_world._draw_power_wires
+# still draws today — which is why the substation can afford 11 without
+# reintroducing the hairball.
+#
+# Lookup miss returns POLE_RANGE_DEFAULT, so a future pole tier that forgets
+# its row behaves like a basic pole rather than failing to connect at all.
+const POLE_RANGE_BY_TYPE: Dictionary = {
+	Buildings.Type.POWER_POLE:  3,
+	Buildings.Type.MEDIUM_POLE: 6,
+	Buildings.Type.SUBSTATION:  11,
+}
+const POLE_RANGE_DEFAULT: int = 3
 
-# Pole's supply-area Chebyshev radius for CONSUMERS (Factorio-style).
-# A consumer at any cell within SUPPLY_RADIUS Chebyshev distance of a
-# pole receives power from that pole's component. Radius 1 = 3×3 area
-# centered on pole (8 surrounding cells + the pole's own cell). Lamps,
-# future electric processors, etc. all use this. GENERATORS
-# (WATER_WHEEL, etc.) intentionally use strict cardinal adjacency
-# instead — see _adjacent_component_id. Asymmetric by design (PAUSE 1
-# user decision): consumers powered wirelessly within radius, generators
-# must touch a pole.
-const SUPPLY_RADIUS: int = 1
+# Per-tier supply-area Chebyshev radius for CONSUMERS (Factorio-style
+# wireless supply). Radius r is measured from the pole's FOOTPRINT, so a 1x1
+# pole covers (2r+1) cells per axis and the 2x2 substation covers (2r+2) —
+# anchor-r .. anchor+1+r. GENERATORS (WATER_WHEEL, etc.) intentionally use
+# strict cardinal adjacency instead — see _adjacent_component_id. Asymmetric
+# by design (PAUSE 1 user decision): consumers are powered wirelessly within
+# the radius, generators must touch a pole.
+#
+# NOT YET WIRED UP. Task 4 lands the table; Task 5 lands the footprint-
+# projected resolver that reads it. Until then the two consumer paths below
+# (_supply_component_id, power_satisfaction_at) are still hardcoded to
+# SUPPLY_RADIUS_DEFAULT — see the TEMPORARY note on each.
+#
+# WHY THESE STOP AT 4. The lookup is consumer-outward: a consumer scans a box
+# around ITSELF and asks what poles are in it (power_satisfaction_at), because
+# it cannot know in advance which tier might be covering it. That means every
+# consumer pays the box of the LARGEST tier on the map, every tick, even where
+# no substation exists. Cost is (2r+1)^2: radius 1 is 9 checks, radius 4 is 81,
+# radius 7 would be 225. 4 is the affordability ceiling, not a balance choice.
+const SUPPLY_RADIUS_BY_TYPE: Dictionary = {
+	Buildings.Type.POWER_POLE:  1,
+	Buildings.Type.MEDIUM_POLE: 2,
+	Buildings.Type.SUBSTATION:  4,
+}
+const SUPPLY_RADIUS_DEFAULT: int = 1
+
+# The widest supply radius any tier declares. Derived at first use rather than
+# hardcoded so it cannot drift from the table above.
+static var _max_supply_radius_cache: int = -1
+
+## Widest supply radius across all pole tiers — the consumer-side scan box
+## size. NO CALLER YET: Task 5's resolver sizes its box to this and then
+## filters per-pole, because the consumer does not know what tier will answer.
+## Landed here so the table and the number derived from it stay in one file.
+static func max_supply_radius() -> int:
+	if _max_supply_radius_cache < 0:
+		var m: int = SUPPLY_RADIUS_DEFAULT
+		for t in SUPPLY_RADIUS_BY_TYPE:
+			m = max(m, int(SUPPLY_RADIUS_BY_TYPE[t]))
+		_max_supply_radius_cache = m
+	return _max_supply_radius_cache
+
+## Wire range for one pole type.
+static func pole_range(t: int) -> int:
+	return int(POLE_RANGE_BY_TYPE.get(t, POLE_RANGE_DEFAULT))
+
+## Supply radius for one pole type.
+static func supply_radius(t: int) -> int:
+	return int(SUPPLY_RADIUS_BY_TYPE.get(t, SUPPLY_RADIUS_DEFAULT))
+
+## THE connection predicate — the single source of truth for "are these two
+## poles wired together". Called by BOTH rebuild_topology's BFS and
+## grid_world._draw_power_wires. That sharing is the entire point: these used
+## to be two independent reads of one constant, and with per-type ranges two
+## reads WILL diverge.
+##
+## The divergence is dangerous in one direction specifically. If the renderer
+## is STRICTER than the BFS, poles are in one component but no wire is drawn —
+## an invisible connection, with no test or visual signal. (Looser is caught by
+## the renderer's same-component guard.) One predicate makes that unreachable.
+##
+## RULE: EITHER-REACHES — chebyshev(a, b) <= max(range(a), range(b)).
+## Symmetric, so the BFS stays an undirected flood fill and component grouping
+## cannot depend on lex start order. It also mirrors the asymmetry the project
+## already chose for consumers: a pole reaches OUT to things that do not reach
+## back. A min() rule would cap a substation talking to basic poles at the
+## basic pole's 3, making the backbone tier useless in mixed networks.
+static func poles_connected(world, anchor_a: Vector2i, anchor_b: Vector2i) -> bool:
+	if anchor_a == anchor_b:
+		return false
+	var ba: Building = world.buildings.get(anchor_a, null)
+	var bb: Building = world.buildings.get(anchor_b, null)
+	if ba == null or bb == null:
+		return false
+	if not Buildings.POLE_TYPES.has(ba.type) or not Buildings.POLE_TYPES.has(bb.type):
+		return false
+	var reach: int = max(pole_range(ba.type), pole_range(bb.type))
+	return _pole_distance(ba, bb) <= reach
+
+## Chebyshev distance between two poles, measured FOOTPRINT to FOOTPRINT
+## rather than anchor to anchor.
+##
+## For 1x1 poles these are identical. For the 2x2 substation they diverge in
+## one direction per axis, because the anchor sits on the footprint's west/north
+## edge: toward -x/-y the two metrics AGREE, while toward +x/+y anchor-to-anchor
+## OVER-measures by 1 and so understates the substation's real reach. Worked:
+## a substation anchored at x 12 (cells 12..13) against a 1x1 pole at x 3 reads
+## 9 either way, but against one at x 16 reads 4 by anchor and 3 by footprint.
+## Left uncorrected, a substation reaches further "up-left" than "down-right",
+## which is invisible in tests built around a single orientation and obvious
+## on screen. Footprint-to-footprint is orientation-independent.
+static func _pole_distance(a: Building, b: Building) -> int:
+	var fa: Vector2i = Buildings.footprint_of(a.type)
+	var fb: Vector2i = Buildings.footprint_of(b.type)
+	var dx: int = max(0, max(a.anchor.x - (b.anchor.x + fb.x - 1), b.anchor.x - (a.anchor.x + fa.x - 1)))
+	var dy: int = max(0, max(a.anchor.y - (b.anchor.y + fb.y - 1), b.anchor.y - (a.anchor.y + fa.y - 1)))
+	return max(dx, dy)
 
 # 4-directional adjacency for building-to-pole association. Local copy —
 # grid_world.gd has its own `_CARDINALS` at line 471; kept separate so
@@ -63,8 +162,9 @@ const _CARDINALS: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vect
 static func mark_dirty(world) -> void:
 	world._power_network_dirty = true
 
-## Rebuild the topology: walks all poles, BFS over 5-tile Chebyshev
-## adjacency, populates world._pole_component[pos] = comp_id. Clears
+## Rebuild the topology: walks every pole of every tier in Buildings.POLE_TYPES,
+## BFS over the shared poles_connected() predicate (per-tier Chebyshev range,
+## either-reaches), populates world._pole_component[anchor] = comp_id. Clears
 ## supply/demand/satisfaction (they're recomputed by update_supply_demand
 ## in Task 7).
 ##
@@ -84,9 +184,14 @@ static func rebuild_topology(world) -> void:
 	world._component_accumulator_supply.clear()
 	world._component_accumulator_drain.clear()
 
+	# EVERY pole tier, not just POWER_POLE — Buildings.POLE_TYPES is the one
+	# hand-maintained list, and a tier missing from it is invisible here and
+	# forms no network at all (the silent failure test_pole_tiers sub-case 1
+	# pins). Keys are ANCHORS: a 2x2 substation contributes one entry, and
+	# _pole_distance re-derives its footprint from the type.
 	var pole_anchors: Array = []
 	for anchor in world.buildings:
-		if world.buildings[anchor].type == Buildings.Type.POWER_POLE:
+		if Buildings.POLE_TYPES.has(world.buildings[anchor].type):
 			pole_anchors.append(anchor)
 	pole_anchors.sort_custom(func(a, b): return a.x < b.x or (a.x == b.x and a.y < b.y))
 
@@ -100,15 +205,15 @@ static func rebuild_topology(world) -> void:
 			if world._pole_component.has(p):
 				continue
 			world._pole_component[p] = next_id
-			# Find all poles within POLE_RANGE Chebyshev distance.
+			# Find all poles this one is wired to. poles_connected is the
+			# SHARED predicate — grid_world._draw_power_wires calls the same
+			# function, so the graph the BFS builds and the graph the renderer
+			# draws cannot disagree. It also rejects other == p on its own, so
+			# no self-skip guard is needed here.
 			for other in pole_anchors:
-				if other == p:
-					continue
 				if world._pole_component.has(other):
 					continue
-				var dx: int = abs(other.x - p.x)
-				var dy: int = abs(other.y - p.y)
-				if max(dx, dy) <= POLE_RANGE:
+				if PowerNetwork.poles_connected(world, p, other):
 					queue.append(other)
 		next_id += 1
 
@@ -191,7 +296,7 @@ static func update_supply_demand(world) -> void:
 				continue
 			world._component_demand[con_comp] = int(world._component_demand.get(con_comp, 0)) + ElectricLamp.DEMAND
 		elif b.type == Buildings.Type.ELECTRIC_INSERTER:
-			# CONSUMER rule (_supply_component_id — Chebyshev SUPPLY_RADIUS
+			# CONSUMER rule (_supply_component_id — a Chebyshev supply radius
 			# around every footprint cell), same as lamps. NOT the generator/
 			# accumulator rule (_adjacent_component_id), which demands a
 			# touching pole.

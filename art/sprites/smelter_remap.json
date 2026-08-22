@@ -1,5 +1,5 @@
 {
-  "name": "smelter",
+  "name": "smelter_remap",
   "source": "smelter.glb",
   "footprint_tiles": 2.0,
   "fit": "footprint",
@@ -58,39 +58,21 @@
   },
   "masters": [
     {
-      "tag": "smelter_idle",
+      "tag": "smelter_idle_remap",
       "state": "idle",
       "yaw": null,
-      "master": "art/renders/smelter_idle_4x.png",
-      "sprite": "art/sprites/smelter_idle.png",
+      "master": "art/renders/smelter_idle_remap_4x.png",
+      "sprite": "art/sprites/smelter_idle_remap.png",
       "state_hook": null
     },
     {
-      "tag": "smelter_smelting",
+      "tag": "smelter_smelting_remap",
       "state": "smelting",
       "yaw": null,
-      "master": "art/renders/smelter_smelting_4x.png",
-      "sprite": "art/sprites/smelter_smelting.png",
+      "master": "art/renders/smelter_smelting_remap_4x.png",
+      "sprite": "art/sprites/smelter_smelting_remap.png",
       "state_hook": "smelter_smelting.py"
     }
   ],
-  "lock_stamp": "434c0cf56d8f",
-  "glow_layer": {
-    "file": "art/sprites/smelter_glow.png",
-    "body_sprite": "art/sprites/smelter_idle.png",
-    "derived_from": [
-      "smelter_smelting_4x.png",
-      "smelter_idle_4x.png"
-    ],
-    "blend": "additive; dst += rgb * a. Pulse modulate.a for flicker.",
-    "lit_px": 174,
-    "coverage_pct": 2.83,
-    "peak_alpha": 1.0,
-    "bbox": [
-      24,
-      73,
-      43,
-      82
-    ]
-  }
+  "lock_stamp": "434c0cf56d8f"
 }
