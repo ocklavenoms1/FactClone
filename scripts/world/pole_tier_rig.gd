@@ -206,11 +206,11 @@ const INSERTER_OFFSETS: Array = [
 # total is missed.
 #
 # Supply radius is projected from ALL of a pole's footprint cells and measured
-# to the NEAREST one — see PowerNetwork._covering_component_id, which walks
+# to the NEAREST one — see the plan's _covering_component_id, which walks
 # world._pole_cells and takes `max(abs(dx), abs(dy))` to the matched cell. For
 # the 1x1 tiers that is the same as anchor distance; for the 2x2 substation
 # (cells x 12..13, y 2..3) it is not, and the numbers below use the footprint
-# rule because that is the rule that runs.
+# rule because that is the rule that will run.
 #
 # WHICH LAMPS PIN WHICH RADIUS, which is what makes Task 5 load-bearing rather
 # than decorative:

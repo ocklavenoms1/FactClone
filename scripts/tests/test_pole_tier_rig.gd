@@ -4,38 +4,36 @@ extends RefCounted
 ## at, asserted headlessly so what the test proves and what they see cannot
 ## drift. Drives PoleTierRig.build, the same entry point main.gd calls.
 ##
-## THIS TEST WAS RED FROM TASK 3 TO TASK 5. That was deliberate: the rig is
-## built BEFORE the tier logic (last session's lesson — a gate should be a
-## looking exercise, not a construction exercise), so this file was the
-## scenario-level RED that Tasks 4 and 5 turned green. It is GREEN NOW and
-## every sub-case must stay that way through Tasks 6-7.
+## THIS TEST IS RED UNTIL TASK 7. That is deliberate: the rig is built BEFORE
+## the tier logic (last session's lesson — a gate should be a looking exercise,
+## not a construction exercise), so this file is the scenario-level RED that
+## Tasks 4-7 turn green.
 ##
-## What each sub-case rests on, and which task put it there:
+## Expected state of each sub-case as of Task 3, with why:
 ##
-##   (1) layout lands ......................... Both tiers became placeable at
-##       Task 2, so nothing here depends on network logic.
-##   (2) demand is exactly 40 ................. Task 5. The ten lamps that only
-##       the medium pole and the substation can reach need per-tier supply
-##       radii AND the substation's footprint projection to resolve to a
-##       component at all. Read 30 of 40 until then.
-##   (3) the substation bridges ............... Task 4. rebuild_topology
-##       collects every type in Buildings.POLE_TYPES and joins them under the
-##       either-reaches rule. Before that the two new tiers were invisible to
-##       the BFS and cluster A / cluster B / the control block were 3 islands.
-##   (4a) total raw supply is 40 .............. Green since Task 3.
+##   (1) layout lands ......................... PASSES. Both tiers became
+##       placeable at Task 2, so nothing here depends on network logic.
+##   (2) demand is exactly 40 ................. FAILS at 30. rebuild_topology
+##       still collects only Buildings.Type.POWER_POLE, so the ten lamps that
+##       only the medium pole and the substation can reach resolve to no
+##       component and contribute nothing.
+##   (3) the substation bridges ............... FAILS at 3 components instead
+##       of 2. The two new tiers are invisible to BFS, so the bridge does not
+##       exist and cluster A / cluster B / the control block are three islands.
+##   (4a) total raw supply is 40 .............. PASSES, and must keep passing.
 ##       Catches a generator that does not touch a pole — a defect this layout
 ##       has already had once. Sub-case (2) cannot see that defect, because
-##       demand is 40 whether or not any generator is connected. (1)'s edge-ring
+##       demand is 40 whether or not any generator is connected; (1)'s edge-ring
 ##       check sees it too, and the two are complementary rather than redundant
 ##       (see (1)'s header).
 ##   (4b) all 40 supply and all 40 demand on
-##        ONE component, satisfaction 1.00 .... Tasks 4 and 5 together — the
-##       bridge has to exist AND all 40 of the demand has to reach it.
-##   (5) re-spawn adopts ...................... Green since Task 3. Pure spawn
-##       plumbing, independent of the tier logic.
+##        ONE component, satisfaction 1.00 .... FAILS. The bus is split in two
+##       and each half has 20 supply against a partial demand.
+##   (5) re-spawn adopts ...................... PASSES, and must keep passing.
+##       Pure spawn plumbing, independent of the tier logic.
 ##
 ## Do NOT "fix" (2) or (4b) by moving lamps next to basic poles. Those lamp
-## positions are what prove the wide supply areas work.
+## positions are what prove the wide supply areas work once Task 5 lands.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
@@ -182,10 +180,10 @@ static func _case_demand(parent: Node, failures: Array) -> void:
 # pole_tier_rig.gd, which carries the full arithmetic and the reason cluster B
 # sits close enough for that to be true.
 #
-# BOTH HALVES ARE LOAD-BEARING SINCE TASK 4, and the second one was not before
-# it: with the substation outside the topology, removing it changed nothing and
-# the count read 3 either way. It now reads 2 before the removal and 3 after,
-# so the delta is the bridge.
+# NOTE for the Task 4 GREEN step: the SECOND half of this sub-case passes today
+# for the wrong reason. Before Task 4 the substation is not in the topology at
+# all, so removing it changes nothing and the count is 3 either way. Only the
+# first half is a real RED right now.
 # ===========================================================================
 static func _case_bridge(parent: Node, failures: Array) -> void:
 	var world = _make_world(parent)
