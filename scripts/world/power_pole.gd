@@ -5,8 +5,10 @@ extends RefCounted
 ## passive carrier of the electric network.
 ##
 ## The tiers are POWER_POLE, MEDIUM_POLE (medium_pole.gd) and SUBSTATION
-## (substation.gd). The DESIGN intent is that they differ in three numbers
-## only — wire range, supply radius, footprint. Ranges live in
+## (substation.gd). They differ in three numbers — wire range, supply radius,
+## footprint — and the footprint drags one behavioural difference along with
+## it: the 2x2 substation is the only non-walkable tier (see substation.gd,
+## which paints its body edge-to-edge for exactly that reason). Ranges live in
 ## PowerNetwork.POLE_RANGE_BY_TYPE (this one is 3) and supply radii in
 ## SUPPLY_RADIUS_BY_TYPE (this one is 1). Two poles auto-connect when their
 ## Chebyshev distance is within EITHER one's range — max(), not min() — so a
@@ -14,13 +16,24 @@ extends RefCounted
 ## PowerNetwork.poles_connected and nowhere else.
 ##
 ## WHERE THE TIERS ARE NOT YET EQUAL (Task 4 -> Task 5). Wiring is done: all
-## three tiers form network components. Everything a pole does for OTHER
-## buildings is still POWER_POLE-only, because three functions in
-## power_network.gd still hard-filter on that type — _supply_component_id and
-## power_satisfaction_at (so a medium pole and a substation project NO supply
-## area and power nothing) and _adjacent_component_id (so a generator touching
-## one feeds NO supply into the network). Task 5 owns all three. Until it
-## lands, the two new tiers are wire-carriers and nothing else.
+## three tiers form network components and are drawn with wires. What a pole
+## does for OTHER buildings is not, and the three functions involved do not
+## even fail the same way:
+##
+##   _supply_component_id   hard-filters type != POWER_POLE, so a consumer
+##                          beside a medium pole or substation contributes NO
+##                          demand to the network.
+##   _adjacent_component_id hard-filters the same way, so a generator or
+##                          accumulator touching one feeds NO supply in.
+##   power_satisfaction_at  has NO type check at all — it only asks whether a
+##                          cell is in _pole_component, and Task 4 put every
+##                          tier's anchor there. It therefore ANSWERS for the
+##                          new tiers, at the basic radius of 1.
+##
+## That last one is the mismatch worth knowing about: between Task 4 and Task
+## 5 a lamp placed next to a medium pole reads as powered and lights up, while
+## contributing nothing to that network's demand. Task 5 owns all three and
+## must widen them together.
 ##
 ## No tick logic; network membership is computed on demand by
 ## PowerNetwork.rebuild_topology(world). Visual: dark wood base + tall pole +

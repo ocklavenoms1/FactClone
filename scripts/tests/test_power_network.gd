@@ -39,7 +39,9 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, comp_1 == 0, "(1) single pole should be component 0, got %d" % comp_1)
 
 	# ===========================================================================
-	# (2) TWO POLES IN RANGE — within POLE_RANGE (3) Chebyshev, same
+	# (2) TWO POLES IN RANGE — within the BASIC tier's wire range, 3 Chebyshev
+	# (PowerNetwork.pole_range(Buildings.Type.POWER_POLE); the per-tier table is
+	# POLE_RANGE_BY_TYPE and every pole in this file is a basic one). Same
 	# component. Place 2nd pole 3 tiles away (at the edge of the
 	# connection range).
 	# ===========================================================================
@@ -52,7 +54,7 @@ static func run(parent: Node) -> Dictionary:
 
 	# ===========================================================================
 	# (3) TWO POLES OUT OF RANGE — 4+ tiles apart, different components.
-	# Reset world, place poles at (0,5) and (7,5) (Chebyshev dist 7 > POLE_RANGE=3).
+	# Reset world, place poles at (0,5) and (7,5) (Chebyshev dist 7 > the basic tier's range of 3).
 	# ===========================================================================
 	world.queue_free()
 	world = GridWorldScript.new()
@@ -67,7 +69,7 @@ static func run(parent: Node) -> Dictionary:
 
 	# ===========================================================================
 	# (4) BRIDGE MERGES NETWORKS — place a third pole linking two separate.
-	# Layout: (0,5) and (6,5) are 6 apart → different networks (> POLE_RANGE=3).
+	# Layout: (0,5) and (6,5) are 6 apart → different networks (> the basic tier's range of 3).
 	# Bridge at (3,5): 3 tiles from each → in range of both → merges.
 	# ===========================================================================
 	world.queue_free()
@@ -199,7 +201,7 @@ static func run(parent: Node) -> Dictionary:
 	# ===========================================================================
 	# (9) BROWNOUT — 1 wheel (10 supply) + 12+ lamps (12+ demand). Sat < 1.0.
 	# Layout: stone strip 0..30, water at (3,5), wheel at (4,5) facing west,
-	# chain of poles at 6/9/12/15/18 (3-tile spacing = POLE_RANGE → all
+	# chain of poles at 6/9/12/15/18 (3-tile spacing = the basic tier's range → all
 	# connected), many lamps around those poles.
 	# ===========================================================================
 	world.queue_free()
@@ -210,7 +212,7 @@ static func run(parent: Node) -> Dictionary:
 			world.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
 	world.tiles[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
-	# Chain of poles at 3-tile spacing (POLE_RANGE = 3) — all in same component.
+	# Chain of poles at 3-tile spacing (basic tier range 3) — all in same component.
 	for px in [6, 9, 12, 15, 18]:
 		world.place_building(Buildings.Type.POWER_POLE, Vector2i(px, 5))
 	# Place lamps adjacent to those poles. Use y=4 and y=6 (above/below
@@ -281,7 +283,7 @@ static func run(parent: Node) -> Dictionary:
 	world.tile_modifications[Vector2i(3, 5)] = Tile.new(Terrain.Base.WATER, Terrain.Overlay.NONE)
 	world.place_building(Buildings.Type.WATER_WHEEL, Vector2i(4, 5), Belt.DIR_W)
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
-	world.place_building(Buildings.Type.POWER_POLE, Vector2i(9, 5))    # 3 tiles from (6,5) — in range with POLE_RANGE=3
+	world.place_building(Buildings.Type.POWER_POLE, Vector2i(9, 5))    # 3 tiles from (6,5) — in range at basic tier range 3
 	world.place_building(Buildings.Type.ELECTRIC_LAMP, Vector2i(7, 5))
 	# Pre-save: tick + update + verify lamp powered.
 	TickSystem.current_tick += 1
@@ -530,7 +532,7 @@ static func run(parent: Node) -> Dictionary:
 	# generators). Layout: windmill (4,5)+(5,5)+(4,6)+(5,6); pole (6,5); pole (6,7);
 	# acc A (7,5) cardinally adjacent to pole (6,5); acc B (7,7) cardinally
 	# adjacent to pole (6,7). Poles (6,5) and (6,7) are Chebyshev 2 → same
-	# component (POLE_RANGE=3).
+	# component (basic tier range 3).
 	world.place_building(Buildings.Type.WINDMILL, Vector2i(4, 5))
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 5))
 	world.place_building(Buildings.Type.POWER_POLE, Vector2i(6, 7))

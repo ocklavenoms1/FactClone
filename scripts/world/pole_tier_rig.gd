@@ -91,7 +91,8 @@ const PAVE_MAX: Vector2i = Vector2i(30, 7)
 
 # --- THE BUS: mixed-tier bridge demo ---------------------------------------
 # Everything that carries power sits on row y = 2. Cluster A basic poles at
-# x = 0 and 3 (Chebyshev 3 apart: exactly POLE_RANGE, so they join). Cluster B
+# x = 0 and 3 (Chebyshev 3 apart: exactly the basic tier's range, so they
+# join). Cluster B
 # at x = 16 and 19. The clusters are 13 apart, far beyond basic range 3, and
 # the medium pole cannot bridge them either: it reaches cluster A at 5 but is
 # 8 from cluster B. Only the substation closes that gap.
@@ -218,10 +219,11 @@ const INSERTER_OFFSETS: Array = [
 #     sit at x <= 7, outside the substation's covered span (x 8..17 — TEN
 #     columns, anchor-4 .. anchor+1+4, per the 10x10 coverage corrected in
 #     commit f476ef7) and 3+ from cluster A's far pole. Nothing but
-#     SUPPLY_RADIUS 2 reaches them, so all six drop out if the medium tier
+#     a supply radius of 2 reaches them, so all six drop out if the medium tier
 #     regresses to radius 1.
 #   - of the four substation lamps, (8,5) is at footprint distance exactly 4
-#     and is the ONE that pins SUPPLY_RADIUS 4: at radius 3 it drops out,
+#     and is the ONE that pins the substation's supply radius of 4: at
+#     radius 3 it drops out,
 #     demand becomes 39 and sub-case (2) reddens. The other three — (16,5),
 #     (10,6), (14,6) — are at footprint distance 3. They are still substation-
 #     EXCLUSIVE (no basic pole is within 1, the medium pole is not within 2),

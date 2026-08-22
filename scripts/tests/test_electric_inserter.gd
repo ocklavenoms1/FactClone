@@ -74,7 +74,7 @@ const ELECTRIC_DEMAND: int = 5
 # Sub-case 4 layout (inside the stone patch painted by _make_world).
 # Windmill 2x2 at (7,8) covers (7,8)(8,8)(7,9)(8,9); the pole sits on its
 # east edge cell, and the inserter sits at Chebyshev 1 from the pole so it
-# falls inside PowerNetwork.SUPPLY_RADIUS.
+# falls inside the basic pole's supply radius.
 const WINDMILL_POS: Vector2i  = Vector2i(7, 8)
 const POLE_POS: Vector2i      = Vector2i(9, 8)
 const ELEC_INS_POS: Vector2i  = Vector2i(10, 9)
@@ -101,7 +101,7 @@ const FUEL_SENTINEL: int = 7
 # lamps at ElectricLamp.DEMAND = 1 each bring total demand to 12. 6/12 = 0.5.
 #
 # The ballast hangs off a SECOND pole at (9,11) — Chebyshev 3 from POLE_POS
-# (9,8), which is exactly PowerNetwork.POLE_RANGE, so the two poles form ONE
+# (9,8), which is exactly the basic pole's wire range, so the two poles form ONE
 # component and one satisfaction number covers both. A second pole rather
 # than more lamps around the first because the first pole's 3x3 supply area
 # is already full: the windmill footprint, the source chest and the inserter.
@@ -674,7 +674,7 @@ static func _case_no_fuel_path(parent: Node, failures: Array) -> void:
 # ===========================================================================
 # (4) CONSTANT POWER DEMAND.
 # The electric inserter registers ELECTRIC_DEMAND on the component that
-# supplies it (CONSUMER rule — Chebyshev SUPPLY_RADIUS around a pole, the
+# supplies it (CONSUMER rule — a pole's Chebyshev supply radius around it, the
 # same rule lamps use), and that draw is CONSTANT.
 #
 # Constant, not duty-cycled, is a locked design decision. PowerNetwork.
@@ -918,7 +918,7 @@ static func _case_fuel_tier_unaffected(parent: Node, failures: Array) -> void:
 #
 # The outage is produced by REMOVING THE POLE rather than by poking state:
 # that is the move a player actually makes, and it exercises the real
-# supply-area lookup (no pole within SUPPLY_RADIUS -> satisfaction 0.0)
+# supply-area lookup (no pole within the supply radius -> satisfaction 0.0)
 # instead of a value the test invented.
 # ===========================================================================
 static func _case_no_power_stall_and_hold(parent: Node, failures: Array) -> void:
@@ -1812,8 +1812,8 @@ static func _epsilon_rig_satisfaction(world, failures: Array, label: String) -> 
 ## (or -1.0 if the pole is not in a network at all).
 ##
 ## Supply and demand are asserted alongside satisfaction so a layout drift —
-## a lamp landing outside SUPPLY_RADIUS, the ballast pole falling out of
-## POLE_RANGE — is diagnosed as the wrong number rather than as a mysterious
+## a lamp landing outside the supply radius, the ballast pole falling out of
+## wire range — is diagnosed as the wrong number rather than as a mysterious
 ## timing failure several assertions later.
 static func _verified_satisfaction(world, failures: Array, label: String, want_sat: float, want_demand: int) -> float:
 	PowerNetwork.update_supply_demand(world)
@@ -1914,8 +1914,8 @@ static func _click_filter_slot(panel, button_index: int) -> bool:
 	panel._gui_input(ev)
 	return true
 
-## Chebyshev (chessboard) distance — the metric PowerNetwork.SUPPLY_RADIUS
-## is expressed in.
+## Chebyshev (chessboard) distance — the metric both PowerNetwork range
+## tables, POLE_RANGE_BY_TYPE and SUPPLY_RADIUS_BY_TYPE, are expressed in.
 static func _chebyshev(a: Vector2i, b: Vector2i) -> int:
 	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 

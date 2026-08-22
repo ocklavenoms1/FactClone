@@ -71,21 +71,22 @@ const SUPPLY_RADIUS_BY_TYPE: Dictionary = {
 }
 const SUPPLY_RADIUS_DEFAULT: int = 1
 
-# The widest supply radius any tier declares. Derived at first use rather than
-# hardcoded so it cannot drift from the table above.
-static var _max_supply_radius_cache: int = -1
-
 ## Widest supply radius across all pole tiers — the consumer-side scan box
-## size. NO CALLER YET: Task 5's resolver sizes its box to this and then
-## filters per-pole, because the consumer does not know what tier will answer.
-## Landed here so the table and the number derived from it stay in one file.
+## size. Derived from the table rather than hardcoded so it cannot drift from
+## it. NO CALLER YET: Task 5's resolver sizes its box to this and then filters
+## per-pole, because the consumer does not know what tier will answer. Landed
+## here so the table and the number derived from it stay in one file.
+##
+## Deliberately UNCACHED. The plan suggested memoising into a static var; that
+## is three iterations of a const Dictionary, called once per consumer scan
+## that then does up to 81 cell checks, so the cache would have paid for
+## nothing and would have been this module's only mutable static — the one
+## piece of state a test could leave dirty for the next test in the runner.
 static func max_supply_radius() -> int:
-	if _max_supply_radius_cache < 0:
-		var m: int = SUPPLY_RADIUS_DEFAULT
-		for t in SUPPLY_RADIUS_BY_TYPE:
-			m = max(m, int(SUPPLY_RADIUS_BY_TYPE[t]))
-		_max_supply_radius_cache = m
-	return _max_supply_radius_cache
+	var m: int = SUPPLY_RADIUS_DEFAULT
+	for t in SUPPLY_RADIUS_BY_TYPE:
+		m = max(m, int(SUPPLY_RADIUS_BY_TYPE[t]))
+	return m
 
 ## Wire range for one pole type.
 static func pole_range(t: int) -> int:
@@ -103,8 +104,17 @@ static func supply_radius(t: int) -> int:
 ##
 ## The divergence is dangerous in one direction specifically. If the renderer
 ## is STRICTER than the BFS, poles are in one component but no wire is drawn —
-## an invisible connection, with no test or visual signal. (Looser is caught by
-## the renderer's same-component guard.) One predicate makes that unreachable.
+## an invisible connection, with no test or visual signal. One predicate makes
+## that unreachable.
+##
+## NOTHING CATCHES THE LOOSER DIRECTION EITHER, so do not read the above as
+## "only one direction matters". An earlier draft of this docstring claimed
+## the renderer's same-component guard caught it. It does not: both endpoints
+## there come out of one poles_by_comp bucket, so their ids are equal by
+## construction and the guard cannot fire under any predicate — see
+## grid_world._draw_power_wires. Concretely, for TASK 7: an MST edge pass that
+## skips this function and re-derives the rule has no backstop of any kind.
+## Call it.
 ##
 ## RULE: EITHER-REACHES — chebyshev(a, b) <= max(range(a), range(b)).
 ## Symmetric, so the BFS stays an undirected flood fill and component grouping
@@ -112,6 +122,13 @@ static func supply_radius(t: int) -> int:
 ## already chose for consumers: a pole reaches OUT to things that do not reach
 ## back. A min() rule would cap a substation talking to basic poles at the
 ## basic pole's 3, making the backbone tier useless in mixed networks.
+##
+## ONE EXCEPTION TO THE RULE AS STATED, because the rule alone would say yes:
+## a pole is NOT connected to ITSELF. chebyshev(a, a) is 0, which is within
+## every range, so the arithmetic would return true. rebuild_topology's BFS
+## depends on the false — it iterates all of pole_anchors including the pole
+## it is expanding from, with no self-skip guard, and relies on this to avoid
+## re-queueing it.
 static func poles_connected(world, anchor_a: Vector2i, anchor_b: Vector2i) -> bool:
 	if anchor_a == anchor_b:
 		return false
@@ -393,10 +410,12 @@ static func _adjacent_component_id(world, b: Building) -> int:
 	# Widening it alone here would also be UNVERIFIABLE rather than dangerous,
 	# which is the actual reason it waits: no layout in the project puts a
 	# generator or accumulator against a new tier. electric_rig places neither
-	# tier at all, and both of pole_tier_rig's steam generators sit on basic
-	# poles (GEN_A's N edge (0,2) (1,2) and GEN_B's (16,2) (17,2) are all
-	# CLUSTER_A/B_POLES). So the change would move no number in the suite, and
-	# a behaviour change nothing can observe is one nothing can review.
+	# tier at all, and each of pole_tier_rig's two steam generators touches
+	# exactly ONE basic pole: GEN_A's N edge is (0,2) (1,2) and only (0,2) is
+	# in CLUSTER_A_POLES [(0,2) (3,2)], GEN_B's is (16,2) (17,2) and only
+	# (16,2) is in CLUSTER_B_POLES [(16,2) (19,2)]. The other cell of each pair
+	# is a LAMP. So the change would move no number in the suite, and a
+	# behaviour change nothing can observe is one nothing can review.
 	for cell in Buildings.all_edge_cells(b.type, b.anchor):
 		if not world.has_building_at(cell):
 			continue

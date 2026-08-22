@@ -1620,6 +1620,10 @@ func _draw() -> void:
 
 # ---------- power network rendering ----------
 
+# How far down its tile a 1x1 pole's wires attach, as a fraction of TILE_SIZE.
+# Matches power_pole.gd's crossarm offset exactly. See _pole_wire_anchor.
+const MAST_WIRE_Y: float = 0.16
+
 ## Draw wires between poles: mesh-within-network. For each pair of poles
 ## (i, j) with j > i (dedup), draw a wire if PowerNetwork.poles_connected
 ## says they are wired AND they share the same component. Matches the
@@ -1654,9 +1658,16 @@ func _draw() -> void:
 ## brown if dead. Called from _draw between building draws and post-
 ## pass indicators.
 ##
-## Complexity: O(N²) per component per frame. Trivial for ~50 poles.
-## If pole counts climb past ~500 per component, cache the edge list
-## and invalidate on _power_network_dirty.
+## Complexity: O(N²) per component per frame, and each pair now costs more
+## than it used to — a static call into PowerNetwork.poles_connected plus its
+## two `buildings` lookups and two POLE_TYPES lookups, where the old inline
+## form was about three integer ops. That trade bought the shared predicate
+## and is the right one at this scale, but the ~500-poles-per-component figure
+## below was measured against the cheap version and should be re-measured, not
+## trusted, if anyone goes looking for the ceiling. The fix is the same either
+## way: cache the edge list and invalidate on _power_network_dirty. Task 7's
+## MST pass reduces the DRAWN edges but still visits every pair to build the
+## tree, so it does not change this.
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
@@ -1692,7 +1703,39 @@ func _draw_power_wires() -> void:
 				# for why it is still here rather than deleted.
 				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
 					continue
-				# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
-				var a_top: Vector2 = Vector2(pa.x * TILE_SIZE + TILE_SIZE * 0.5, pa.y * TILE_SIZE + TILE_SIZE * 0.16)
-				var b_top: Vector2 = Vector2(pb.x * TILE_SIZE + TILE_SIZE * 0.5, pb.y * TILE_SIZE + TILE_SIZE * 0.16)
-				draw_line(a_top, b_top, wire_color, WIRE_THICKNESS)
+				# Draw the wire, footprint-derived at BOTH ends.
+				draw_line(_pole_wire_anchor(pa), _pole_wire_anchor(pb), wire_color, WIRE_THICKNESS)
+
+## Where one pole's wires terminate, in world pixels.
+##
+## NOT the anchor cell's centre-top, which is what this used to be. The anchor
+## of a multi-cell tier is its WEST/NORTH cell, so an anchor-based endpoint
+## puts every substation wire over the TOP-LEFT QUARTER of a body that is two
+## tiles on a side. Task 4 created that: substations only entered
+## _pole_component then, so they only started being wire-drawn then. Derived
+## from the FOOTPRINT instead, which is orientation-independent.
+##
+## Horizontally: the footprint's centre, always.
+##
+## Vertically: the 1x1 mast tiers terminate near the top, at MAST_WIRE_Y —
+## power_pole.gd draws its single crossarm at exactly that offset, and on
+## medium_pole.gd (crossarms at 0.10 and 0.26) it lands on the shaft between
+## the two, which reads correctly. The 2x2 substation has NO mast:
+## substation.gd paints a solid body with insulators at the four cell centres,
+## so its wires meet the body centre, the only point equidistant from all four.
+## Footprint HEIGHT is the discriminator because in this project the mast
+## tiers are exactly the 1x1 ones — if a 1x2 masted tier ever exists, this
+## needs a real per-tier attachment point rather than a shape test.
+##
+## For every 1x1 pole this returns bit-identical values to the old inline
+## expression, so no shipped basic-pole visual moved.
+##
+## Task 7's MST rewrite draws a different SET of wires but the same endpoints,
+## and should call this rather than recomputing.
+func _pole_wire_anchor(anchor: Vector2i) -> Vector2:
+	var b: Building = buildings.get(anchor, null)
+	var fp: Vector2i = Vector2i(1, 1) if b == null else Buildings.footprint_of(b.type)
+	var x: float = (float(anchor.x) + float(fp.x) * 0.5) * float(TILE_SIZE)
+	if fp.y == 1:
+		return Vector2(x, float(anchor.y) * float(TILE_SIZE) + float(TILE_SIZE) * MAST_WIRE_Y)
+	return Vector2(x, (float(anchor.y) + float(fp.y) * 0.5) * float(TILE_SIZE))

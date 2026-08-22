@@ -21,8 +21,13 @@ extends RefCounted
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const HotbarScript = preload("res://scripts/ui/hotbar.gd")
 
+## Short on purpose. The sub-case index in this file's header is the list, and
+## it is the thing that stays accurate — a name that concatenates every
+## sub-case grows unreadable across Tasks 5-7 and drifts the moment one is
+## added without renaming. Failures print their own "(N) ..." prefix, so the
+## runner line never needs to enumerate what passed.
 static func test_name() -> String:
-	return "pole tiers (network-type set + registration + either-reaches + order independence + predicate is the graph)"
+	return "pole tiers (tables + either-reaches + shared predicate)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -264,10 +269,25 @@ static func _case_either_reaches(parent: Node, failures: Array) -> void:
 # reach 5) and leaves three singletons. The grouping comparison below is what
 # catches that.
 #
-# The two GROUPING assertions catch a directed predicate. The "should be
-# connected" assertion catches the degenerate opposite — a predicate that
-# returns false for everything groups both layouts identically (all singletons)
-# and would slip past the comparison alone.
+# FOUR assertions, and each one has a mutation that reaches it and no other:
+#   1. joined-grouping matches      <- directed predicate (verified: forward
+#                                      true, mirror false)
+#   2. component count matches      <- same, from the other side (2 vs 3)
+#   3. the pair IS joined           <- a predicate that returns false for
+#                                      everything, which groups both layouts
+#                                      identically and slips past 1 and 2
+#   4. the far pole is NOT joined   <- a predicate that returns true for
+#                                      everything, same reason
+#
+# There was a FIFTH — "the far pole groups the same in both layouts" — and it
+# is deleted rather than kept for symmetry, because no single-line change to
+# the predicate could redden it. The layout is exactly mirror-symmetric and
+# the far pair is 25 apart against a maximum table range of 11, so joining
+# them at all takes a predicate that ignores distance, which then joins them
+# in BOTH layouts and leaves the comparison equal. Assertion 2 already covers
+# far-pole grouping and assertion 4 already covers the distance-blind case.
+# We replaced the plan's original sub-case (4) for carrying an assertion that
+# could not fail. The replacement does not get to carry one forward.
 # ===========================================================================
 static func _case_order_independence(parent: Node, failures: Array) -> void:
 	# Forward layout: the medium pole is lex-FIRST.
@@ -280,10 +300,17 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 	var m_basic: Vector2i = Vector2i(30, 5)
 	var m_far: Vector2i = Vector2i(10, 5)
 
+	# Placement is CHECKED, as it is in (3) and (5). Silently dropping a pole
+	# would leave both layouts with the same too-few poles, so all three
+	# comparisons would agree at 0 == 0 and the only red would be assertion 3,
+	# which reads as a range bug. Nothing about that failure would point at
+	# the setup.
 	var forward = _make_world(parent)
-	forward.place_building(Buildings.Type.MEDIUM_POLE, f_medium)
-	forward.place_building(Buildings.Type.POWER_POLE, f_basic)
-	forward.place_building(Buildings.Type.POWER_POLE, f_far)
+	if not _place_all(forward, [
+			[Buildings.Type.MEDIUM_POLE, f_medium], [Buildings.Type.POWER_POLE, f_basic],
+			[Buildings.Type.POWER_POLE, f_far]], failures, "(4) forward"):
+		_teardown(forward)
+		return
 	PowerNetwork.rebuild_topology(forward)
 	var f_joined: bool = int(forward._pole_component.get(f_medium, -1)) == int(forward._pole_component.get(f_basic, -2))
 	var f_far_joined: bool = int(forward._pole_component.get(f_medium, -1)) == int(forward._pole_component.get(f_far, -2))
@@ -291,19 +318,18 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 	_teardown(forward)
 
 	var mirror = _make_world(parent)
-	mirror.place_building(Buildings.Type.MEDIUM_POLE, m_medium)
-	mirror.place_building(Buildings.Type.POWER_POLE, m_basic)
-	mirror.place_building(Buildings.Type.POWER_POLE, m_far)
+	if not _place_all(mirror, [
+			[Buildings.Type.MEDIUM_POLE, m_medium], [Buildings.Type.POWER_POLE, m_basic],
+			[Buildings.Type.POWER_POLE, m_far]], failures, "(4) mirror"):
+		_teardown(mirror)
+		return
 	PowerNetwork.rebuild_topology(mirror)
 	var m_joined: bool = int(mirror._pole_component.get(m_medium, -1)) == int(mirror._pole_component.get(m_basic, -2))
-	var m_far_joined: bool = int(mirror._pole_component.get(m_medium, -1)) == int(mirror._pole_component.get(m_far, -2))
 	var m_comps: int = _component_count(mirror)
 	_teardown(mirror)
 
 	_check(failures, f_joined == m_joined,
 		"(4) the medium pole and the basic pole 5 away group differently in the mirrored layout (forward=%s mirror=%s), which means the connection predicate is not symmetric — it is reading the range of whichever pole the lex-sorted walk expanded from" % [str(f_joined), str(m_joined)])
-	_check(failures, f_far_joined == m_far_joined,
-		"(4) the far pole groups differently in the mirrored layout (forward=%s mirror=%s)" % [str(f_far_joined), str(m_far_joined)])
 	_check(failures, f_comps == m_comps,
 		"(4) the mirrored layout produces a different number of components (forward=%d mirror=%d) from the same tiers at the same distances" % [f_comps, m_comps])
 	_check(failures, f_joined,
@@ -445,6 +471,19 @@ static func _case_predicate_is_the_graph(parent: Node, failures: Array) -> void:
 	_check(failures, int(world._pole_component.get(group_one[0], -1)) != int(world._pole_component.get(group_two[0], -2)),
 		"(5c) the two groups must stay in SEPARATE components — the closest pair across them is F basic at (45,5) and E basic at (32,5) at distance 13 against basic range 3, and F against the substation at footprint distance 24 against range 11. %s and %s came back in one component" % [String(labels[group_one[0]]), String(labels[group_two[0]])])
 	_teardown(world)
+
+## Place every [type, anchor] row, reporting the world's own placement error
+## on the first failure. Returns false if any placement was refused, so the
+## caller can abandon a sub-case rather than assert against a partial layout.
+static func _place_all(world, rows: Array, failures: Array, prefix: String) -> bool:
+	for row in rows:
+		var t: int = int(row[0])
+		var pos: Vector2i = row[1]
+		if not world.place_building(t, pos):
+			_check(failures, false,
+				"%s SETUP failed placing type %d at %s: %s" % [prefix, t, str(pos), str(world.last_building_place_error)])
+			return false
+	return true
 
 ## Number of distinct component ids currently in world._pole_component.
 static func _component_count(world) -> int:

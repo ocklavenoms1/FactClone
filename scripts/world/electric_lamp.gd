@@ -54,9 +54,15 @@ static func info_lines(b: Building, world) -> Array:
 	var lines: Array = []
 	lines.append("Demand: %d unit" % DEMAND)
 	# Consumers use the wireless supply-area scan (Factorio-style), not
-	# strict cardinal adjacency. A pole within its own tier's supply radius
-	# (PowerNetwork.SUPPLY_RADIUS_BY_TYPE, via supply_radius()) of any cell
+	# strict cardinal adjacency: a pole within the supply radius of any cell
 	# of the lamp's footprint = network match.
+	#
+	# The radius is NOT yet per-tier here, whatever the tables in
+	# power_network.gd suggest. _supply_component_id is still hardcoded to
+	# SUPPLY_RADIUS_DEFAULT (1) and still skips any pole that is not a
+	# POWER_POLE, so a lamp beside a medium pole or a substation reports
+	# "no pole within supply range" on this panel. Task 5 rewrites that
+	# function against SUPPLY_RADIUS_BY_TYPE and POLE_TYPES.
 	var comp_id: int = PowerNetwork._supply_component_id(world, b)
 	if comp_id < 0:
 		lines.append("Network: (no pole within supply range)")

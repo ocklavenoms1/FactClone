@@ -12,17 +12,23 @@ extends RefCounted
 ##
 ## Beware the two different 9s in this session. 9x9 is (2*4+1)^2, the 1x1
 ## formula, and it is what a CONSUMER searches: power_satisfaction_at scans
-## (2r + 1)^2 outward from the consumer itself — r being a supply radius from
-## PowerNetwork.SUPPLY_RADIUS_BY_TYPE, read through supply_radius(), which
-## replaced the flat SUPPLY_RADIUS const when the tables went per-tier in
-## Task 4 — independent of any pole's footprint. That box is odd-sided
-## because it centres on a single
-## cell — which is exactly why it cannot describe an even-sided footprint.
-## Sizing a substation's scan box to 9 silently drops its far edge.
+## (2r + 1)^2 outward from the consumer itself, independent of any pole's
+## footprint. That box is odd-sided because it centres on a single cell —
+## which is exactly why it cannot describe an even-sided footprint. Sizing a
+## substation's scan box to 9 silently drops its far edge.
+##
+## The r above is NOT yet 4, or per-tier at all. Task 4 landed
+## PowerNetwork.SUPPLY_RADIUS_BY_TYPE and supply_radius() but wired neither
+## consumer path to them: power_satisfaction_at and _supply_component_id both
+## still use SUPPLY_RADIUS_DEFAULT (1). Task 5 connects them, and only then
+## does this substation project anything.
 ##
 ## This is the project's first MULTI-CELL POLE. Every distance computation in
 ## power_network.gd that assumes a pole occupies exactly one cell has to be
-## taught otherwise; that work lands in a later task.
+## taught otherwise. The WIRE side learned in Task 4 — PowerNetwork
+## ._pole_distance measures footprint to footprint, and
+## grid_world._pole_wire_anchor hangs this tier's wires from its body centre
+## rather than its anchor cell. The SUPPLY side is still Task 5's.
 ##
 ## State: empty {} (network membership lives at world._pole_component).
 

@@ -127,17 +127,23 @@ enum Type {
 	# Electricity Arc Session 3 (session-electricity-pole-tiers): pole tiers.
 	# Medium Pole — 1x1, wire range 6, supply radius 2.
 	# Substation  — 2x2, wire range 11, supply radius 4. The backbone piece.
-	# Both BEHAVE like POWER_POLE, differing only in the range/radius numbers.
 	# They are NOT the POWER_POLE type: each gets its own enum value, its own
 	# DATA row, and its own make(), so `b.type` is never POWER_POLE for them.
 	# Every `type == POWER_POLE` test is therefore a place the tiers must be
 	# added by hand — see POLE_TYPES below, and the guards in power_network.gd.
-	# Both became placeable in Task 2: DATA rows, make/draw/info_lines dispatch
-	# and hotbar slots all exist now. What does NOT exist yet is the parametric
-	# POLE_RANGE_BY_TYPE / SUPPLY_RADIUS_BY_TYPE pair, so rebuild_topology
-	# still collects POWER_POLE alone and a placed tier forms no network and
-	# powers nothing. Those tables land in a later task. Appended at the END of
-	# the enum so every previously-saved type keeps its integer value.
+	# Both became placeable in Task 2 (DATA rows, make/draw/info_lines
+	# dispatch, hotbar slots) and became real network members in Task 4:
+	# POLE_RANGE_BY_TYPE and SUPPLY_RADIUS_BY_TYPE exist, rebuild_topology
+	# collects every type in POLE_TYPES, and a placed tier forms and joins
+	# networks and is drawn with wires.
+	# STILL OUTSTANDING (Task 5): what they do for OTHER buildings. The
+	# POWER_POLE-only filters in _supply_component_id and
+	# _adjacent_component_id mean a consumer beside one contributes no demand
+	# and a generator touching one feeds in no supply — while
+	# power_satisfaction_at, which has no type filter, already answers for them
+	# at the basic radius. power_pole.gd's docstring has the full breakdown.
+	# Appended at the END of the enum so every previously-saved type keeps its
+	# integer value.
 	MEDIUM_POLE,
 	SUBSTATION,
 }
@@ -1392,9 +1398,11 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Smelter.info_lines(b, world)
 		# All three wire tiers share PowerPole.info_lines: it reads nothing
 		# tier-specific, only network membership at b.anchor via
-		# PowerNetwork.network_id_at. Until the resolver learns about the new
-		# tiers, network_id_at returns -1 for them and the panel reads
-		# "Network: (not connected)" — correct, not a crash.
+		# PowerNetwork.network_id_at. Since Task 4 that returns a REAL id for
+		# every tier — network_id_at is a plain _pole_component lookup and
+		# rebuild_topology now fills it for all of POLE_TYPES — so the panel
+		# shows the network number, capacity and satisfaction for a medium
+		# pole and a substation exactly as it does for a basic one.
 		Type.POWER_POLE, Type.MEDIUM_POLE, Type.SUBSTATION:
 			return PowerPole.info_lines(b, world)
 		Type.WATER_WHEEL:
