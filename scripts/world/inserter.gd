@@ -757,19 +757,51 @@ static func info_lines(b: Building, world) -> Array:
 			# have different fixes, and the whole value of the line is telling
 			# the player WHICH one they are looking at.
 			#
-			# The remedy names the supply rule literally, and since Task 5 that
-			# rule is PER-TIER: every pole tier projects its own supply area,
-			# so a basic pole has to be within 1 while a substation reaches 4.
-			# Both numbers are READ FROM THE TABLE — supply_radius() and
-			# max_supply_radius() over PowerNetwork.SUPPLY_RADIUS_BY_TYPE — so
-			# retuning a tier retunes this line instead of leaving it lying.
-			# It used to say "within 1 tile" flat, which was exactly right only
-			# while the basic pole was the one tier that projected anything.
-			status = "NO POWER — no pole in range (a basic pole reaches %d, the widest tier %d)" % [
-				PowerNetwork.supply_radius(Buildings.Type.POWER_POLE),
-				PowerNetwork.max_supply_radius(),
-			]
+			# PLAIN AND IMPERATIVE like every other arm here, and carrying no
+			# numbers ON PURPOSE. info_panel.gd draws each row at
+			# PANEL_WIDTH - PADDING * 2 = 220 px through draw_string, whose
+			# default overrun behaviour is NO_TRIMMING — so an over-long row
+			# spills past the panel's own background and then off the right of
+			# the viewport about 246 px in. MEASURED against the panel's real
+			# font (Open Sans SemiBold at size 12):
+			#
+			#   "Status: NO POWER — connect a pole"          211 px, fits
+			#   ...— no pole in range (a basic pole ...)     457 px, read as
+			#                          "NO POWER — no pole in range (a b"
+			#   ...— connect a pole within 1 tile            282 px, read as
+			#                          "NO POWER — connect a pole withi"
+			#
+			# So the per-tier numbers were invisible, and so was the flat "1
+			# tile" that preceded them. They are not lost here — they moved to
+			# their own rows below, where each has the full 220 px to itself.
+			status = "NO POWER — connect a pole"
 	lines.append("Status: %s" % status)
+	# The per-tier supply reach, and ONLY while the inserter is actually
+	# stalled for want of a pole — that is the one moment the number answers a
+	# question the player is asking, and STATE_NO_POWER is reachable on the
+	# electric tiers alone (see the state's own comment above).
+	#
+	# TWO ROWS because one labelled row does not fit: "Pole reach: Power 1,
+	# Medium 2, Substation 4" measures 257 px against the panel's 220, while
+	# the label (109 px) and the data (196 px) each clear it on their own.
+	#
+	# DERIVED from Buildings.POLE_TYPES and PowerNetwork.SUPPLY_RADIUS_BY_TYPE
+	# rather than written out, so retuning a radius or adding a fourth tier
+	# updates this panel instead of leaving it lying — which is exactly what
+	# the flat "within 1 tile" string did the moment the medium pole and the
+	# substation shipped. Names come from DATA through name_of() with a
+	# trailing " Pole" trimmed: it costs five characters each on "Power Pole"
+	# and "Medium Pole" and "Substation" has no suffix to lose.
+	if s == STATE_NO_POWER:
+		var reaches: PackedStringArray = PackedStringArray()
+		for pole_t in Buildings.POLE_TYPES:
+			var pt: int = int(pole_t)
+			reaches.append("%s %d" % [
+				Buildings.name_of(pt).trim_suffix(" Pole"),
+				PowerNetwork.supply_radius(pt),
+			])
+		lines.append("Pole reach, in tiles:")
+		lines.append("  %s" % ", ".join(reaches))
 	# Held item.
 	var held: int = held_item_type(b)
 	if held >= 0:

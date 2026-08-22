@@ -14,10 +14,20 @@ extends RefCounted
 ##
 ##   (1) layout lands ......................... Both tiers became placeable at
 ##       Task 2, so nothing here depends on network logic.
-##   (2) demand is exactly 40 ................. Task 5. The ten lamps that only
-##       the medium pole and the substation can reach need per-tier supply
-##       radii AND the substation's footprint projection to resolve to a
-##       component at all. Read 30 of 40 until then.
+##   (2) demand is exactly 40 ................. Task 5, and specifically the
+##       PER-TIER supply radii: the ten lamps that only the medium pole and
+##       the substation can reach resolve to no component without them, which
+##       is why this read 30 of 40 until Task 5.
+##       NOT the substation's footprint projection, despite the 2x2 tier being
+##       involved. All four substation lamps sit at ANCHOR-Chebyshev exactly 4
+##       as well — (8,5) (16,5) (10,6) (14,6) against the anchor at (12,2) —
+##       so an anchor-only lookup still covers every one of them. Verified by
+##       mutation: with world._pole_cells reduced to `_pole_cells[p] = p` this
+##       whole file stays GREEN, while test_pole_tiers (6) fires on three
+##       far-edge probes and test_load_network_invalidation (2) fires on its
+##       lamp. Those two are where footprint projection is covered — do not
+##       come here looking for a _pole_cells regression, this rig cannot see
+##       one.
 ##   (3) the substation bridges ............... Task 4. rebuild_topology
 ##       collects every type in Buildings.POLE_TYPES and joins them under the
 ##       either-reaches rule. Before that the two new tiers were invisible to
