@@ -30,7 +30,7 @@
       },
       "yaws": [],
       "status": "real",
-      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite.",
+      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite. PALETTE: generated against the legacy 6-member palette. Its albedo_remap targets those old hexes and is retained so the accepted appearance is unchanged. Regenerate against the 5-member separable palette; a new-palette remap on this asset recolours rather than corrects (only 2 of 5 anchors match, oak clamps at 2.5, result goes olive).",
       "albedo_gain": [
         0.4168,
         0.535,
@@ -169,7 +169,8 @@
           "forge_brown"
         ]
       },
-      "albedo_correction": "remap"
+      "albedo_correction": "remap",
+      "palette_era": "legacy-6"
     },
     {
       "name": "chest",
@@ -208,7 +209,7 @@
         270
       ],
       "status": "test",
-      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor.",
+      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor. PALETTE: generated against the legacy 6-member palette. Its albedo_remap targets those old hexes and is retained so the accepted appearance is unchanged. Regenerate against the 5-member separable palette; a new-palette remap on this asset recolours rather than corrects (only 2 of 5 anchors match, oak clamps at 2.5, result goes olive).",
       "albedo_gain": [
         0.4168,
         0.535,
@@ -347,7 +348,8 @@
           "forge_brown"
         ]
       },
-      "albedo_correction": "remap"
+      "albedo_correction": "remap",
+      "palette_era": "legacy-6"
     }
   ]
 }

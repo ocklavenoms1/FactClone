@@ -79,6 +79,17 @@ foreach ($a in $manifest.assets) {
     $d = python (Join-Path $ArtDir "tools\downsample.py") $metaPath
     $d | ForEach-Object { Write-Host "  $_" }
     if ($LASTEXITCODE -ne 0) { $failed += $a.name; continue }
+
+    # Tripwire: a state that renders identical to another means the transform
+    # silently did nothing. Two such failures have shipped through this
+    # pipeline already, both caught only by a human looking at pixels.
+    $s = python (Join-Path $ArtDir "tools\assert_states.py") $metaPath
+    $s | Where-Object { $_ -match "FAIL|ok  |--  " } | ForEach-Object { Write-Host "$_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  STATE ASSERTION FAILED for $($a.name)" -ForegroundColor Red
+        $failed += $a.name
+        continue
+    }
     $built += $a.name
 }
 

@@ -49,6 +49,7 @@
       "metallic_after": 0.0
     }
   ],
+  "albedo_gain_applied": null,
   "masters": [
     {
       "tag": "chest",

@@ -125,7 +125,8 @@ art/
     palette_drift.py       measures Tripo's palette shift; emits the albedo gain
     glow_layer.py          extracts the fire as a separate additive layer
     overhang.py            containment: lateral appendages past the body block
-    detail_density.py      feature count per tile + high-frequency survival
+    detail_density.py      HF gate + feature/thickness diagnostics
+    assert_states.py       tripwire: declared states must actually differ
 ```
 
 `template.blend` is generated from code, so the lock lives in a reviewable
@@ -742,3 +743,31 @@ Blender is expected at `C:\Program Files\Blender Foundation\Blender 5.2\blender.
 The pipeline is complete and verified end to end. What it now needs is assets:
 three concept images in one batch, verified by silhouette, through Tripo
 image-to-3D. Everything up to that point has passed.
+
+---
+
+## 12. Silent-failure tripwires
+
+Two failures have shipped through this pipeline and **both were caught only by
+a human looking at pixels**, while every log line reported success:
+
+1. The glTF importer's `QUATERNION` rotation mode made an 8-way turnaround
+   render eight identical images, with no error anywhere.
+2. Applying the albedo correction *before* the emission mask was detected made
+   the smelting state render identical to idle — while the log printed
+   `STATE smelting: mask-driven emission on 1 material(s)` throughout.
+
+They share a shape: **a transform silently did nothing, and every downstream
+report claimed success.** Logs confirm that code ran, not that it had an effect.
+
+`art/tools/assert_states.py` runs on every build and fails it if two declared
+states of the same asset differ by less than 0.25% of opaque pixels (at a
+per-channel threshold of 8/255). Deliberately loose — it is a tripwire for
+"did nothing at all", not a quality check. The smelter's fire changes **4.48%**,
+an order of magnitude above the floor.
+
+Verified in both directions: it passes on a good build, and forcing the two
+states to be identical makes it fail with a non-zero exit.
+
+The general lesson, worth applying to the next transform added here: **assert on
+the output, not on the fact that the code ran.**

@@ -67,6 +67,7 @@
       "metallic_after": 0.55
     }
   ],
+  "albedo_gain_applied": null,
   "masters": [
     {
       "tag": "power_pole",

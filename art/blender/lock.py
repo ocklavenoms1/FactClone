@@ -72,13 +72,31 @@ EMISSION_CEILING = 2.5
 # `forge_brown` was called `hot_iron` and was expected to signal emission. It
 # never does again: it means "warm-toned metal" and nothing more. Heat is a
 # STATE, and states are keyed on the mask colour, not on a palette member.
+# REBUILT FOR CHROMATICITY SEPARABILITY.
+#
+# The old six-member palette put four members at hue 17-30 deg, separated only
+# by VALUE. The cluster matcher is value-invariant by design, so those four were
+# mutually indistinguishable to it - which is why forge_brown mismatched at
+# 0.279 and fired_clay needed a 4.4x gain clamp. Those were not matcher
+# weaknesses; they were the palette telling us it could not be matched.
+# fired_clay and forge_brown are removed: a member Tripo cannot reproduce and
+# the pipeline cannot correct is a liability, not a member.
+#
+# Minimum pairwise chromaticity distance is now 0.2743 = 1.83x the matcher's
+# 0.15 confidence threshold. Every pair clears comfortably.
+#
+# THE STRUCTURAL RULE, learned here: only ONE member may sit near the white
+# point. A near-neutral colour's chromaticity is the white point, so its
+# distance to anything else is capped by that other colour's saturation. Two
+# near-neutrals can never be told apart. fieldstone holds that slot at
+# saturation 0.06; wrought_iron was a second near-neutral at 0.25 and had to be
+# pushed to 0.43 to clear it.
 PALETTE = {
-    "fieldstone": "#5A5E58",
-    "fired_clay": "#8A6A4F",
-    "weathered_oak": "#6B4E32",
-    "wrought_iron": "#46504E",
-    "leather": "#7A5A42",
-    "forge_brown": "#8C4A32",
+    "fieldstone": "#5A5E58",     # near-neutral green-grey - stone
+    "wrought_iron": "#36455E",   # cool blue-grey - ironwork
+    "weathered_oak": "#7A6633",  # warm yellow-brown - timber
+    "leather": "#7E3B2C",        # red-brown - leather, canvas
+    "verdigris": "#3D7A5E",      # saturated green - accents only
 }
 
 # The emission mask. Painted flat, unshaded, into the concept image on any

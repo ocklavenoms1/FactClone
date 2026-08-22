@@ -32,8 +32,8 @@ Copy this exactly. Never paraphrase it, never "improve" it for one asset.
 
 ```
 Early-industrial agrarian MACHINE, hand-built from farm materials but clearly a
-working piece of equipment. Fieldstone, fired clay, weathered oak timber
-framing, wrought iron banding, leather.
+working piece of equipment. Fieldstone, weathered oak timber framing, wrought
+iron banding, leather.
 
 Not sci-fi. Not steampunk. Not fantasy. Not a decorative prop or set dressing.
 
@@ -47,12 +47,15 @@ projecting sideways beyond the body. The mass is centred in its own footprint.
 Function readable at a glance: a visible input where material goes in and a
 visible output where product comes out.
 
-Stone is LARGE blocks, at most four courses visible on a face. Not cobbles, not
-rubble, not small stones. Timber is plain, no visible grain. Matte, light edge
-wear only. No grunge, no rust streaking, no dirt.
+At most FOUR readable features on the whole building. Stone is LARGE blocks, at
+most four courses visible on a face. Not cobbles, not rubble, not small stones.
+Every detail at least one eighth of the building's width - nothing thin, no
+narrow lines, no small repeated ornament. Timber is plain, no visible grain.
+Matte, light edge wear only. No grunge, no rust streaking, no dirt.
 
-Colours only: fieldstone grey #5A5E58, fired clay #8A6A4F, weathered oak
-#6B4E32, wrought iron #46504E, leather #7A5A42, forge brown #8C4A32.
+Colours only: fieldstone grey #5A5E58, wrought iron blue-grey #36455E,
+weathered oak #7A6633, leather red-brown #7E3B2C, verdigris green #3D7A5E
+(accents only).
 
 Any region that glows when the machine is running is painted FLAT MAGENTA
 #FF00FF with no shading — it is a mask, not a colour.
@@ -66,17 +69,34 @@ Aspect **1:1**.
 
 ## The palette is a closed set
 
-| Role | Hex |
-|---|---|
-| fieldstone | `#5A5E58` |
-| fired clay | `#8A6A4F` |
-| weathered oak | `#6B4E32` |
-| wrought iron | `#46504E` |
-| leather | `#7A5A42` |
-| **forge brown** | `#8C4A32` |
+**Five members, spread across hue.** `fired_clay` and `forge_brown` are
+**removed**: a member Tripo cannot reproduce and the pipeline cannot correct is
+a liability, not a member.
 
-`forge brown` was called `hot_iron` and was expected to signal emission. **It
-never does again.** It means "warm-toned metal" and nothing more.
+| Role | Hex | Hue | Sat | Use |
+|---|---|---|---|---|
+| fieldstone | `#5A5E58` | 100° | 0.06 | stone |
+| wrought iron | `#36455E` | 218° | 0.43 | ironwork |
+| weathered oak | `#7A6633` | 43° | 0.58 | timber |
+| leather | `#7E3B2C` | 11° | 0.65 | leather, canvas |
+| verdigris | `#3D7A5E` | 153° | 0.50 | accents only |
+
+**Minimum pairwise chromaticity distance 0.2743 = 1.83× the matcher's 0.15
+confidence threshold.** Every pair clears comfortably. The old six-member set
+had four members at hue 17–30° separated only by value; the matcher is
+value-invariant by design, so those four were mutually invisible to it — which
+is why `forge_brown` mismatched at 0.279 and `fired_clay` needed a 4.4× clamp.
+Those were the palette failing, not the matcher.
+
+> **The structural rule, learned the hard way: only ONE member may sit near the
+> white point.** A near-neutral colour's chromaticity *is* the white point, so
+> its distance to anything else is capped by that other colour's saturation.
+> Two near-neutrals can never be told apart. Fieldstone holds that slot at
+> saturation 0.06 — which is why wrought iron had to move from 0.25 to 0.43.
+
+Three hexes moved from the first draft of this palette to clear the threshold:
+wrought iron `#3C4650`→`#36455E`, weathered oak `#7A5A33`→`#7A6633`, leather
+`#7E4433`→`#7E3B2C`, verdigris `#4E7A66`→`#3D7A5E`. Fieldstone was untouched.
 
 ### Heat is a state, not a material
 
@@ -89,13 +109,13 @@ Measured separation, linear RGB:
 
 | | distance from `#FF00FF` |
 |---|---|
-| nearest palette member (fired clay) | **1.194** |
-| widest pair *inside* the palette | 0.206 |
+| nearest palette member (leather) | **1.256** |
 | the distance that killed the first attempt | 0.079 |
 
-The mask sits **15× clear** of the failure threshold and roughly **6× outside
-the palette's own internal spread**, so tolerance is no longer a knife-edge —
-anything up to ~0.60 works.
+Re-verified against the five-member palette. Detection uses the linear chroma
+score `min(R,B) − G`: every palette member scores **negative** (worst is
+fieldstone at −0.0143) against an emit cut of **+0.16** — a margin of 0.17, so
+no palette member can false-trigger the mask.
 
 > **Rejected alternative, and why.** The first fix was to add a saturated
 > orange `#FF5A18` so the key would separate. That solves masking by making a
@@ -133,7 +153,8 @@ consumed **38% of the sprite's width** and rendered the building itself
 sat **0.28 tiles left of its own tile centre**. A building not centred on the
 tile it occupies reads as misplaced the moment it stands next to another one.*
 
-**Detail budget: six readable features per tile, four stone courses per face.**
+**Detail budget: FOUR readable features per tile, four stone courses per face.**
+Tightened from six.
 *The first kiln measured **8.75 features per tile** — 1.46× over the cap — and
 **14.3% of its spatial-frequency energy is destroyed by the downsample**, against
 about 2% for flat-shaded geometry. That 14.3% is generation effort that
@@ -190,7 +211,18 @@ scale, off-centre origin, wrong roughness/metallic, slightly-off saturation.
 
 ## Subject blocks
 
-### smelter — ACCEPTED (`stone furnace 3d model.glb`)
+### smelter — ACCEPTED, but LEGACY PALETTE (`stone furnace 3d model.glb`)
+
+> **Regenerate against the five-member palette.** This asset was generated
+> against the old six-member set, and a new-palette remap on it *recolours*
+> rather than corrects: only 2 of 5 anchors match (wrought iron 0.334, leather
+> 0.285, verdigris 0.299 — all dropped as untrusted), oak's gain clamps at 2.5,
+> and the whole asset goes olive. Its accepted appearance is preserved by
+> keeping the legacy remap in the manifest (`"palette_era": "legacy-6"`).
+>
+> The general rule: **the albedo correction is a drift corrector, not a
+> recolouring tool.** A palette change requires regeneration.
+
 
 Fixes all three rejects on the first kiln. Measured, not eyeballed:
 

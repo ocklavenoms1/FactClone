@@ -52,7 +52,7 @@ import numpy as np
 from PIL import Image
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-CAP_PER_TILE = 6
+CAP_PER_TILE = 4                          # tightened from 6: 87% of features were under 2px
 SUPERSAMPLE = 4
 TILE_PX = 32
 HF_RATIO_CAP = 3.0                        # pass mark: under 3x the flat floor
