@@ -1306,6 +1306,20 @@ git commit -m "Pole Tiers Task 4: parametric ranges + shared either-reaches pred
 
 ## Task 5: `_pole_cells` — multi-cell poles resolve from any footprint cell
 
+> **SCOPE WIDENED after Task 4.** The plan originally named two `POWER_POLE`-only
+> filters to fix. There are **three**. Task 4's review found the generator-side
+> `_adjacent_component_id` carries the same filter and was owned by no task:
+>
+> | function | rule | consequence while unfixed |
+> |---|---|---|
+> | `power_satisfaction_at` | **no type check at all** | a consumer beside a new tier reads as powered |
+> | `_supply_component_id` | `type != POWER_POLE` | …while contributing zero demand — the two disagree |
+> | `_adjacent_component_id` | `type != POWER_POLE` | a generator flush against a substation supplies **nothing** |
+>
+> All three carry `TEMPORARY` notes naming Task 5 as owner. Fix all three, and
+> note the first two are *asymmetric with each other* today — that mismatch is
+> reachable by a player right now, since both tiers are hotbar-placeable.
+
 `_pole_component` is keyed by **anchor only** (`power_network.gd:88-90`, `:102`), but the two consumer query paths test raw cells against it (`:306`, `:338`). A 2×2 substation therefore answers only from its top-left cell, making its supply box off-centre.
 
 **Files:**
