@@ -1,13 +1,23 @@
 class_name PowerPole
 extends RefCounted
 
-## Power Pole — passive carrier of the electric network.
+## Power Pole — the BASIC (cheapest, shortest) of three wire tiers, and the
+## passive carrier of the electric network.
 ##
-## Auto-connects to other poles within 5-tile Chebyshev range (POLE_RANGE
-## in power_network.gd). No tick logic; network membership is computed on
-## demand by PowerNetwork.rebuild_topology(world). Visual: dark wood base
-## + tall pole + small "T" crossarm at top. Wires drawn globally by
-## grid_world._draw_power_wires (Task 4, NOT per-pole, to avoid double-drawing).
+## The tiers are POWER_POLE, MEDIUM_POLE (medium_pole.gd) and SUBSTATION
+## (substation.gd). They differ ONLY in three numbers — wire range, supply
+## radius, footprint — and share every behaviour; nothing here is special-
+## cased for the basic tier. Ranges are per-tier and live in
+## PowerNetwork.POLE_RANGE_BY_TYPE (this one is 3) with supply radii in
+## SUPPLY_RADIUS_BY_TYPE (this one is 1). Two poles auto-connect when their
+## Chebyshev distance is within EITHER one's range — max(), not min() — so a
+## substation reaches a basic pole that cannot reach back; the rule lives in
+## PowerNetwork.poles_connected and nowhere else.
+##
+## No tick logic; network membership is computed on demand by
+## PowerNetwork.rebuild_topology(world). Visual: dark wood base + tall pole +
+## small "T" crossarm at top. Wires drawn globally by
+## grid_world._draw_power_wires (NOT per-pole, to avoid double-drawing).
 ##
 ## State: empty {} (network membership tracked at world._pole_component level).
 

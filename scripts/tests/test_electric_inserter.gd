@@ -1459,8 +1459,13 @@ static func _case_panel_routing(failures: Array) -> void:
 # ===========================================================================
 # (16) SUPPLY-AREA BOUNDARY.
 #
-# PowerNetwork.SUPPLY_RADIUS is 1, so a consumer is powered at Chebyshev 1
-# from a pole and unpowered at Chebyshev 2. Asserted from BOTH sides, and
+# A BASIC pole's supply radius is 1 — PowerNetwork.SUPPLY_RADIUS_BY_TYPE
+# via supply_radius(), which replaced the flat SUPPLY_RADIUS const when the
+# tables went per-tier (Pole Tiers Task 4). POLE_POS holds a POWER_POLE, so
+# a consumer is powered at Chebyshev 1 from it and unpowered at Chebyshev 2.
+# Read through the accessor rather than hardcoded, so retuning the basic
+# tier's radius reddens the PREMISE lines here instead of the outcome lines.
+# Asserted from BOTH sides, and
 # behaviourally as well as by query: the query half proves the topology, the
 # tick half proves the inserter actually reads it. A machine that queried
 # correctly and ran anyway would pass the first half alone.
@@ -1491,20 +1496,21 @@ static func _case_supply_area_boundary(parent: Node, failures: Array) -> void:
 		return
 	far_src.state["bag"] = [[Items.Type.WHEAT, SEEDED_WHEAT]]
 
+	var pole_radius: int = PowerNetwork.supply_radius(Buildings.Type.POWER_POLE)
 	var near_cheb: int = _chebyshev(POLE_POS, ELEC_INS_POS)
 	var far_cheb: int = _chebyshev(POLE_POS, FAR_INS_POS)
-	_check(failures, near_cheb == PowerNetwork.SUPPLY_RADIUS,
-		"(16) PREMISE: the near inserter should sit at Chebyshev %d from the pole, measured %d" % [PowerNetwork.SUPPLY_RADIUS, near_cheb])
-	_check(failures, far_cheb == PowerNetwork.SUPPLY_RADIUS + 1,
-		"(16) PREMISE: the far inserter should sit ONE ring outside the supply area at Chebyshev %d, measured %d" % [PowerNetwork.SUPPLY_RADIUS + 1, far_cheb])
+	_check(failures, near_cheb == pole_radius,
+		"(16) PREMISE: the near inserter should sit at Chebyshev %d from the pole, measured %d" % [pole_radius, near_cheb])
+	_check(failures, far_cheb == pole_radius + 1,
+		"(16) PREMISE: the far inserter should sit ONE ring outside the supply area at Chebyshev %d, measured %d" % [pole_radius + 1, far_cheb])
 
 	PowerNetwork.update_supply_demand(world)
 	var near_sat: float = PowerNetwork.power_satisfaction_at(world, ELEC_INS_POS)
 	var far_sat: float = PowerNetwork.power_satisfaction_at(world, FAR_INS_POS)
 	_check(failures, near_sat > Inserter.POWER_EPSILON,
-		"(16) Chebyshev %d is INSIDE the supply area — satisfaction should be above POWER_EPSILON, got %.4f" % [PowerNetwork.SUPPLY_RADIUS, near_sat])
+		"(16) Chebyshev %d is INSIDE the supply area — satisfaction should be above POWER_EPSILON, got %.4f" % [pole_radius, near_sat])
 	_check(failures, far_sat == 0.0,
-		"(16) Chebyshev %d is OUTSIDE the supply area — satisfaction should be exactly 0.0, got %.4f" % [PowerNetwork.SUPPLY_RADIUS + 1, far_sat])
+		"(16) Chebyshev %d is OUTSIDE the supply area — satisfaction should be exactly 0.0, got %.4f" % [pole_radius + 1, far_sat])
 
 	for _i in SUPPLY_RUN_TICKS:
 		TickSystem.current_tick += 1
@@ -1514,9 +1520,9 @@ static func _case_supply_area_boundary(parent: Node, failures: Array) -> void:
 	var far_delivered: int = _bag_count(far_dst.state.get("bag", []), Items.Type.WHEAT)
 	var far_left: int = _bag_count(far_src.state.get("bag", []), Items.Type.WHEAT)
 	_check(failures, near_delivered > 0,
-		"(16) the inserter at Chebyshev %d is powered and should have delivered within %d ticks, its destination holds %d" % [PowerNetwork.SUPPLY_RADIUS, SUPPLY_RUN_TICKS, near_delivered])
+		"(16) the inserter at Chebyshev %d is powered and should have delivered within %d ticks, its destination holds %d" % [pole_radius, SUPPLY_RUN_TICKS, near_delivered])
 	_check(failures, far_delivered == 0,
-		"(16) the inserter at Chebyshev %d has no power and must deliver NOTHING, its destination holds %d" % [PowerNetwork.SUPPLY_RADIUS + 1, far_delivered])
+		"(16) the inserter at Chebyshev %d has no power and must deliver NOTHING, its destination holds %d" % [pole_radius + 1, far_delivered])
 	_check(failures, far_left == SEEDED_WHEAT,
 		"(16) the unpowered inserter must not even pick up — its source should still hold %d wheat, it holds %d" % [SEEDED_WHEAT, far_left])
 	_check(failures, int(far_ins.state.get("state", -99)) == Inserter.STATE_NO_POWER,

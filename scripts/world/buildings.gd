@@ -91,9 +91,10 @@ enum Type {
 	LONG_REACH_INSERTER,
 	# Electricity Arc Session 1 (session-electricity-foundation): Power
 	# infrastructure foundation. POWER_POLE forms the wire network via
-	# 5-tile Chebyshev adjacency; auto-connects on placement. Empty state.
-	# (DATA entry + dispatch cases land in Task 3; WATER_WHEEL/ELECTRIC_LAMP
-	# enum entries land in Tasks 5+6 respectively.)
+	# Chebyshev adjacency at its own tier's range — 3 for this one, see
+	# PowerNetwork.POLE_RANGE_BY_TYPE — and auto-connects on placement.
+	# Empty state. (DATA entry + dispatch cases land in Task 3;
+	# WATER_WHEEL/ELECTRIC_LAMP enum entries land in Tasks 5+6 respectively.)
 	POWER_POLE,
 	# Water Wheel — first generator. 2x2, requires STONE/PATH base, must
 	# have at least one perimeter cell over a water terrain tile to be

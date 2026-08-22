@@ -385,17 +385,26 @@ static func _adjacent_component_id(world, b: Building) -> int:
 			return int(world._pole_component[nb.anchor])
 	return -1
 
-## Find the component ID of any pole within SUPPLY_RADIUS Chebyshev
-## distance of any cell of building `b`'s footprint. Returns -1 if no
-## pole in supply area. Used by CONSUMERS (lamps etc.) — Factorio-style
-## wireless supply. Pole at (5,5) with SUPPLY_RADIUS=1 covers consumers
-## anywhere in the 3×3 area (4,4)..(6,6).
+## Find the component ID of any pole within a Chebyshev supply radius of any
+## cell of building `b`'s footprint. Returns -1 if no pole in supply area.
+## Used by CONSUMERS (lamps etc.) — Factorio-style wireless supply. A pole at
+## (5,5) with radius 1 covers consumers anywhere in the 3×3 area (4,4)..(6,6).
 ##
 ## First pole found wins (lex iteration order of pole positions).
 ## Defensive verification: only counts cells that are confirmed POWER_POLE
 ## buildings (in case _pole_component has stale entries during a rebuild).
 static func _supply_component_id(world, b: Building) -> int:
-	var radius: int = SUPPLY_RADIUS
+	# TEMPORARY (Task 4 -> Task 5): the consumer-side scan is still sized to
+	# the basic pole's radius and still takes the first pole it hits, and the
+	# POWER_POLE check below still excludes the two new tiers outright. That is
+	# behaviourally IDENTICAL to pre-Session-3, so the existing suite stays
+	# green — but it means MEDIUM_POLE and SUBSTATION now join the network
+	# without yet projecting their wider supply areas, which is why
+	# test_pole_tier_rig sub-cases (2) and (4b) still read demand 30 of 40.
+	# Task 5 replaces this function and power_satisfaction_at with the
+	# per-pole-radius, footprint-projected resolver that reads
+	# SUPPLY_RADIUS_BY_TYPE.
+	var radius: int = SUPPLY_RADIUS_DEFAULT
 	var fp: Vector2i = Buildings.footprint_of(b.type)
 	# Iterate the consumer's full footprint. For each footprint cell,
 	# scan the (2*radius+1)² area around it for a pole. 1×1 consumers
@@ -419,24 +428,36 @@ static func _supply_component_id(world, b: Building) -> int:
 					return int(world._pole_component[check_pos])
 	return -1
 
-## Public query: is the position within SUPPLY_RADIUS of a pole in a
+## Public query: is the position within a pole's supply radius in a
 ## powered (sat > 0) network? Used for boolean checks. Most consumers
 ## should use power_satisfaction_at() instead.
 static func is_powered_at(world, pos: Vector2i) -> bool:
 	return power_satisfaction_at(world, pos) > 0.0
 
 ## Public query: per-tile satisfaction for consumers. Returns 0.0 if no
-## pole within SUPPLY_RADIUS Chebyshev. Returns [0.0, 1.0] otherwise.
+## pole within the supply radius. Returns [0.0, 1.0] otherwise.
 ## Consumers call this from their tick to drive brightness / throughput.
 ##
-## Scans the (2*SUPPLY_RADIUS+1)² area around pos for any pole. First
-## pole found wins. This is the per-position equivalent of
-## _supply_component_id for 1×1 callers — lamps mostly. Multi-cell
-## consumers should use _supply_component_id with their Building.
+## Scans the (2*radius+1)² area around pos for any pole. First pole found
+## wins. This is the per-position equivalent of _supply_component_id for 1×1
+## callers — lamps mostly. Multi-cell consumers should use
+## _supply_component_id with their Building.
 static func power_satisfaction_at(world, pos: Vector2i) -> float:
 	if world._power_network_dirty:
 		rebuild_topology(world)
-	var radius: int = SUPPLY_RADIUS
+	# TEMPORARY (Task 4 -> Task 5): same bridge as _supply_component_id — the
+	# box is still the basic pole's radius, so the wider tiers do not yet
+	# project their supply areas. NOTE the one asymmetry this bridge leaves
+	# behind: unlike _supply_component_id, this scan has never verified the
+	# building type, and _pole_component now holds MEDIUM_POLE and SUBSTATION
+	# anchors, so at radius 1 the two functions can answer differently about a
+	# consumer next to a new tier. Task 5 rewrites both together and the
+	# question disappears. No RIG hits it in the meantime — every pole_tier_rig
+	# consumer is at Chebyshev 2 or more from the medium pole and 3 or more
+	# from the substation anchor, and electric_rig places neither tier — but a
+	# player who puts a lamp beside a medium pole between Task 4 and Task 5
+	# will see it glow while contributing no demand.
+	var radius: int = SUPPLY_RADIUS_DEFAULT
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
 			var n: Vector2i = pos + Vector2i(dx, dy)

@@ -1621,19 +1621,33 @@ func _draw() -> void:
 # ---------- power network rendering ----------
 
 ## Draw wires between poles: mesh-within-network. For each pair of poles
-## (i, j) with j > i (dedup), draw a wire if both endpoints are within
-## POLE_RANGE Chebyshev distance AND share the same component. Matches
-## the player mental model: "if two poles are in range and on the same
+## (i, j) with j > i (dedup), draw a wire if PowerNetwork.poles_connected
+## says they are wired AND they share the same component. Matches the
+## player mental model: "if two poles are in range and on the same
 ## network, I see a wire." Visually busier than MST for dense clusters
 ## but predictable and never surprises by omitting an expected wire.
+## (Task 7 replaces the mesh with a per-component minimum spanning tree;
+## the shared predicate below is independent of that change.)
 ##
-## The same-network guard is technically redundant — PowerNetwork's BFS
-## uses the same Chebyshev range for connectivity, so two in-range poles
-## are always in the same component. The guard is kept explicit anyway:
-## (1) it documents the rendering rule for future readers, and (2) it
-## protects against future divergence between BFS range and wire range
-## (e.g., if Session 3's pole-tier work introduces a substation with a
-## wider connection range but the wire-render uses the per-pole range).
+## THE IN-RANGE CHECK IS A CALL, NOT ARITHMETIC. It used to be a Chebyshev
+## comparison computed right here against the one flat pole-range constant
+## PowerNetwork exported, which was safe only while every pole shared that one
+## range. Deliberately no longer named or recomputed in this file: grepping
+## this module for a range identifier must come back empty, because there is
+## no second reader of the rule left to drift. With per-tier ranges a second
+## derivation would drift, and the dangerous direction is silent:
+## a renderer STRICTER than the BFS draws no wire between two poles that ARE
+## on one network, and nothing — no test, no visual — reports it. Asking
+## poles_connected makes stricter-than-BFS unreachable rather than untested.
+##
+## The same-network guard that follows is a genuine no-op and no claim is made
+## for it here: poles_by_comp already groups by component, and a shared
+## predicate cannot put connected poles in different components, so nothing
+## can make it fire. Nothing in the headless suite exercises this function at
+## all — there is no draw pass — so any "it would catch X" argument for it
+## would be unverifiable. It is left in place only because Task 7 replaces
+## this whole pairwise loop with a per-component minimum spanning tree, and
+## deleting one dictionary comparison first is churn.
 ##
 ## Color reflects component satisfaction: golden if any power, dark
 ## brown if dead. Called from _draw between building draws and post-
@@ -1666,15 +1680,13 @@ func _draw_power_wires() -> void:
 			for j in range(i + 1, poles.size()):
 				var pa: Vector2i = poles[i]
 				var pb: Vector2i = poles[j]
-				# In-range check (Chebyshev, matches BFS connectivity).
-				var dx: int = abs(pb.x - pa.x)
-				var dy: int = abs(pb.y - pa.y)
-				if max(dx, dy) > PowerNetwork.POLE_RANGE:
+				# In-range check — THE SHARED PREDICATE, the same call
+				# rebuild_topology's BFS makes. Not a reimplementation of it.
+				if not PowerNetwork.poles_connected(self, pa, pb):
 					continue
-				# Same-network guard — explicit rendering rule. Currently a
-				# no-op (poles_by_comp grouping already filters by network)
-				# but kept for future-proofing if pole ranges ever diverge
-				# from wire ranges.
+				# Same-network guard — the looser-direction backstop. See the
+				# docstring: it cannot fire while the predicate is shared, and
+				# that is the point.
 				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
 					continue
 				# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
