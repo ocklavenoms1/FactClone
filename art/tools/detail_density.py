@@ -56,6 +56,7 @@ CAP_PER_TILE = 4                          # tightened from 6: 87% of features we
 SUPERSAMPLE = 4
 TILE_PX = 32
 HF_RATIO_CAP = 3.0                        # pass mark: under 3x the flat floor
+CONTRAST_COSTLY = 0.12                    # luminance range above which thin detail costs
 FLOOR_REFS = ("chest", "power_pole")      # flat untextured proxies define the floor
 
 
@@ -79,12 +80,19 @@ def sobel(g):
     return np.hypot(gx, gy)
 
 
-def components(mask, min_area=3, want_sizes=False):
+def components(mask, min_area=3, want_sizes=False, lumimg=None):
     """Connected components (4-neighbour), iterative flood fill.
 
-    With want_sizes, also returns each component's thickness in FINAL pixels,
-    estimated as area / longest-bbox-side. A 1px-wide streak 10px long has
-    thickness 1.0; a compact 4x4 blob has thickness 4.0.
+    With want_sizes, also returns per component (thickness, contrast):
+    thickness in FINAL pixels as area / longest-bbox-side (a 1px-wide streak
+    10px long is 1.0; a compact 4x4 blob is 4.0), and contrast as the luminance
+    range across the component's pixels.
+
+    Thickness alone is the wrong diagnostic. The approved smelter has 16 of 20
+    features under 2px yet the LOWEST HF destruction of the set at 1.45x floor,
+    because its sub-2px rivets are low-contrast and average harmlessly into the
+    strap. Sub-2px detail is only wasteful when it is ALSO high-contrast: a thin
+    high-contrast edge is what costs, a thin low-contrast dot is free.
     """
     h, w = mask.shape
     seen = np.zeros_like(mask, dtype=bool)
@@ -96,12 +104,15 @@ def components(mask, min_area=3, want_sizes=False):
             stack, area = [(sy, sx)], 0
             y0 = y1 = sy
             x0 = x1 = sx
+            px = []
             seen[sy, sx] = True
             while stack:
                 y, x = stack.pop()
                 area += 1
                 y0, y1 = min(y0, y), max(y1, y)
                 x0, x1 = min(x0, x), max(x1, x)
+                if lumimg is not None:
+                    px.append(lumimg[y, x])
                 for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                     ny, nx = y + dy, x + dx
                     if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
@@ -111,7 +122,8 @@ def components(mask, min_area=3, want_sizes=False):
                 count += 1
                 if want_sizes:
                     longest = max(y1 - y0 + 1, x1 - x0 + 1)
-                    sizes.append(area / max(longest, 1))
+                    contrast = (max(px) - min(px)) if px else 0.0
+                    sizes.append((area / max(longest, 1), float(contrast)))
     return (count, sizes) if want_sizes else count
 
 
@@ -127,18 +139,28 @@ def feature_count(sprite_path, footprint_tiles):
     for pct in (75, 85, 92):
         thr = np.percentile(vals, pct)
         if pct == 85:
-            n, sizes = components((e >= thr) & op, min_area=3, want_sizes=True)
+            n, sizes = components((e >= thr) & op, min_area=3, want_sizes=True,
+                                  lumimg=luma(rgb))
         else:
             n = components((e >= thr) & op, min_area=3)
         out[f"p{pct}"] = n
 
     thin = {}
     if sizes:
-        s = np.array(sizes)
+        arr = np.array(sizes)
+        th, ct = arr[:, 0], arr[:, 1]
+        thin_mask = th < 2.0
+        hot = thin_mask & (ct >= CONTRAST_COSTLY)
+        cold = thin_mask & (ct < CONTRAST_COSTLY)
         thin = {
-            "median_thickness_px": round(float(np.median(s)), 2),
-            "p10_thickness_px": round(float(np.percentile(s, 10)), 2),
-            "under_2px_pct": round(float((s < 2.0).mean() * 100), 1),
+            "median_thickness_px": round(float(np.median(th)), 2),
+            "p10_thickness_px": round(float(np.percentile(th, 10)), 2),
+            "under_2px_pct": round(float(thin_mask.mean() * 100), 1),
+            "median_contrast": round(float(np.median(ct)), 3),
+            # the number that matters: thin AND high-contrast
+            "thin_costly": int(hot.sum()),
+            "thin_free": int(cold.sum()),
+            "thin_costly_pct": round(float(hot.mean() * 100), 1),
         }
 
     occupied_tiles = op.sum() / float(TILE_PX * TILE_PX)
@@ -255,9 +277,13 @@ def main():
                 print(f"      @{k}: {tot:4d} total   {per:6.2f}/occupied-tile")
             th = fc.get("feature_thickness") or {}
             if th:
-                print(f"  [diagnostic] feature thickness in FINAL px: "
-                      f"median {th['median_thickness_px']}, p10 {th['p10_thickness_px']}, "
-                      f"{th['under_2px_pct']}% under 2px")
+                print(f"  [diagnostic] thickness x contrast, FINAL px:")
+                print(f"      median thickness {th['median_thickness_px']}px, "
+                      f"{th['under_2px_pct']}% under 2px, median contrast {th['median_contrast']}")
+                print(f"      sub-2px COSTLY (contrast >= {CONTRAST_COSTLY}): "
+                      f"{th['thin_costly']}  <- the ones that actually waste budget")
+                print(f"      sub-2px free   (low contrast, averages away): "
+                      f"{th['thin_free']}")
         if hf:
             lost = hf["energy_lost_pct"]
             print(f"  4x master {hf['master_px'][0]}x{hf['master_px'][1]}")

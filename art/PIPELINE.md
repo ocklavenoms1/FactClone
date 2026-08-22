@@ -130,6 +130,7 @@ art/
     detail_density.py      HF gate + feature/thickness diagnostics
     assert_states.py       tripwire: declared states must actually differ
     assert_palette_era.py  gate: every real asset on the locked palette era
+    assert_rig_correlation.py  gate: baked light must not oppose the rig
     baked_shading.py       albedo variance by spatial scale (see section 15)
     palette_board.py       renders a palette on flat proxies, no correction
 ```
@@ -940,3 +941,79 @@ fighting the downsample.
 
 So this is wasted generation detail rather than harmful detail. It feeds the
 prompt-budget feedback (80% under 2 px) without threatening the gate.
+
+---
+
+## 17. Three changes from the advisory-palette finding
+
+### The rig correlation is a GATE now, not a diagnostic
+
+`+0.443` on the first measurement was fortunate, not designed - the concept
+image carried a painted falloff despite the prompt demanding flat lighting, and
+it happened to fall near the rig's key. An asset lit from the opposite side
+would **oppose** the rig, and nothing else in the pipeline would notice: the
+palette still matches, the HF gate still passes, the states still differ.
+
+`assert_rig_correlation.py` runs on every real asset. It divides the rig out of
+the render in log space and correlates the remainder against the rig's own
+shading. **A negative sign fails the build.** Magnitude stays advisory until
+three assets exist to calibrate a threshold against - a limit picked from n=1
+is a guess.
+
+Negative-tested by synthesising an asset with `real = rig^0.5`, whose implied
+albedo opposes the rig by construction: the gate returns `-0.999` and exits 1.
+The real smelter reads **+0.296** and passes.
+
+`PROMPTS.md` now specifies the key direction (upper left, matching the rig)
+rather than only asking for flat light.
+
+### Palette membership is declared per asset
+
+Verdigris "dropped" on a building with no green in it - a category error, not a
+failure, and it first stole a cluster from the assignment on its way out.
+`assets.json` now carries `palette_members`; matching is restricted to those and
+undeclared members are **skipped**, not attempted.
+
+### K=10 was the real bug behind every matching instability
+
+Pruning membership exposed something bigger. Three matching strategies were
+tried and all three behaved erratically:
+
+- **greedy** - order-dependent and cascading. Removing verdigris freed a
+  cluster, leather took the one oak wanted, and oak went from matching to
+  ambiguous with nothing about oak having changed.
+- **optimal (min total cost)** - sacrifices individuals for the sum. Fieldstone
+  was handed the iron cluster and iron a brown one; each absurd, together cheap.
+- **independent nearest** - stable, and the one kept. Two members landing on the
+  same cluster is not a conflict to resolve arbitrarily; it is exactly the
+  ambiguity the `d1/d2` test exists to catch.
+
+But the erratic behaviour was not really the algorithm. **With K=10 clusters the
+two near-neutrals kept merging into ONE cluster**, and which member won it then
+swung with membership, gain, and strategy. Trusted-anchor count on the smelter:
+
+| K | 10 | 14 | **20** | 28 | 40 |
+|---|---|---|---|---|---|
+| anchors trusted (of 4) | 2 | 2 | **4** | 4 | 4 |
+
+Everything from K=20 up is stable; K is now **24**. With that fixed and
+membership pruned, the smelter matches **all four declared members with zero
+drops and 90% variance explained** - the best result of the project.
+
+### Thickness alone was the wrong diagnostic
+
+16 of 20 features under 2px, yet this asset has the *lowest* HF destruction of
+the set at 1.45x floor - because its rivets are low-contrast and average
+harmlessly into the strap. Sub-2px detail is only wasteful when it is **also
+high-contrast**.
+
+The diagnostic now reports thickness x contrast:
+
+| | |
+|---|---|
+| median thickness | 1.54 px, 80% under 2px |
+| sub-2px **costly** (contrast >= 0.12) | **8** |
+| sub-2px free (averages away) | 8 |
+
+Half the thin detail is free. Only the other half is worth prompting away. Still
+prompt feedback, still not a gate.

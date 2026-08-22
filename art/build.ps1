@@ -102,6 +102,23 @@ foreach ($a in $manifest.assets) {
         $failed += $a.name
         continue
     }
+
+    # The albedo's baked light must not oppose the locked rig. Sign is a hard
+    # gate; magnitude is reported and stays advisory until three assets exist
+    # to calibrate a threshold against. Proxies have no baked light to check.
+    if ($a.status -ne "proxy") {
+        Blend @((Join-Path $ArtDir "blender\render_rigonly.py"), "--name", $a.name) |
+            Select-String "RIGONLY" | Out-Null
+        $rc = python (Join-Path $ArtDir "tools\assert_rig_correlation.py") $a.name
+        $rcFailed = ($LASTEXITCODE -ne 0)
+        $rc | Where-Object { $_ -match "FAIL|ok  |--  " } | ForEach-Object { Write-Host "$_" }
+        if ($rcFailed) {
+            Write-Host "  RIG CORRELATION FAILED for $($a.name)" -ForegroundColor Red
+            $rc | Select-Object -Last 5 | ForEach-Object { Write-Host "      $_" }
+            $failed += $a.name
+            continue
+        }
+    }
     $built += $a.name
 }
 

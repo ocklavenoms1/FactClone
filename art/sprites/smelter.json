@@ -45,13 +45,11 @@
     "anchors": [
       "fieldstone",
       "wrought_iron",
-      "weathered_oak"
+      "weathered_oak",
+      "leather"
     ],
     "sigma": 0.02,
-    "dropped": [
-      "leather",
-      "verdigris"
-    ],
+    "dropped": [],
     "materials": 1,
     "mode": "remap"
   },

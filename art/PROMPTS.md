@@ -59,7 +59,9 @@ Colours only: fieldstone grey #5A5E58, wrought iron #46504E, weathered oak
 Any region that glows when the machine is running is painted FLAT MAGENTA
 #FF00FF with no shading — it is a mask, not a colour.
 
-Flat even shadowless lighting. Plain white background, no ground, no base.
+Flat even shadowless lighting. If any directional light is unavoidable, the key
+must come from the UPPER LEFT, matching the render rig. Never lit from the
+right or from below. Plain white background, no ground, no base.
 ```
 
 Aspect **1:1**.

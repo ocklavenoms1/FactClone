@@ -40,7 +40,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "blender"))
 import lock  # noqa: E402
 
-K = 10
+# K=10 was too few and was the real source of every matching instability chased
+# before it: with only ten clusters, the two near-neutrals (stone and iron) kept
+# merging into ONE cluster, and which member won it then swung with membership,
+# gain, and assignment strategy. Measured trusted-anchor count on the smelter:
+#     K=10  2/4      K=14  2/4      K=20  4/4      K=28  4/4      K=40  4/4
+# Everything from K=20 up is stable. 24 sits inside that plateau.
+K = 24
 ITERS = 40
 # An anchor is trusted only if BOTH questions pass:
 #   "is it close at all?"      d1 < MATCH_ABS_RATIO * palette min-pair
@@ -99,7 +105,7 @@ def kmeans(X, k, iters=ITERS, seed=SEED):
     return cent, w
 
 
-def analyse(path, sample=200_000, is_render=False):
+def analyse(path, sample=200_000, is_render=False, members=None):
     img = Image.open(path)
     if is_render:
         a = np.asarray(img.convert("RGBA")).astype(np.float64) / 255.0
@@ -119,7 +125,17 @@ def analyse(path, sample=200_000, is_render=False):
     if len(lin) > sample:
         lin = lin[rng.choice(len(lin), sample, replace=False)]
 
-    pal = {n: hexlin(h) for n, h in lock.PALETTE.items()}
+    # PRUNE membership to what this asset actually uses. Attempting a member
+    # the building was never going to contain is a category error, not a
+    # failure: verdigris "dropped" on a smelter with no green in it, having
+    # first stolen a cluster from the greedy assignment. An absent member is
+    # skipped, not attempted.
+    declared = list(members) if members else list(lock.PALETTE)
+    unknown = [m for m in declared if m not in lock.PALETTE]
+    if unknown:
+        raise SystemExit(f"palette_members not in the locked palette: {unknown}")
+    skipped = [m for m in lock.PALETTE if m not in declared]
+    pal = {n: hexlin(lock.PALETTE[n]) for n in declared}
     P = np.array(list(pal.values()))
 
     # (a) GLOBAL GAIN FIRST, from aggregate albedo, with NO matching at all.
@@ -134,21 +150,37 @@ def analyse(path, sample=200_000, is_render=False):
 
     # (c) match on FULL LINEAR RGB - chromaticity AND value together.
     cent, w = kmeans(Y, K)
-    used, result = set(), {}
-    flat = sorted((float(np.linalg.norm(cent[i] - P[j])), list(pal)[j], i)
-                  for j in range(len(P)) for i in range(K))
-    for dist, name, i in flat:
-        if name in result or i in used:
-            continue
-        # runner-up distance for this cluster, for the ratio test
-        others = sorted(float(np.linalg.norm(cent[i] - P[j]))
-                        for j in range(len(P)) if list(pal)[j] != name)
-        result[name] = (i, dist, others[0] if others else float("inf"))
-        used.add(i)
 
-    # trust threshold scales with how separable this palette actually is
-    min_pair = min(float(np.linalg.norm(P[i] - P[j]))
-                   for i, j in __import__("itertools").combinations(range(len(P)), 2))
+    # INDEPENDENT nearest-cluster matching, NOT a forced one-to-one assignment.
+    #
+    # Both alternatives were tried and both are wrong here:
+    #   greedy   - order-dependent and cascades. Removing verdigris from the
+    #              declared set freed a cluster, leather took the one oak
+    #              wanted, and oak went from matching to ambiguous with nothing
+    #              about oak having changed.
+    #   optimal  - minimising TOTAL cost sacrifices individual members to help
+    #              the sum: fieldstone got handed the iron cluster and iron got
+    #              a brown one, each individually absurd but cheap overall.
+    #
+    # The flaw both share is forcing a bijection when some declared members may
+    # simply have no corresponding cluster. So each member takes its own nearest
+    # cluster independently, and the trust tests then decide. Two members
+    # landing on the SAME cluster is not a conflict to resolve arbitrarily - it
+    # is exactly the ambiguity the d1/d2 test exists to catch.
+    D = np.array([[float(np.linalg.norm(cent[i] - P[j])) for i in range(K)]
+                  for j in range(len(P))])
+    result = {}
+    for j, name in enumerate(pal):
+        i = int(np.argmin(D[j]))
+        others = sorted(D[k][i] for k in range(len(P)) if k != j)
+        result[name] = (i, float(D[j][i]), others[0] if others else float("inf"))
+
+    # trust threshold scales with how separable THIS ASSET's declared subset is
+    if len(P) >= 2:
+        min_pair = min(float(np.linalg.norm(P[i] - P[j]))
+                       for i, j in __import__("itertools").combinations(range(len(P)), 2))
+    else:
+        min_pair = 1.0
 
     rows = []
     for name, p in pal.items():
@@ -182,6 +214,8 @@ def analyse(path, sample=200_000, is_render=False):
         "rows": rows,
         "gain": gain,
         "min_pair": min_pair,
+        "declared": declared,
+        "skipped": skipped,
         "resid_rms": float(np.sqrt((resid ** 2).mean())),
         "raw_rms": float(np.sqrt(((O - P) ** 2).mean())),
     }
@@ -297,6 +331,8 @@ def main():
                     help="inputs are rendered RGBA sprites/masters, not albedo textures")
     ap.add_argument("--emit", metavar="ASSET",
                     help="write albedo_gain and albedo_remap for this asset into assets.json")
+    ap.add_argument("--members", help="comma-separated palette members this asset uses; "
+                                      "defaults to the asset's palette_members in assets.json")
     a = ap.parse_args()
 
     out = []
@@ -304,7 +340,16 @@ def main():
         if not os.path.exists(t):
             print(f"MISSING {t}")
             continue
-        r = analyse(t, is_render=a.render)
+        members = None
+        if a.members:
+            members = [x.strip() for x in a.members.split(",") if x.strip()]
+        elif a.emit:
+            import json as _j
+            _m = _j.load(open(os.path.join(HERE, "..", "assets.json")))
+            _row = next((x for x in _m["assets"] if x["name"] == a.emit), None)
+            if _row:
+                members = _row.get("palette_members")
+        r = analyse(t, is_render=a.render, members=members)
         report(r)
         if a.emit:
             print("\n  per-cluster anchors:")
