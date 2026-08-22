@@ -190,12 +190,18 @@ static func _check_hotbar_budget(failures: Array, parent: Node) -> void:
 # The rule has to be SYMMETRIC or the BFS becomes a directed flood fill whose
 # component grouping depends on lex walk order — see sub-case (4).
 #
+# THE DIRECTION RULE, stated once so it is not re-derived from scratch every
+# time: a substation's anchor is its WEST/NORTH cell, so its footprint grows
+# in +x/+y only. Anchor distance and footprint distance therefore differ for a
+# pole on the substation's +x/+y side (footprint reads one LESS, because the
+# gap really is shorter) and are IDENTICAL for a pole on its -x/-y side.
+#
 # THESE ROWS DO NOT DISCRIMINATE ANCHOR FROM FOOTPRINT. The second pole is
-# always placed EAST of the first, and the substation's anchor sits on its
-# WEST column, so its footprint extends AWAY from the other pole and the two
-# metrics read the same number. That is deliberate — this case is about the
-# max() rule, not about _pole_distance. Sub-case (5) carries the westward
-# pairing where anchor-to-anchor reads 12 and footprint reads 11.
+# always placed EAST of the first, which puts the first pole on the
+# substation's -x side — the identical case. That is deliberate: this case is
+# about the max() rule, not about _pole_distance. Sub-case (5) carries the
+# +x pairing (E basic at (32,5), EAST of the substation at (20,5)) where
+# anchor-to-anchor reads 12 and footprint reads 11.
 # ===========================================================================
 static func _case_either_reaches(parent: Node, failures: Array) -> void:
 	var rows: Array = [
@@ -303,7 +309,7 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 	_check(failures, f_joined,
 		"(4) the medium pole at %s and the basic pole at %s are 5 apart and should be connected under either-reaches, max(6,3)=6" % [str(f_medium), str(f_basic)])
 	_check(failures, not f_far_joined,
-		"(4) the far basic pole at %s is 20 from the medium pole and must NOT join it — if it does, the predicate is not measuring distance at all" % str(f_far))
+		"(4) the far basic pole at %s is 25 from the medium pole and must NOT join it — if it does, the predicate is not measuring distance at all" % str(f_far))
 
 # ===========================================================================
 # (5) THE PREDICATE IS THE GRAPH.

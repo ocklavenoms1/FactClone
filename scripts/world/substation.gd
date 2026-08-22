@@ -12,8 +12,11 @@ extends RefCounted
 ##
 ## Beware the two different 9s in this session. 9x9 is (2*4+1)^2, the 1x1
 ## formula, and it is what a CONSUMER searches: power_satisfaction_at scans
-## (2 * SUPPLY_RADIUS + 1)^2 outward from the consumer itself, independent of
-## any pole's footprint. That box is odd-sided because it centres on a single
+## (2r + 1)^2 outward from the consumer itself — r being a supply radius from
+## PowerNetwork.SUPPLY_RADIUS_BY_TYPE, read through supply_radius(), which
+## replaced the flat SUPPLY_RADIUS const when the tables went per-tier in
+## Task 4 — independent of any pole's footprint. That box is odd-sided
+## because it centres on a single
 ## cell — which is exactly why it cannot describe an even-sided footprint.
 ## Sizing a substation's scan box to 9 silently drops its far edge.
 ##

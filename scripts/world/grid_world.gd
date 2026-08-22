@@ -1641,9 +1641,10 @@ func _draw() -> void:
 ## poles_connected makes stricter-than-BFS unreachable rather than untested.
 ##
 ## The same-network guard that follows is a genuine no-op and no claim is made
-## for it here: poles_by_comp already groups by component, and a shared
-## predicate cannot put connected poles in different components, so nothing
-## can make it fire. Nothing in the headless suite exercises this function at
+## for it here. The reason is the loop shape, not the shared predicate: both
+## endpoints are drawn from poles_by_comp[cid], so their component ids are
+## equal by construction and no predicate — shared, stricter or looser — could
+## ever make the guard fire. Nothing in the headless suite exercises this at
 ## all — there is no draw pass — so any "it would catch X" argument for it
 ## would be unverifiable. It is left in place only because Task 7 replaces
 ## this whole pairwise loop with a per-component minimum spanning tree, and
@@ -1684,9 +1685,11 @@ func _draw_power_wires() -> void:
 				# rebuild_topology's BFS makes. Not a reimplementation of it.
 				if not PowerNetwork.poles_connected(self, pa, pb):
 					continue
-				# Same-network guard — a no-op, and nothing can make it fire
-				# now that the check above is the BFS's own predicate. See the
-				# docstring for why it is still here rather than deleted.
+				# Same-network guard — a no-op, and NOT because of the shared
+				# predicate above: pa and pb both come out of
+				# poles_by_comp[cid], so their component ids are equal by
+				# construction, under any predicate at all. See the docstring
+				# for why it is still here rather than deleted.
 				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
 					continue
 				# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).

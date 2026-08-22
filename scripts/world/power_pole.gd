@@ -5,14 +5,22 @@ extends RefCounted
 ## passive carrier of the electric network.
 ##
 ## The tiers are POWER_POLE, MEDIUM_POLE (medium_pole.gd) and SUBSTATION
-## (substation.gd). They differ ONLY in three numbers — wire range, supply
-## radius, footprint — and share every behaviour; nothing here is special-
-## cased for the basic tier. Ranges are per-tier and live in
-## PowerNetwork.POLE_RANGE_BY_TYPE (this one is 3) with supply radii in
+## (substation.gd). The DESIGN intent is that they differ in three numbers
+## only — wire range, supply radius, footprint. Ranges live in
+## PowerNetwork.POLE_RANGE_BY_TYPE (this one is 3) and supply radii in
 ## SUPPLY_RADIUS_BY_TYPE (this one is 1). Two poles auto-connect when their
 ## Chebyshev distance is within EITHER one's range — max(), not min() — so a
 ## substation reaches a basic pole that cannot reach back; the rule lives in
 ## PowerNetwork.poles_connected and nowhere else.
+##
+## WHERE THE TIERS ARE NOT YET EQUAL (Task 4 -> Task 5). Wiring is done: all
+## three tiers form network components. Everything a pole does for OTHER
+## buildings is still POWER_POLE-only, because three functions in
+## power_network.gd still hard-filter on that type — _supply_component_id and
+## power_satisfaction_at (so a medium pole and a substation project NO supply
+## area and power nothing) and _adjacent_component_id (so a generator touching
+## one feeds NO supply into the network). Task 5 owns all three. Until it
+## lands, the two new tiers are wire-carriers and nothing else.
 ##
 ## No tick logic; network membership is computed on demand by
 ## PowerNetwork.rebuild_topology(world). Visual: dark wood base + tall pole +

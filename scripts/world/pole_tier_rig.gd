@@ -21,7 +21,9 @@ extends RefCounted
 ##   dense arrangement behind the original complaint: POLE_RANGE was cut from
 ##   5 to 3 at Foundation PAUSE 1 because a 5-tile range "produced too many
 ##   in-range pairs in dense layouts (K4 with 6 wires for 4 poles)" — see the
-##   POLE_RANGE docstring in power_network.gd. Session 3 replaces mesh
+##   POLE_RANGE_BY_TYPE docstring in power_network.gd, which is where that
+##   history moved when Task 4 replaced the flat POLE_RANGE const with the
+##   per-tier table. Session 3 replaces mesh
 ##   rendering with a minimum spanning tree, which changes SHIPPED,
 ##   GATE-APPROVED visuals, so the simple basic-pole case needs to be judged
 ##   against what it looked like before. All six pairs in this square are at

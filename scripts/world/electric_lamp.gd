@@ -54,8 +54,9 @@ static func info_lines(b: Building, world) -> Array:
 	var lines: Array = []
 	lines.append("Demand: %d unit" % DEMAND)
 	# Consumers use the wireless supply-area scan (Factorio-style), not
-	# strict cardinal adjacency. Pole within SUPPLY_RADIUS Chebyshev of
-	# any cell of lamp's footprint = network match.
+	# strict cardinal adjacency. A pole within its own tier's supply radius
+	# (PowerNetwork.SUPPLY_RADIUS_BY_TYPE, via supply_radius()) of any cell
+	# of the lamp's footprint = network match.
 	var comp_id: int = PowerNetwork._supply_component_id(world, b)
 	if comp_id < 0:
 		lines.append("Network: (no pole within supply range)")

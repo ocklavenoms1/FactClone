@@ -375,6 +375,28 @@ static func update_supply_demand(world) -> void:
 ## Consumers should use _supply_component_id instead — Factorio-style
 ## wireless supply area (PAUSE 1 user decision).
 static func _adjacent_component_id(world, b: Building) -> int:
+	# TEMPORARY (Task 4 -> Task 5), and the LEAST obvious of the three: the
+	# POWER_POLE check below rejects MEDIUM_POLE and SUBSTATION, so a
+	# generator or accumulator cardinally touching one of the new tiers
+	# resolves to -1 and is skipped entirely by update_supply_demand's Stage 1.
+	# A steam generator built flush against a substation contributes ZERO
+	# supply while looking perfectly connected — the substation is a network
+	# member, it is drawn with wires, and the generator shows no error.
+	#
+	# Task 4 created that reachability: both tiers became network members here
+	# and have been hotbar-placeable since Task 2. Task 5 owns this function
+	# alongside _supply_component_id and power_satisfaction_at — all three
+	# carry the same filter and all three must widen to Buildings.POLE_TYPES
+	# together, or generators and consumers will disagree about which poles
+	# exist.
+	#
+	# Widening it alone here would also be UNVERIFIABLE rather than dangerous,
+	# which is the actual reason it waits: no layout in the project puts a
+	# generator or accumulator against a new tier. electric_rig places neither
+	# tier at all, and both of pole_tier_rig's steam generators sit on basic
+	# poles (GEN_A's N edge (0,2) (1,2) and GEN_B's (16,2) (17,2) are all
+	# CLUSTER_A/B_POLES). So the change would move no number in the suite, and
+	# a behaviour change nothing can observe is one nothing can review.
 	for cell in Buildings.all_edge_cells(b.type, b.anchor):
 		if not world.has_building_at(cell):
 			continue
