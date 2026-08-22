@@ -42,7 +42,14 @@ import lock  # noqa: E402
 
 K = 10
 ITERS = 40
-MATCH_TRUST_RATIO = 0.5  # match must be nearer than half the palette min-pair
+# An anchor is trusted only if BOTH questions pass:
+#   "is it close at all?"      d1 < MATCH_ABS_RATIO * palette min-pair
+#   "is it decisively closest?" d1/d2 < MATCH_RATIO_TEST
+# Absolute-only (the old d1 < 0.5*min_pair) dropped fieldstone - the largest
+# cluster on a stone building. Ratio-only kept verdigris, calling a grey cluster
+# green on an asset with no green in it. Each question alone is wrong.
+MATCH_ABS_RATIO = 1.0
+MATCH_RATIO_TEST = 0.8
 GAIN_CLAMP = (0.4, 2.5)  # per-anchor gain limits; beyond this the cure is worse
 SEED = 12345
 
@@ -133,7 +140,10 @@ def analyse(path, sample=200_000, is_render=False):
     for dist, name, i in flat:
         if name in result or i in used:
             continue
-        result[name] = (i, dist)
+        # runner-up distance for this cluster, for the ratio test
+        others = sorted(float(np.linalg.norm(cent[i] - P[j]))
+                        for j in range(len(P)) if list(pal)[j] != name)
+        result[name] = (i, dist, others[0] if others else float("inf"))
         used.add(i)
 
     # trust threshold scales with how separable this palette actually is
@@ -142,7 +152,7 @@ def analyse(path, sample=200_000, is_render=False):
 
     rows = []
     for name, p in pal.items():
-        i, mdist = result[name]
+        i, mdist, runner = result[name]
         # back into the ORIGINAL texture space: the shader taps the raw texture
         o = cent[i] * gain
         cdist = float(np.linalg.norm(chromaticity(o) - chromaticity(p)))
@@ -159,6 +169,8 @@ def analyse(path, sample=200_000, is_render=False):
             "chroma_dist": float(cdist),
             "match_dist": float(mdist),
             "match_ratio": float(mdist / max(min_pair, 1e-9)),
+            "runner_up": float(runner),
+            "ratio_test": float(mdist / max(runner, 1e-9)),
             "cluster_pct": float(w[i] * 100),
         })
 
@@ -177,13 +189,15 @@ def analyse(path, sample=200_000, is_render=False):
 
 def report(a):
     print(f"\n=== {a['file']}   (mask texels excluded: {a['mask_pct']:.2f}%)")
-    print(f"{'member':15}{'locked':9}{'observed':10}{'|delta|':>9}{'lum ratio':>11}"
-          f"{'match d':>9}{'d/minpair':>11}{'cluster':>9}")
+    print(f"{'member':15}{'locked':9}{'observed':10}{'match d':>9}"
+          f"{'d/minpr':>9}{'d1/d2':>9}{'cluster':>9}")
     for r in a["rows"]:
-        flag = "" if r["match_ratio"] < 0.5 else ("  MARGINAL" if r["match_ratio"] < 1.0 else "  UNTRUSTED")
+        keep = r["match_ratio"] <= MATCH_ABS_RATIO and r["ratio_test"] <= MATCH_RATIO_TEST
+        flag = "" if keep else ("  DROP far" if r["match_ratio"] > MATCH_ABS_RATIO
+                                else "  DROP ambiguous")
         print(f"{r['member']:15}{r['palette_hex']:9}{r['observed_hex']:10}"
-              f"{r['delta_mag']:9.4f}{r['lum_ratio']:11.3f}"
-              f"{r['match_dist']:9.4f}{r['match_ratio']:11.2f}{r['cluster_pct']:8.1f}%{flag}")
+              f"{r['match_dist']:9.4f}{r['match_ratio']:9.2f}{r['ratio_test']:9.2f}"
+              f"{r['cluster_pct']:8.1f}%{flag}")
     g = a["gain"]
     print(f"  palette min-pair separation (linear RGB): {a['min_pair']:.4f}")
     print(f"  (a) aggregate global gain, no matching: R {g[0]:.3f}  G {g[1]:.3f}  B {g[2]:.3f}")
@@ -219,8 +233,12 @@ def build_remap(a):
         # A poor chromaticity match means we are not actually confident this
         # cluster IS that material - and a confident-looking gain built on a bad
         # match will shift hues wherever it applies. Drop it rather than trust it.
-        if r["match_ratio"] > MATCH_TRUST_RATIO:
-            dropped.append((r["member"], round(r["match_ratio"], 3), "match further than half the palette min-pair"))
+        too_far = r["match_ratio"] > MATCH_ABS_RATIO
+        not_decisive = r["ratio_test"] > MATCH_RATIO_TEST
+        if too_far or not_decisive:
+            why = ("no material that close - likely absent from the asset" if too_far
+                   else "ambiguous against its runner-up - materials not distinct")
+            dropped.append((r["member"], round(r["ratio_test"], 3), why))
             continue
 
         # Clamp: an unclamped gain on a very dark cluster (fired clay wants

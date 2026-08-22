@@ -24,21 +24,54 @@ import lock  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 
+def _srgb_to_linear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _hexlin(h):
+    h = h.lstrip("#")
+    return [_srgb_to_linear(int(h[i:i + 2], 16) / 255.0) for i in (0, 2, 4)]
+
+
 def main():
     man = json.load(open(os.path.join(REPO, "art", "assets.json")))
     era = lock.PALETTE_ERA
     stale, missing, ok = [], [], []
 
+    # The era is defined by the REMAP TARGET, not by what was typed into Tripo
+    # and not by a hand-written string. Where an asset carries remap anchors,
+    # verify their stored targets against the locked palette - that is the
+    # actual thing the correction aims at, so it is what the gate must check.
+    def target_matches(asset):
+        rm = asset.get("albedo_remap") or {}
+        anchors = rm.get("anchors") or []
+        if not anchors:
+            return None  # nothing to verify against
+        for an in anchors:
+            hexcode = lock.PALETTE.get(an["member"])
+            if hexcode is None:
+                return False
+            want = _hexlin(hexcode)
+            got = an.get("target") or []
+            if len(got) != 3 or max(abs(w - g) for w, g in zip(want, got)) > 1e-3:
+                return False
+        return True
+
     for a in man["assets"]:
         if a.get("status") == "proxy":
             continue
         declared = a.get("palette_era")
+        verified = target_matches(a)
+
         if declared is None:
             missing.append(a["name"])
         elif declared != era:
             stale.append((a["name"], declared))
+        elif verified is False:
+            stale.append((a["name"], f"{declared} (declared) but its remap targets "
+                                     f"do not match the locked palette"))
         else:
-            ok.append(a["name"])
+            ok.append(a["name"] + ("" if verified else "  [declared only - no remap anchors to verify]"))
 
     print(f"locked palette era: {era}")
     if ok:

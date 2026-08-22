@@ -116,6 +116,8 @@ art/
     analyze_mesh.py        structural report on a Tripo mesh
     dump_texture.py        extract basecolour/normal/rm to PNG for measurement
     make_proxies.py        stand-in geometry for testing without Tripo
+    render_rigonly.py      flat-albedo render: the rig's shading, alone
+    palette_swatch.py      a palette on flat proxies, no Tripo, no correction
     states/                per-state material/light hooks
   tools/                   system Python (needs Pillow + numpy)
     downsample.py          premultiplied LANCZOS downsample
@@ -128,6 +130,7 @@ art/
     detail_density.py      HF gate + feature/thickness diagnostics
     assert_states.py       tripwire: declared states must actually differ
     assert_palette_era.py  gate: every real asset on the locked palette era
+    baked_shading.py       albedo variance by spatial scale (see section 15)
     palette_board.py       renders a palette on flat proxies, no correction
 ```
 
@@ -825,3 +828,115 @@ locked rig with **no Tripo texture and no correction in the path** - chips at
 true 32 px size, at 4x, and on three proxy buildings. Every earlier look at
 these colours was through a Tripo texture and an albedo correction, which shows
 a correction, not a palette.
+
+---
+
+## 14. Does the PROMPT palette bind? No - it is advisory
+
+A free controlled test arrived: `SMELTER.glb` was prompted with the superseded
+draft palette (`#3C4650` blue iron, `#7A5A33` olive oak) but measured against
+the locked `natural-5` targets. If the prompt palette bound, iron and oak would
+be the anchors that failed.
+
+| member | prompt delta from locked | match d/min-pair | d1/d2 | result |
+|---|---|---|---|---|
+| fieldstone | **0.0000** (prompted exactly) | 0.92 | 0.73 | clears |
+| wrought iron | 0.0252 (prompted **wrong**) | **0.42** | 0.63 | **clears** |
+| weathered oak | **0.0543** (prompted **most wrong**) | **0.33** | 0.36 | **clears best** |
+| leather | 0.0154 (near-identical) | 1.27 | 0.92 | drop |
+| verdigris | **0.0000** (prompted exactly) | 1.92 | 0.72 | drop |
+
+**There is no correlation between prompt fidelity and match quality — if
+anything it inverts.** The member prompted *most* wrongly matched *best*; both
+members prompted *exactly* did worst. Variance explained 74%, against 79% on
+the previous asset, which was prompted with a different palette again.
+
+### What actually binds: presence and distinctness
+
+The two drops are content, not colour:
+
+- **verdigris** — the asset contains no green cluster at all. Prompted with the
+  identical hex, so the prompt cannot be the cause; Tripo simply did not give
+  the accent any area.
+- **leather** — its best candidate cluster sits at `d1/d2 = 0.92`, i.e. almost
+  exactly as close to `weathered_oak`. The asset's browns form a continuum, so
+  leather is not *distinguishable*, whatever hex was asked for.
+
+**Conclusion for assets 4-20: the prompt palette is advisory.** Getting a hex
+slightly wrong costs nothing once the remap exists. What is binding is that
+every material the asset claims appears as a **visually distinct region with
+real area**. Prompt for separation of materials, not for exact hexes.
+
+### The trust rule needed both halves
+
+This asset forced a fix. An anchor is trusted only if **both** hold:
+
+```
+d1 < 1.0 x palette min-pair      "is it close at all?"
+d1 / d2 < 0.8                    "is it decisively closest?"
+```
+
+Absolute-only (the old `d1 < 0.5 x min_pair`) dropped **fieldstone** - the
+largest cluster on a stone building. Ratio-only kept **verdigris**, calling a
+grey cluster green on an asset with no green in it. Each question alone is
+wrong; the pair keeps exactly the three materials the asset actually contains.
+
+---
+
+## 15. Baked shading: it reinforces the rig, it does not fight it
+
+The stone faces carry painted gradients. The remap corrects value, not
+gradient, so the question is whether that baked light competes with the locked
+rig.
+
+**A variance decomposition of the albedo could not answer it.** Splitting
+within-cluster luminance variance by spatial scale returned ~100% "coarse" for
+every material, at both 2048 and full 8192 resolution - because the variance is
+dominated by different *faces* sitting at different values, which swamps any
+within-face gradient. The metric is in `baked_shading.py` and is reported, but
+it is not the answer.
+
+**The decisive test is a rig-only render.** `render_rigonly.py` re-renders the
+asset with every albedo flattened to mid grey, leaving only what the three-point
+rig and the geometry produce. Comparing that against the real render separates
+the two:
+
+| | |
+|---|---|
+| correlation, real vs rig-only (log luminance) | **+0.918** |
+| final-sprite variance from the RIG | **52.0%** |
+| final-sprite variance from the ALBEDO | 48.0% |
+| correlation of implied albedo with rig shading | **+0.443** |
+
+The last number is the answer: **the baked light runs WITH the rig**, not
+against it. The concept image was lit from roughly the same direction the rig
+uses, so the painted falloff exaggerates the rig's own shading rather than
+fighting it.
+
+That is the good outcome, with one caveat worth carrying: *exaggerates* means
+this asset renders at higher contrast than a genuinely flat-albedo one would,
+and the amount is per-asset and uncorrected. It is a cross-asset consistency
+risk, not a per-asset defect - and it is exactly why "flat even shadowless
+lighting" stays in the style block.
+
+---
+
+## 16. Rivet noise: invisible, but cheap
+
+Dozens of sub-2px dots on the iron straps.
+
+| | |
+|---|---|
+| features at p85 | 20 |
+| under 2 px thick | **16 of 20 (80%)** |
+| under 1.5 px | 9 |
+| median thickness | 1.54 px |
+| HF energy destroyed | **3.4% = 1.45x floor** - the best of any asset so far |
+
+They do **not** survive - no dot pattern is visible on the straps at true size.
+But they cost almost nothing either: the HF gate is the lowest yet, because the
+rivets are low-contrast against the strap and average into its tone rather than
+fighting the downsample.
+
+So this is wasted generation detail rather than harmful detail. It feeds the
+prompt-budget feedback (80% under 2 px) without threatening the gate.

@@ -31,11 +31,13 @@
       },
       "yaws": [],
       "status": "real",
-      "note": "Tripo 'stone furnace 3d model' (approved). Squared block on a square plan, large stone courses, no outrigger. Firebox interior is a flat magenta mask panel, so this asset drives the MASK path - no glow_at emitter. Glow ships as a separate additive layer (smelter_glow.png), not baked into the smelting sprite. PALETTE: generated against the legacy 6-member palette. Its albedo_remap targets those old hexes and is retained so the accepted appearance is unchanged. Regenerate against the 5-member separable palette; a new-palette remap on this asset recolours rather than corrects (only 2 of 5 anchors match, oak clamps at 2.5, result goes olive).",
+      "note": "Tripo SMELTER.glb. Squared block, large courses, no outrigger, magenta firebox mask. PROMPTED with the superseded draft palette (#3C4650 iron, #7A5A33 oak) but the REMAP TARGET is natural-5, which is what defines palette_era. Used as the controlled test of whether the prompt palette binds - see PIPELINE.md.",
+      "albedo_correction": "remap",
+      "palette_era": "natural-5",
       "albedo_gain": [
-        0.4168,
-        0.535,
-        0.5304
+        0.4835,
+        0.4117,
+        0.3499
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -43,9 +45,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.073142,
-              0.07334,
-              0.061421
+              0.055665,
+              0.058922,
+              0.045824
             ],
             "target": [
               0.102242,
@@ -53,74 +55,25 @@
               0.097587
             ],
             "gain": [
-              1.3978,
-              1.5262,
-              1.5888
+              1.8367,
+              1.8997,
+              2.1296
             ],
             "gain_raw": [
-              1.3978,
-              1.5262,
-              1.5888
+              1.8367,
+              1.8997,
+              2.1296
             ],
             "clamped": false,
-            "chroma_dist": 0.0303
-          },
-          {
-            "member": "fired_clay",
-            "observed": [
-              0.057213,
-              0.034499,
-              0.017252
-            ],
-            "target": [
-              0.254152,
-              0.144128,
-              0.078187
-            ],
-            "gain": [
-              2.5,
-              2.5,
-              2.5
-            ],
-            "gain_raw": [
-              4.4422,
-              4.1777,
-              4.5322
-            ],
-            "clamped": true,
-            "chroma_dist": 0.0174
-          },
-          {
-            "member": "weathered_oak",
-            "observed": [
-              0.097346,
-              0.062264,
-              0.031697
-            ],
-            "target": [
-              0.147027,
-              0.076185,
-              0.031896
-            ],
-            "gain": [
-              1.5103,
-              1.2236,
-              1.0063
-            ],
-            "gain_raw": [
-              1.5103,
-              1.2236,
-              1.0063
-            ],
-            "clamped": false,
-            "chroma_dist": 0.0832
+            "chroma_dist": 0.0344,
+            "match_ratio": 0.92
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.050136,
-              0.05024,
-              0.039582
+              0.036083,
+              0.039113,
+              0.029811
             ],
             "target": [
               0.061246,
@@ -128,50 +81,51 @@
               0.076185
             ],
             "gain": [
-              1.2216,
-              1.5967,
-              1.9248
+              1.6974,
+              2.051,
+              2.5
             ],
             "gain_raw": [
-              1.2216,
-              1.5967,
-              1.9248
+              1.6974,
+              2.051,
+              2.5556
             ],
-            "clamped": false,
-            "chroma_dist": 0.1025
+            "clamped": true,
+            "chroma_dist": 0.0909,
+            "match_ratio": 0.424
           },
           {
-            "member": "leather",
+            "member": "weathered_oak",
             "observed": [
-              0.080989,
-              0.0499,
-              0.024844
+              0.076894,
+              0.036231,
+              0.01104
             ],
             "target": [
-              0.194618,
-              0.102242,
-              0.05448
+              0.147027,
+              0.076185,
+              0.031896
             ],
             "gain": [
-              2.403,
-              2.0489,
-              2.1929
+              1.9121,
+              2.1028,
+              2.5
             ],
             "gain_raw": [
-              2.403,
-              2.0489,
-              2.1929
+              1.9121,
+              2.1028,
+              2.8892
             ],
-            "clamped": false,
-            "chroma_dist": 0.0451
+            "clamped": true,
+            "chroma_dist": 0.0565,
+            "match_ratio": 0.326
           }
         ],
         "dropped": [
-          "forge_brown"
+          "leather",
+          "verdigris"
         ]
-      },
-      "albedo_correction": "remap",
-      "palette_era": "legacy-6"
+      }
     },
     {
       "name": "chest",
@@ -210,11 +164,13 @@
         270
       ],
       "status": "test",
-      "note": "Rotation experiment only. Cell is unioned across all four facings so Godot carries ONE anchor. PALETTE: generated against the legacy 6-member palette. Its albedo_remap targets those old hexes and is retained so the accepted appearance is unchanged. Regenerate against the 5-member separable palette; a new-palette remap on this asset recolours rather than corrects (only 2 of 5 anchors match, oak clamps at 2.5, result goes olive).",
+      "note": "Tripo SMELTER.glb. Squared block, large courses, no outrigger, magenta firebox mask. PROMPTED with the superseded draft palette (#3C4650 iron, #7A5A33 oak) but the REMAP TARGET is natural-5, which is what defines palette_era. Used as the controlled test of whether the prompt palette binds - see PIPELINE.md.",
+      "albedo_correction": "remap",
+      "palette_era": "natural-5",
       "albedo_gain": [
-        0.4168,
-        0.535,
-        0.5304
+        0.4835,
+        0.4117,
+        0.3499
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -222,9 +178,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.073142,
-              0.07334,
-              0.061421
+              0.055665,
+              0.058922,
+              0.045824
             ],
             "target": [
               0.102242,
@@ -232,74 +188,25 @@
               0.097587
             ],
             "gain": [
-              1.3978,
-              1.5262,
-              1.5888
+              1.8367,
+              1.8997,
+              2.1296
             ],
             "gain_raw": [
-              1.3978,
-              1.5262,
-              1.5888
+              1.8367,
+              1.8997,
+              2.1296
             ],
             "clamped": false,
-            "chroma_dist": 0.0303
-          },
-          {
-            "member": "fired_clay",
-            "observed": [
-              0.057213,
-              0.034499,
-              0.017252
-            ],
-            "target": [
-              0.254152,
-              0.144128,
-              0.078187
-            ],
-            "gain": [
-              2.5,
-              2.5,
-              2.5
-            ],
-            "gain_raw": [
-              4.4422,
-              4.1777,
-              4.5322
-            ],
-            "clamped": true,
-            "chroma_dist": 0.0174
-          },
-          {
-            "member": "weathered_oak",
-            "observed": [
-              0.097346,
-              0.062264,
-              0.031697
-            ],
-            "target": [
-              0.147027,
-              0.076185,
-              0.031896
-            ],
-            "gain": [
-              1.5103,
-              1.2236,
-              1.0063
-            ],
-            "gain_raw": [
-              1.5103,
-              1.2236,
-              1.0063
-            ],
-            "clamped": false,
-            "chroma_dist": 0.0832
+            "chroma_dist": 0.0344,
+            "match_ratio": 0.92
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.050136,
-              0.05024,
-              0.039582
+              0.036083,
+              0.039113,
+              0.029811
             ],
             "target": [
               0.061246,
@@ -307,50 +214,51 @@
               0.076185
             ],
             "gain": [
-              1.2216,
-              1.5967,
-              1.9248
+              1.6974,
+              2.051,
+              2.5
             ],
             "gain_raw": [
-              1.2216,
-              1.5967,
-              1.9248
+              1.6974,
+              2.051,
+              2.5556
             ],
-            "clamped": false,
-            "chroma_dist": 0.1025
+            "clamped": true,
+            "chroma_dist": 0.0909,
+            "match_ratio": 0.424
           },
           {
-            "member": "leather",
+            "member": "weathered_oak",
             "observed": [
-              0.080989,
-              0.0499,
-              0.024844
+              0.076894,
+              0.036231,
+              0.01104
             ],
             "target": [
-              0.194618,
-              0.102242,
-              0.05448
+              0.147027,
+              0.076185,
+              0.031896
             ],
             "gain": [
-              2.403,
-              2.0489,
-              2.1929
+              1.9121,
+              2.1028,
+              2.5
             ],
             "gain_raw": [
-              2.403,
-              2.0489,
-              2.1929
+              1.9121,
+              2.1028,
+              2.8892
             ],
-            "clamped": false,
-            "chroma_dist": 0.0451
+            "clamped": true,
+            "chroma_dist": 0.0565,
+            "match_ratio": 0.326
           }
         ],
         "dropped": [
-          "forge_brown"
+          "leather",
+          "verdigris"
         ]
-      },
-      "albedo_correction": "remap",
-      "palette_era": "legacy-6"
+      }
     }
   ]
 }

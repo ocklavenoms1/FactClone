@@ -260,14 +260,14 @@ When changing a "magic number" constant in code that has embedded geometry / val
 ## Electricity Network Design Decision (asymmetric — earned `session-electricity-foundation`)
 
 Generators require strict cardinal adjacency to pole (physical wiring metaphor).
-Consumers require Chebyshev radius ≤ `SUPPLY_RADIUS` to pole (supply area metaphor).
+Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply area metaphor).
 
-**Constants:** `POLE_RANGE = 3` (pole-to-pole network connectivity, Chebyshev), `SUPPLY_RADIUS = 1` (pole's consumer reach, Chebyshev).
+**Constants:** the two flat consts `POLE_RANGE = 3` / `SUPPLY_RADIUS = 1` were replaced by per-tier tables at `session-electricity-pole-tiers` Task 4 — `PowerNetwork.POLE_RANGE_BY_TYPE` (basic 3, medium 6, substation 11) and `PowerNetwork.SUPPLY_RADIUS_BY_TYPE` (1, 2, 4), each with a `*_DEFAULT` for lookup misses. The basic pole's row still carries the original numbers, so nothing about the shipped basic-pole behaviour moved.
 
 **Rationale:** matches Factorio convention. Two different concepts:
 
-- **Generator-to-pole** = high-current connection, robust contact required. Code: `PowerNetwork._adjacent_component_id(world, b)` — iterates `Buildings.all_edge_cells()` for 4-directional 1-tile adjacency.
-- **Consumer-to-pole** = supply area, electromagnetic field metaphor, more forgiving. Code: `PowerNetwork._supply_component_id(world, b)` — iterates b's full footprint and scans `(2*SUPPLY_RADIUS+1)²` Chebyshev box for any pole.
+- **Generator-to-pole** = high-current connection, robust contact required. Code: `PowerNetwork._adjacent_component_id(world, b)` — iterates `Buildings.all_edge_cells()` for 4-directional 1-tile adjacency, filtered on `Buildings.POLE_TYPES` so every tier counts.
+- **Consumer-to-pole** = supply area, electromagnetic field metaphor, more forgiving. Code: `PowerNetwork._supply_component_id(world, b)` — iterates b's full footprint and hands each cell to `_covering_component_id`, which is also what `power_satisfaction_at` calls, so the two consumer paths cannot disagree. That resolver scans a box sized to `max_supply_radius()` (the widest tier), then filters each candidate against its OWN radius, and measures distance to the matched **footprint cell** via `world._pole_cells` — so the 2×2 substation covers `anchor-4 .. anchor+1+4`, ten cells per axis, rather than a 9×9 hung off its anchor.
 
 **Forward implications for future sessions:**
 

@@ -22,16 +22,16 @@
     96.0
   ],
   "overhangs_front_edge": false,
-  "normalized_scale": 1.877413,
+  "normalized_scale": 1.88169,
   "normalized_extent_tiles": [
+    1.7034,
     1.84,
-    1.7531,
-    1.71
+    1.5495
   ],
   "material_norm": true,
   "material_report": [
     {
-      "material": "tripo_material_302dcdc3-fe90-4aa2-b81e-845d14c2dc6e",
+      "material": "tripo_material_027a1544-e4f9-4eea-b071-2b26bfb7d516",
       "roughness_src": "texture",
       "roughness_after": [
         0.34,
@@ -44,14 +44,13 @@
   "albedo_gain_applied": {
     "anchors": [
       "fieldstone",
-      "fired_clay",
-      "weathered_oak",
       "wrought_iron",
-      "leather"
+      "weathered_oak"
     ],
     "sigma": 0.02,
     "dropped": [
-      "forge_brown"
+      "leather",
+      "verdigris"
     ],
     "materials": 1,
     "mode": "remap"

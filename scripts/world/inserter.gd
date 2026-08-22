@@ -755,16 +755,20 @@ static func info_lines(b: Building, world) -> Array:
 		STATE_NO_POWER:
 			# Its OWN entry, not folded into the NO_FUEL arm: the two stalls
 			# have different fixes, and the whole value of the line is telling
-			# the player WHICH one they are looking at. The remedy names the
-			# supply rule literally — a BASIC pole's supply radius is 1
-			# (PowerNetwork.supply_radius(Buildings.Type.POWER_POLE), from the
-			# per-tier SUPPLY_RADIUS_BY_TYPE table that replaced the flat
-			# SUPPLY_RADIUS const in Task 4), so a pole anywhere in the 3x3
-			# around the inserter powers it. "within 1 tile" stays exactly
-			# right while the basic pole is the only tier that projects a
-			# supply area at all — Task 5 gives the wider tiers theirs, and
-			# this string has to widen with them.
-			status = "NO POWER — connect a pole within 1 tile"
+			# the player WHICH one they are looking at.
+			#
+			# The remedy names the supply rule literally, and since Task 5 that
+			# rule is PER-TIER: every pole tier projects its own supply area,
+			# so a basic pole has to be within 1 while a substation reaches 4.
+			# Both numbers are READ FROM THE TABLE — supply_radius() and
+			# max_supply_radius() over PowerNetwork.SUPPLY_RADIUS_BY_TYPE — so
+			# retuning a tier retunes this line instead of leaving it lying.
+			# It used to say "within 1 tile" flat, which was exactly right only
+			# while the basic pole was the one tier that projected anything.
+			status = "NO POWER — no pole in range (a basic pole reaches %d, the widest tier %d)" % [
+				PowerNetwork.supply_radius(Buildings.Type.POWER_POLE),
+				PowerNetwork.max_supply_radius(),
+			]
 	lines.append("Status: %s" % status)
 	# Held item.
 	var held: int = held_item_type(b)

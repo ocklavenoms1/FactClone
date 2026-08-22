@@ -4,9 +4,9 @@ extends RefCounted
 ## Medium Pole — the middle wire tier (Electricity Session 3).
 ##
 ## 1x1 like the basic pole, but wire range 6 (vs 3) and supply radius 2
-## (vs 1), so it covers a 5x5 area instead of 3x3. Those numbers land in
-## power_network.gd in a later task, NOT here — this module owns only
-## identity and pixels.
+## (vs 1), so it covers a 5x5 area instead of 3x3. Those numbers live in
+## power_network.gd's POLE_RANGE_BY_TYPE and SUPPLY_RADIUS_BY_TYPE, NOT here
+## — this module owns only identity and pixels.
 ##
 ## Visually distinguished from the basic pole by a taller shaft, a second
 ## crossarm, and a cooler grey-brown body. Both tiers must be tellable apart

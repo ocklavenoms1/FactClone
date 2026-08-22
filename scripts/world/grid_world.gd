@@ -216,7 +216,14 @@ var _component_has_pump: Dictionary = {}  # int -> bool
 # scripts/world/power_network.gd for the resolver module. Linear-
 # satisfaction model: each component has a ratio in [0, 1] applied by
 # consumers to scale their throughput/visual feedback.
-var _pole_component: Dictionary = {}              # Vector2i → int (component id)
+var _pole_component: Dictionary = {}              # Vector2i (pole ANCHOR) → int (component id)
+# Every footprint cell of every pole, mapped back to that pole's anchor.
+# Rebuilt alongside _pole_component by PowerNetwork.rebuild_topology and read
+# by PowerNetwork._covering_component_id. A 1x1 pole contributes one entry
+# that duplicates its _pole_component key; the 2x2 substation contributes
+# four, which is the whole reason this exists — consumer queries arrive as raw
+# cells and cannot know a multi-cell pole's anchor.
+var _pole_cells: Dictionary = {}                  # Vector2i (any pole footprint cell) → Vector2i (that pole's anchor)
 var _component_supply: Dictionary = {}            # int (comp_id) → int (units)
 var _component_demand: Dictionary = {}            # int (comp_id) → int (units)
 var _component_satisfaction: Dictionary = {}      # int (comp_id) → float in [0, 1]

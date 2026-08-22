@@ -132,16 +132,13 @@ enum Type {
 	# Every `type == POWER_POLE` test is therefore a place the tiers must be
 	# added by hand — see POLE_TYPES below, and the guards in power_network.gd.
 	# Both became placeable in Task 2 (DATA rows, make/draw/info_lines
-	# dispatch, hotbar slots) and became real network members in Task 4:
-	# POLE_RANGE_BY_TYPE and SUPPLY_RADIUS_BY_TYPE exist, rebuild_topology
-	# collects every type in POLE_TYPES, and a placed tier forms and joins
-	# networks and is drawn with wires.
-	# STILL OUTSTANDING (Task 5): what they do for OTHER buildings. The
-	# POWER_POLE-only filters in _supply_component_id and
-	# _adjacent_component_id mean a consumer beside one contributes no demand
-	# and a generator touching one feeds in no supply — while
-	# power_satisfaction_at, which has no type filter, already answers for them
-	# at the basic radius. power_pole.gd's docstring has the full breakdown.
+	# dispatch, hotbar slots), became real network members in Task 4
+	# (POLE_RANGE_BY_TYPE and SUPPLY_RADIUS_BY_TYPE exist, rebuild_topology
+	# collects every type in POLE_TYPES, a placed tier forms and joins networks
+	# and is drawn with wires) and became equal to the basic pole for OTHER
+	# buildings in Task 5: all three of power_network.gd's type filters now
+	# read POLE_TYPES, so a consumer inside a new tier's supply area
+	# contributes demand and a generator touching one feeds in supply.
 	# Appended at the END of the enum so every previously-saved type keeps its
 	# integer value.
 	MEDIUM_POLE,
