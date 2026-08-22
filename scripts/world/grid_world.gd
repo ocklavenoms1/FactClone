@@ -1684,9 +1684,9 @@ func _draw_power_wires() -> void:
 				# rebuild_topology's BFS makes. Not a reimplementation of it.
 				if not PowerNetwork.poles_connected(self, pa, pb):
 					continue
-				# Same-network guard — the looser-direction backstop. See the
-				# docstring: it cannot fire while the predicate is shared, and
-				# that is the point.
+				# Same-network guard — a no-op, and nothing can make it fire
+				# now that the check above is the BFS's own predicate. See the
+				# docstring for why it is still here rather than deleted.
 				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
 					continue
 				# Draw the wire. Pole-top = world_pos + (tile_size/2, tile_size*0.16).
