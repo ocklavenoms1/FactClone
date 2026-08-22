@@ -32,6 +32,9 @@ extends RefCounted
 ##      a substation feeds its supply in (Task 5).
 ##   9. The panel row that renders the tier table still FITS the info panel —
 ##      adding a tier widens a player-facing string (Task 5 review).
+##  10. Supply-scan cost tripwire — times power_satisfaction_at over a dense
+##      consumer field inside a substation's area and prints the us/call on
+##      every run. Order-of-magnitude budget, not a benchmark (Task 6).
 
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
@@ -64,8 +67,9 @@ static func run(parent: Node) -> Dictionary:
 	_case_consumer_paths_agree(parent, failures)
 	_case_generator_against_substation(parent, failures)
 	_case_reach_row_fits_panel(failures)
+	_case_supply_scan_cost(parent, failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "9 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
+		return { "ok": true, "message": "10 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -811,6 +815,206 @@ static func _case_reach_row_fits_panel(failures: Array) -> void:
 		var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(InfoPanelScript.BODY_FONT_SIZE)).x
 		_check(failures, w <= float(budget),
 			"(9) the info-panel row \"%s\" measures %.0f px against info_panel.gd's %d px line budget. draw_string does NOT trim, so it spills past the panel border and off the right of the viewport — which is the exact regression adding a pole tier recreates. Split the row or shorten the labels" % [text, w, budget])
+
+# ===========================================================================
+# (10) THE SUPPLY-SCAN COST TRIPWIRE — Task 6.
+#
+# power_satisfaction_at resolves through _covering_component_id, which walks a
+# (2 * max_supply_radius() + 1)^2 box on every call: 81 cells at the shipped
+# radius 4. Every electric consumer pays several of those every tick —
+# TWO per lamp (update_supply_demand's Stage 1 _supply_component_id, plus
+# ElectricLamp.tick) and THREE per POWERED electric inserter (Stage 1, plus
+# Inserter.tick's power gate, plus effective_cycle_ticks). Both consumers are
+# 1x1, so each _supply_component_id is exactly one _covering_component_id.
+# At the 20 lamps + 4 electric inserters both shipped rigs carry, that is 52
+# scans per tick, against a 50 ms tick (TickSystem.TICKS_PER_SECOND = 20).
+#
+# THIS IS A TRIPWIRE, NOT A BENCHMARK, and the distinction sets the budget.
+# It is here to catch a CLASS of regression — a scan that starts iterating
+# world.buildings, a rebuild_topology that stops being cached behind
+# _power_network_dirty, a box widened again by a tier past the substation's
+# radius 4 — not to police single-digit percentages. Task 6 measured the whole
+# of Session 3's cost increase at about 10x, and a 10x change is precisely what
+# this notices. So SCAN_BUDGET_US sits an order of magnitude above
+# what the code actually costs, and the sub-case print()s the figure on EVERY
+# run, pass or fail. The printed number is the deliverable. The assertion is
+# only the floor under it.
+#
+# The empty-loop figure is printed alongside deliberately: it is the machine's
+# own speed, measured in the same process by the same timer. Whoever reads a
+# red can divide the two and tell in one step whether the scan regressed or
+# the machine was simply busy — which an absolute microsecond threshold
+# cannot say on its own.
+#
+# THE RIG IS THE REALISTIC WORST CASE, in the ways that matter:
+#   - A SUBSTATION, so the box really is the widest tier's 81 cells. Any
+#     smaller pole would be measuring a cheaper world than the one shipped.
+#   - SIX MORE POLES inside its supply area, so candidates have to be
+#     COMPARED. This is the part the Task 6 measurement turned on: the
+#     exhaustive scan's cost rises with how many poles are in the box, because
+#     it evaluates every one before picking, so a lone pole in an empty field
+#     would under-report.
+#   - Consumers on every free cell of the area, and the probe list is those
+#     cells — the scan is timed where a lamp could actually stand, not at an
+#     arbitrary coordinate.
+#
+# MIN, NOT MEAN, across SCAN_RUNS passes. The minimum is the sample least
+# contaminated by whatever else the machine was doing, which is the right
+# statistic for a threshold that must not redden on contention. Mean and max
+# are printed too, so a genuinely slow run is still visible.
+# ===========================================================================
+
+## Microseconds per power_satisfaction_at call this sub-case refuses to pass.
+##
+## Measured at ~10 us/call on the Task 6 development machine (Godot 4.6.3
+## headless console build, which runs GDScript with debug checks on — an
+## exported release build is faster, so every figure here is an upper bound).
+## Seven suite runs landed between 9.8 and 13.0: the low end is a quiet
+## machine and matches the 10.5 a standalone harness measured on the identical
+## rig, and the high end is contention, NOT the scan. The budget is set against
+## the noisy end, so 100.0 is roughly 8x headroom over the worst reading and
+## 10x over the real cost.
+##
+## That spread is the reason this is a tripwire and not a benchmark. A budget
+## tight enough to notice a 30% regression would sit inside the noise and go
+## red on a busy laptop, which is how a timing test gets deleted.
+##
+## Raising it because a run went red is almost always the wrong move. Read the
+## printed empty-loop figure first — if that has not moved, the scan has.
+const SCAN_BUDGET_US: float = 100.0
+## Discarded passes before timing starts. Two jobs: it takes the one-off
+## rebuild_topology that the first power_satisfaction_at triggers out of the
+## timed region (placement leaves _power_network_dirty true), and it lets the
+## engine settle after this rig's 97 placements (7 poles + 90 lamps).
+const SCAN_WARM_PASSES: int = 3
+## Probes per timed pass, and passes per figure. 90 probes x 100 reps = 9000
+## calls per pass, about a tenth of a second — five orders of magnitude
+## above Time.get_ticks_usec()'s 1 us resolution, so quantisation contributes
+## nothing, and three passes still leave the sub-case under half a second.
+const SCAN_REPS: int = 100
+const SCAN_RUNS: int = 3
+
+static func _case_supply_scan_cost(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var sub: Vector2i = Vector2i(20, 20)
+	# Six 1x1 poles inside the substation's supply area, so the box the timed
+	# scan walks holds several candidates rather than one. Mixed tiers on
+	# purpose: _covering_component_id does a SUPPLY_RADIUS_BY_TYPE lookup per
+	# candidate and then filters on the result, so a field of one tier would
+	# hit one row of that table and take one branch of that filter.
+	var rows: Array = [
+		[Buildings.Type.SUBSTATION, sub],
+		[Buildings.Type.POWER_POLE, Vector2i(17, 17)],
+		[Buildings.Type.POWER_POLE, Vector2i(17, 24)],
+		[Buildings.Type.POWER_POLE, Vector2i(24, 17)],
+		[Buildings.Type.POWER_POLE, Vector2i(24, 24)],
+		[Buildings.Type.MEDIUM_POLE, Vector2i(17, 20)],
+		[Buildings.Type.MEDIUM_POLE, Vector2i(24, 20)],
+	]
+	if not _place_all(world, rows, failures, "(10)"):
+		_teardown(world)
+		return
+	# The substation's radius-4 area, DERIVED rather than written out: anchor-4
+	# through anchor+1+4, which is the (2r+2) = ten cells per axis that
+	# SUPPLY_RADIUS_BY_TYPE's docstring describes. Deriving it means a radius
+	# change moves the field with it instead of silently timing the wrong box.
+	var r_sub: int = PowerNetwork.supply_radius(Buildings.Type.SUBSTATION)
+	var fp_sub: Vector2i = Buildings.footprint_of(Buildings.Type.SUBSTATION)
+	var lo: Vector2i = sub - Vector2i(r_sub, r_sub)
+	var hi: Vector2i = sub + fp_sub - Vector2i.ONE + Vector2i(r_sub, r_sub)
+	var probes: Array = []
+	for y in range(lo.y, hi.y + 1):
+		for x in range(lo.x, hi.x + 1):
+			var p: Vector2i = Vector2i(x, y)
+			if world.has_building_at(p):
+				continue
+			if world.place_building(Buildings.Type.ELECTRIC_LAMP, p):
+				probes.append(p)
+
+	# EXPLICIT, and not redundant with the warm-up below. Placement leaves
+	# _power_network_dirty true, and only power_satisfaction_at clears it —
+	# _covering_component_id and _pole_cells readers do NOT rebuild on demand.
+	# Without this the premise checks below read an empty _pole_cells and
+	# report a rig covering nothing, which is exactly what they did when this
+	# line was missing.
+	PowerNetwork.rebuild_topology(world)
+
+	# --- PREMISES, before any timing. A rig that quietly stopped being the
+	# worst case would still produce a fast, green, meaningless number. ---
+	_check(failures, PowerNetwork.max_supply_radius() == r_sub,
+		"(10) PREMISE: max_supply_radius() is %d but the substation's own radius is %d, so this rig is no longer timing the widest tier's box" % [PowerNetwork.max_supply_radius(), r_sub])
+	_check(failures, probes.size() >= 80,
+		"(10) PREMISE: only %d of the substation's supply-area cells took a lamp, so the probe list is not the dense consumer field this sub-case exists to time" % probes.size())
+	if probes.is_empty():
+		_teardown(world)
+		return
+	# Every probe must resolve to a real component. A probe list that resolved
+	# to -1 would time the EMPTY-box path, and the tripwire would go green on a
+	# rig that had stopped covering anything.
+	var uncovered: int = 0
+	var worst_candidates: int = 0
+	for p in probes:
+		if PowerNetwork._covering_component_id(world, p) < 0:
+			uncovered += 1
+		worst_candidates = max(worst_candidates, _pole_cells_in_scan_box(world, p))
+	_check(failures, uncovered == 0,
+		"(10) PREMISE: %d of %d probe cells are covered by no pole at all, so the timed loop is measuring the empty-box path rather than the one a powered consumer pays" % [uncovered, probes.size()])
+	_check(failures, worst_candidates >= 4,
+		"(10) PREMISE: the fullest scan box across the whole probe list holds only %d pole cells, so nothing in this rig makes the scan COMPARE candidates — and the exhaustive walk's variable cost is in that comparison" % worst_candidates)
+
+	# --- warm-up, then the timed passes ---
+	for _w in range(SCAN_WARM_PASSES):
+		for p in probes:
+			PowerNetwork.power_satisfaction_at(world, p)
+	var calls: int = SCAN_REPS * probes.size()
+	var best_us: float = -1.0
+	var worst_us: float = -1.0
+	var total_us: float = 0.0
+	for _run in range(SCAN_RUNS):
+		var t0: int = Time.get_ticks_usec()
+		for _rep in range(SCAN_REPS):
+			for p in probes:
+				PowerNetwork.power_satisfaction_at(world, p)
+		var per_call: float = float(Time.get_ticks_usec() - t0) / float(calls)
+		total_us += per_call
+		if best_us < 0.0 or per_call < best_us:
+			best_us = per_call
+		if per_call > worst_us:
+			worst_us = per_call
+	# The same loop shape around a call that does nothing — the machine's own
+	# speed, so a reader of the figure above can separate scan cost from
+	# machine cost without leaving the log.
+	var t_loop: int = Time.get_ticks_usec()
+	for _rep2 in range(SCAN_REPS):
+		for p in probes:
+			_scan_loop_floor(world, p)
+	var loop_us: float = float(Time.get_ticks_usec() - t_loop) / float(calls)
+
+	print("[bench] pole tiers (10) power_satisfaction_at: %.3f us/call (min of %d passes, mean %.3f, max %.3f) over %d calls each, %d probes, %dx%d box, fullest box %d pole cells, empty-loop floor %.3f us/call, budget %.1f" % [
+		best_us, SCAN_RUNS, total_us / float(SCAN_RUNS), worst_us, calls,
+		probes.size(), 2 * r_sub + 1, 2 * r_sub + 1, worst_candidates, loop_us, SCAN_BUDGET_US])
+
+	_check(failures, best_us <= SCAN_BUDGET_US,
+		"(10) power_satisfaction_at costs %.3f us/call against a %.1f us/call tripwire budget, with the empty-loop floor at %.3f us/call in the same process. That budget sits an order of magnitude above the measured cost, so machine speed alone does not reach it — read the loop floor before touching the constant. A lamp pays 2 of these scans per tick and a powered electric inserter 3, so the shipped 20-lamp 4-inserter rigs pay 52, against a 50 ms tick" % [best_us, SCAN_BUDGET_US, loop_us])
+	_teardown(world)
+
+## How many pole cells sit inside the scan box _covering_component_id would
+## walk for `pos` — i.e. how many candidates the exhaustive version compares.
+## Sized off max_supply_radius() so it tracks the function it describes.
+static func _pole_cells_in_scan_box(world, pos: Vector2i) -> int:
+	var radius: int = PowerNetwork.max_supply_radius()
+	var n: int = 0
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			if world._pole_cells.has(pos + Vector2i(dx, dy)):
+				n += 1
+	return n
+
+## A call with power_satisfaction_at's shape and none of its work. Timing the
+## probe loop around this is what turns the absolute microsecond figure above
+## into something a reader on another machine can calibrate against.
+static func _scan_loop_floor(_world, _pos: Vector2i) -> float:
+	return 0.0
 
 ## Lay STONE over a `size` rectangle anchored at `anchor`.
 ##
