@@ -285,6 +285,54 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ---
 
+## Supply-scan cost: the memo is the lever, NOT the early return
+
+Measured at Electricity Session 3 Task 6, headless console build (debug checks on, so
+these are upper bounds — a release export is faster).
+
+| configuration | µs/call | vs pre-Session-3 |
+|---|---|---|
+| pre-Session-3 (9-cell box, first hit) | 1.03 | 1.0× |
+| 81-cell box, **first hit** | 5.23 | 5.1× |
+| **shipped** — 81-cell box, exhaustive | **10.68** | **10.4×** |
+| shipped, dense pole field (22 candidates) | 17.50 | 17.0× |
+
+**At the shipped rigs' 24 consumers this is 1.1% of a 50 ms tick** (1.8% worst case), so it
+was not worth acting on. It reaches 10% of a tick at ~216 consumers.
+
+### If it ever DOES become real, reach for the memo — not the early return
+
+The tempting fix is restoring `_covering_component_id`'s early return, which is safe today
+only because of an invariant documented in its docstring. **Don't.** Two reasons the
+measurement settled:
+
+1. **It isn't where the cost is.** On an uncovered probe, where nothing can bail early:
+   shipped 8.54 µs, first-hit 8.44 µs, pre-Session-3 1.08 µs. So **~8.4 µs is the bare
+   81-cell box walk, which the early return does not touch.** It is a 2.0× saving on a
+   10.4× regression, not a rollback of it.
+2. **A per-tick memo on the world is BOTH larger and free of correctness cost.** Consumers
+   are scanned more than once per tick — 2 per lamp, 3 per powered electric inserter — so
+   the rigs' 24 consumers cost **52 scans/tick**. A memo collapses that to **24: a 2.17×
+   saving, larger than the early return's 2.0×**, while keeping the exhaustive scan and its
+   robustness. `inserter.gd` names this at the double-lookup site. After the memo, a spatial
+   index over poles is the next step.
+
+Spending the robustness property on the smaller of two available wins is a bad trade.
+
+### The thing to actually watch is DENSITY, not the absolute number
+
+The exhaustive scan compares every candidate in the box, so its cost scales with **poles per
+box** — 10.7 µs at 8 candidates, 17.5 µs at 22 — where a first-hit scan stays nearly flat
+(5.23 → 5.77). **The scenario that would change this answer is pole-dense endgame layouts
+paired with consumer counts in the hundreds**, not consumer count alone.
+
+`test_pole_tiers.gd` sub-case (10) prints the measured figure on **every** suite run, pass or
+fail, with the machine's own empty-loop floor alongside it. So the number surfaces on its own
+rather than needing to be remembered — and a red can be divided by the machine's speed
+instead of guessed at.
+
+---
+
 ## Electricity Arc — 2 of N sessions shipped (+ first non-lamp consumer, via the Inserter Arc)
 
 **The arc's consumer side is no longer theoretical.** `session-inserter-electric` shipped
