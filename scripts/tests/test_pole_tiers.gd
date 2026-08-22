@@ -21,7 +21,7 @@ extends RefCounted
 ##      the opposite order (Task 4).
 ##   5. The predicate IS the graph — the BFS components are exactly the
 ##      connected components of PowerNetwork.poles_connected, the same function
-##      grid_world._draw_power_wires calls to decide what to draw (Task 4).
+##      wire_edges asks when it builds the tree the renderer draws (Task 4).
 ##   6. Multi-cell supply symmetry — the 2x2 substation's supply area is
 ##      projected from all FOUR of its cells, so it reaches equally far east
 ##      and west (Task 5).
@@ -35,6 +35,13 @@ extends RefCounted
 ##  10. Supply-scan cost tripwire — times power_satisfaction_at over a dense
 ##      consumer field inside a substation's area and prints the us/call on
 ##      every run. Order-of-magnitude budget, not a benchmark (Task 6).
+##  11. MST wire edges — PowerNetwork.wire_edges emits a SPANNING TREE per
+##      component (N-1 wires that reach every pole), every edge one
+##      poles_connected accepts, on the K4 square and on the rig's own
+##      mixed-tier bus (Task 7).
+##  12. Wire-edge cost tripwire — times wire_edges at three component sizes.
+##      It runs once per FRAME, so this is the harsher of the two timing
+##      budgets in this file (Task 7).
 
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
@@ -68,8 +75,10 @@ static func run(parent: Node) -> Dictionary:
 	_case_generator_against_substation(parent, failures)
 	_case_reach_row_fits_panel(failures)
 	_case_supply_scan_cost(parent, failures)
+	_case_mst_wire_edges(parent, failures)
+	_case_wire_edge_cost(parent, failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "10 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
+		return { "ok": true, "message": "12 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -374,9 +383,11 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 #
 # Sub-cases (3) and (4) pin the RULE. This one pins the STRUCTURE that makes
 # the rule safe: PowerNetwork.poles_connected is the only place the rule
-# exists, and grid_world._draw_power_wires calls that same function to decide
-# which wires to draw. So the edge set the renderer draws and the edge set the
-# BFS walked are the same object, and the failure the user cares about — a
+# exists, and PowerNetwork.wire_edges — the only thing
+# grid_world._draw_power_wires walks — asks that same function to decide which
+# pairs its spanning tree may use. So the edges the renderer draws are a SUBSET
+# of the edges the BFS walked, never a pair the BFS rejected, and the failure
+# the user cares about — a
 # renderer STRICTER than the BFS, leaving poles on one network with no wire
 # between them and no signal anywhere — is unreachable rather than untested.
 #
@@ -1015,6 +1026,319 @@ static func _pole_cells_in_scan_box(world, pos: Vector2i) -> int:
 ## into something a reader on another machine can calibrate against.
 static func _scan_loop_floor(_world, _pos: Vector2i) -> float:
 	return 0.0
+
+# ===========================================================================
+# (11) MST WIRE EDGES.
+#
+# The renderer draws to a canvas, which the headless suite has no way to
+# inspect, so the testable unit is the EDGE LIST — PowerNetwork.wire_edges,
+# which grid_world._draw_power_wires now does nothing but walk.
+#
+# Three claims:
+#   (a) A component of N poles produces EXACTLY N-1 wires, and those N-1
+#       wires SPAN it. That is what makes wire count independent of wire
+#       range, which is what lets the substation afford range 11 without the
+#       K4 hairball that forced POLE_RANGE down from 5 to 3 at Foundation
+#       PAUSE 1. N-1 alone is not a spanning tree — N nodes and N-1 edges can
+#       still be a cycle plus a separate piece — so the walk in
+#       _edges_span_component is a second, independent assertion and not a
+#       restatement of the count.
+#   (b) Every emitted edge satisfies poles_connected. The renderer must never
+#       draw a wire the BFS would not have walked, and must never omit one it
+#       did.
+#   (c) On a MIXED-TIER layout the tree is strictly smaller than the mesh.
+#       (a) is satisfiable by a renderer that got lucky on one shape; (11b)
+#       pins it where it actually matters, on the rig's own substation-bridged
+#       bus, by measuring the mesh it replaced in the same world.
+#
+# The K4 square in (11a) is the exact shape from the original complaint: four
+# poles, all six pairs in range. Mesh drew 6 wires, MST draws 3. Its premise
+# check re-asserts that all six pairs really are connected, because "3 edges"
+# is only interesting against a layout where 6 was available.
+# ===========================================================================
+
+## The K4: basic poles at Chebyshev exactly 3 on both axes. The DIAGONAL pairs
+## are also at 3 — Chebyshev is max(|dx|, |dy|), not a sum — which is what
+## makes all six pairs in range at the shipped basic range of 3. Same shape as
+## PoleTierRig.MST_CONTROL_POLES, which is the on-screen control for this.
+const MST_K4: Array = [Vector2i(10, 10), Vector2i(13, 10), Vector2i(10, 13), Vector2i(13, 13)]
+## A second component, far enough east that no basic pole in the K4 reaches it
+## (x gap 17, against range 3), so the edge total has to come from two trees.
+const MST_FAR_PAIR: Array = [Vector2i(30, 10), Vector2i(33, 10)]
+
+static func _case_mst_wire_edges(parent: Node, failures: Array) -> void:
+	_case_mst_k4(parent, failures)
+	_case_mst_mixed_tier(parent, failures)
+
+static func _case_mst_k4(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	var rows: Array = []
+	for p in MST_K4:
+		rows.append([Buildings.Type.POWER_POLE, p])
+	for p in MST_FAR_PAIR:
+		rows.append([Buildings.Type.POWER_POLE, p])
+	if not _place_all(world, rows, failures, "(11a)"):
+		_teardown(world)
+		return
+	PowerNetwork.rebuild_topology(world)
+
+	# --- PREMISES. 3 edges is only a claim about MST if 6 were on offer. ---
+	var k4_pairs: int = _mesh_pair_count(world, MST_K4)
+	_check(failures, k4_pairs == 6,
+		"(11a) PREMISE: only %d of the 6 pairs in the K4 square satisfy poles_connected, so this layout is no longer the dense case the mesh renderer drew 6 wires for and a 3-edge result would prove nothing" % k4_pairs)
+	_check(failures, _component_count(world) == 2,
+		"(11a) PREMISE: the layout formed %d components, expected exactly 2 — the far pair must not reach the K4 or the edge total below stops being 3 + 1" % _component_count(world))
+
+	var edges: Array = PowerNetwork.wire_edges(world)
+
+	# --- (a) the count, and the count that names the mutation ---
+	_check(failures, edges.size() == 4,
+		"(11a) four mutually-in-range poles plus a separate pair should yield 3 + 1 = 4 MST wires, got %d (7 means the mesh renderer is still in place: all 6 K4 pairs plus 1 in the far pair)" % edges.size())
+
+	# --- (b) every edge is one the BFS would have walked ---
+	for e in edges:
+		var ea: Vector2i = e[0]
+		var eb: Vector2i = e[1]
+		_check(failures, PowerNetwork.poles_connected(world, ea, eb),
+			"(11a) the edge list contains %s -> %s, which poles_connected rejects. An edge the BFS would not walk is a wire drawn between poles that are not on one network" % [str(ea), str(eb)])
+
+	# --- (a again) per component: N-1, and spanning ---
+	_check_trees(world, edges, failures, "(11a)")
+	_teardown(world)
+
+## The MIXED-TIER case, built from PoleTierRig so it cannot drift from the
+## layout PAUSE 1 is judged against. The bus is the point: a medium pole at
+## range 6 and a substation at range 11 see far more of it than a basic pole
+## does, so the mesh fans out there in a way the basic-only K4 cannot show.
+static func _case_mst_mixed_tier(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	PoleTierRig.build(world, Vector2i(40, 40))
+	PowerNetwork.rebuild_topology(world)
+
+	var by_comp: Dictionary = _poles_by_component(world)
+	# The bus is the component holding the substation. Found by TYPE rather
+	# than by coordinate so moving the rig does not silently pick the control
+	# block, which is basic-only and would make (c) below a weaker claim.
+	var bus_id: int = -1
+	for cid in by_comp:
+		for anchor in by_comp[cid]:
+			var b: Building = world.buildings.get(anchor, null)
+			if b != null and b.type == Buildings.Type.SUBSTATION:
+				bus_id = int(cid)
+				break
+	_check(failures, bus_id >= 0,
+		"(11b) PREMISE: no component in the rig contains a SUBSTATION, so there is no mixed-tier bus here to test")
+	if bus_id < 0:
+		_teardown(world)
+		return
+	var bus: Array = by_comp[bus_id]
+	_check(failures, bus.size() >= 4,
+		"(11b) PREMISE: the substation's component holds only %d poles, which is too small a bus for the mesh and the tree to differ meaningfully" % bus.size())
+
+	var edges: Array = PowerNetwork.wire_edges(world)
+	_check_trees(world, edges, failures, "(11b)")
+
+	# --- (c) on the bus the tree is strictly smaller than the mesh ---
+	var bus_mesh: int = _mesh_pair_count(world, bus)
+	var bus_tree: int = 0
+	for e in edges:
+		if int(world._pole_component.get(e[0], -1)) == bus_id:
+			bus_tree += 1
+	_check(failures, bus_tree == bus.size() - 1,
+		"(11b) the substation's bus holds %d poles so its tree must have %d wires, got %d" % [bus.size(), bus.size() - 1, bus_tree])
+	_check(failures, bus_mesh > bus_tree,
+		"(11b) the mesh and the tree draw the same %d wires on the mixed-tier bus, so this rig no longer demonstrates that MST decouples wire COUNT from wire RANGE — the whole reason the substation may carry 11" % bus_tree)
+	_teardown(world)
+
+## Assert, for every component in `world`, that the emitted edges form a
+## spanning tree over it: exactly N-1 edges, and those edges connect all N.
+## Components of one pole must contribute no edge at all.
+static func _check_trees(world, edges: Array, failures: Array, prefix: String) -> void:
+	var by_comp: Dictionary = _poles_by_component(world)
+	var edges_by_comp: Dictionary = {}
+	for e in edges:
+		var cid: int = int(world._pole_component.get(e[0], -1))
+		var cid_b: int = int(world._pole_component.get(e[1], -1))
+		_check(failures, cid >= 0 and cid == cid_b,
+			"%s the edge %s -> %s joins components %d and %d. An MST edge that crosses components is not an edge of any one component's tree" % [prefix, str(e[0]), str(e[1]), cid, cid_b])
+		if not edges_by_comp.has(cid):
+			edges_by_comp[cid] = []
+		edges_by_comp[cid].append(e)
+	for cid in by_comp:
+		var poles: Array = by_comp[cid]
+		var comp_edges: Array = edges_by_comp.get(cid, [])
+		var want: int = max(0, poles.size() - 1)
+		_check(failures, comp_edges.size() == want,
+			"%s component %d holds %d poles and should have exactly %d wires, got %d" % [prefix, int(cid), poles.size(), want, comp_edges.size()])
+		_check(failures, _edges_span_component(poles, comp_edges),
+			"%s component %d has the right wire COUNT but its wires do not reach all %d of its poles. A count-only check passes a cycle plus a stranded piece, which on screen is a pole with no wire at all" % [prefix, int(cid), poles.size()])
+
+## Do `comp_edges` connect every anchor in `poles` into one piece? Plain BFS
+## over the EMITTED edges only — it must not consult poles_connected, or it
+## would be re-testing the predicate rather than the tree that was drawn.
+static func _edges_span_component(poles: Array, comp_edges: Array) -> bool:
+	if poles.size() <= 1:
+		return true
+	var adj: Dictionary = {}
+	for p in poles:
+		adj[p] = []
+	for e in comp_edges:
+		if not adj.has(e[0]) or not adj.has(e[1]):
+			return false
+		adj[e[0]].append(e[1])
+		adj[e[1]].append(e[0])
+	var seen: Dictionary = { poles[0]: true }
+	var queue: Array = [poles[0]]
+	while not queue.is_empty():
+		var cur = queue.pop_front()
+		for nb in adj[cur]:
+			if seen.has(nb):
+				continue
+			seen[nb] = true
+			queue.append(nb)
+	return seen.size() == poles.size()
+
+## How many of the pairs among `anchors` satisfy poles_connected — i.e. how
+## many wires the OLD mesh renderer would have drawn over them.
+static func _mesh_pair_count(world, anchors: Array) -> int:
+	var n: int = 0
+	for i in range(anchors.size()):
+		for j in range(i + 1, anchors.size()):
+			if PowerNetwork.poles_connected(world, anchors[i], anchors[j]):
+				n += 1
+	return n
+
+## comp_id -> Array of pole anchors, read straight off world._pole_component.
+static func _poles_by_component(world) -> Dictionary:
+	var by_comp: Dictionary = {}
+	for anchor in world._pole_component:
+		var cid: int = int(world._pole_component[anchor])
+		if not by_comp.has(cid):
+			by_comp[cid] = []
+		by_comp[cid].append(anchor)
+	return by_comp
+
+# ===========================================================================
+# (12) WIRE-EDGE COST TRIPWIRE.
+#
+# Same shape and the same reasoning as sub-case (10), for the same reason:
+# wire_edges runs on the RENDER path, once per frame, and nothing else in the
+# suite would notice it getting slow. (10) times a per-consumer cost; this
+# times a per-FRAME one, which is the harsher budget of the two.
+#
+# THE COST IS QUADRATIC IN COMPONENT SIZE and that is inherent, not a bug: an
+# MST over a graph given only by a predicate has to ask the predicate about
+# every pair at least once. The figure to watch is therefore how the printed
+# us/call moves between the three sizes below, not any one of them alone.
+# Sizes: 12 is the shipped rigs, 50 and 100 are a player's endgame bus.
+# ===========================================================================
+
+## Component sizes to time. Square grids so every size is one component: poles
+## spaced at the basic tier's own range, so each has up to eight in-range
+## neighbours and the relaxation body actually runs rather than being skipped.
+##
+## 12 is roughly the shipped rigs (pole_tiers places 10 poles, electric_rig
+## 12). 50 and 100 are a player's endgame bus, and they are here to be READ,
+## not to be passed — see WIRE_BUDGET_US.
+const WIRE_SIZES: Array = [12, 50, 100]
+
+## The size the budget below is applied to, and it is deliberately the MIDDLE
+## one. Measured on the Task 7 development machine (Godot 4.6.3 headless
+## console, debug checks on, so every figure is an upper bound):
+##
+##   poles  shipped dense Prim   the plan's remaining x in_tree form
+##      12          159 us                    732 us   (3.6x)
+##      50         2470 us                  40343 us  (10.5x)
+##     100        12474 us                 339720 us  (27.2x)
+##
+## Gating at 12 would not catch the O(N^3) formulation: 732 us sits inside any
+## budget loose enough to survive a busy machine. Gating at 100 would need a
+## constant above 12474, i.e. writing down that three quarters of a frame is
+## acceptable, which it is not. 50 is where the two formulations are already
+## 16x apart and the honest number is still a fraction of a frame.
+const WIRE_GATE_SIZE: int = 50
+## Microseconds per wire_edges call this sub-case refuses to pass at
+## WIRE_GATE_SIZE. 3x over the 2470 us measured there — the spread across
+## passes at this size ran 2470 to 3192, so a tighter budget would sit inside
+## the noise, and 8000 still catches the O(N^3) form by 5x.
+const WIRE_BUDGET_US: float = 8000.0
+const WIRE_WARM_PASSES: int = 2
+const WIRE_RUNS: int = 3
+
+## 60 fps. wire_edges is called from _draw, not from the tick, so the frame is
+## the budget it competes for and 50 ms tick figures do not apply.
+const FRAME_US: float = 16666.0
+
+static func _case_wire_edge_cost(parent: Node, failures: Array) -> void:
+	var gate_us: float = -1.0
+	for n in WIRE_SIZES:
+		var us: float = _time_wire_edges(parent, int(n), failures)
+		if int(n) == WIRE_GATE_SIZE:
+			gate_us = us
+	_check(failures, gate_us >= 0.0,
+		"(12) PREMISE: WIRE_GATE_SIZE is %d but no entry in WIRE_SIZES matches it, so nothing was gated and the printed figures are unguarded" % WIRE_GATE_SIZE)
+	if gate_us < 0.0:
+		return
+	_check(failures, gate_us <= WIRE_BUDGET_US,
+		"(12) wire_edges costs %.1f us/call at %d poles in one component, against a %.1f us/call tripwire budget. It runs once per FRAME from grid_world._draw_power_wires, so this is spent before anything is drawn — read the printed empty-loop floor before touching the constant, and read the 100-pole line before concluding the budget was too tight" % [gate_us, WIRE_GATE_SIZE, WIRE_BUDGET_US])
+
+## Time wire_edges over one component of `n` basic poles. Returns the min-of-
+## passes us/call, and prints the [bench] line. Min rather than mean for the
+## same reason sub-case (10) uses it: the fastest pass is the least
+## contaminated by whatever else the machine was doing.
+static func _time_wire_edges(parent: Node, n: int, failures: Array) -> float:
+	var world = _make_world(parent)
+	# A square-ish grid spaced at the basic tier's range, read from the table
+	# so a range change moves the layout with it instead of quietly splitting
+	# the grid into many components and timing a much cheaper shape.
+	var step: int = PowerNetwork.pole_range(Buildings.Type.POWER_POLE)
+	var side: int = int(ceil(sqrt(float(n))))
+	var placed: int = 0
+	for i in range(n):
+		var cell: Vector2i = Vector2i((i % side) * step, (i / side) * step)
+		if world.place_building(Buildings.Type.POWER_POLE, cell):
+			placed += 1
+	PowerNetwork.rebuild_topology(world)
+	_check(failures, placed == n,
+		"(12) PREMISE: asked for %d poles at size %d and placed %d" % [n, n, placed])
+	_check(failures, _component_count(world) == 1,
+		"(12) PREMISE: the %d-pole grid formed %d components, not 1. wire_edges is quadratic in COMPONENT size, so a split grid times several small trees and reports a cost no real bus would pay" % [n, _component_count(world)])
+
+	for _w in range(WIRE_WARM_PASSES):
+		PowerNetwork.wire_edges(world)
+	var best_us: float = -1.0
+	var worst_pass_us: float = -1.0
+	var total_us: float = 0.0
+	for _run in range(WIRE_RUNS):
+		var t0: int = Time.get_ticks_usec()
+		PowerNetwork.wire_edges(world)
+		var per_call: float = float(Time.get_ticks_usec() - t0)
+		total_us += per_call
+		if best_us < 0.0 or per_call < best_us:
+			best_us = per_call
+		if per_call > worst_pass_us:
+			worst_pass_us = per_call
+	# The loop that CALLS wire_edges, around a call that does nothing — the
+	# machine's own speed, so the figure above can be read on another machine.
+	var t_loop: int = Time.get_ticks_usec()
+	for _r in range(WIRE_RUNS):
+		_wire_loop_floor(world)
+	var loop_us: float = float(Time.get_ticks_usec() - t_loop) / float(WIRE_RUNS)
+
+	var edges: int = PowerNetwork.wire_edges(world).size()
+	print("[bench] pole tiers (12) wire_edges: %d poles in 1 component -> %d wires, %.1f us/call (min of %d passes, mean %.1f, max %.1f), %.2f%% of a 60fps frame, empty-loop floor %.3f us/call%s" % [
+		n, edges, best_us, WIRE_RUNS, total_us / float(WIRE_RUNS), worst_pass_us,
+		100.0 * best_us / FRAME_US, loop_us,
+		" <- GATED, budget %.1f" % WIRE_BUDGET_US if n == WIRE_GATE_SIZE else ""])
+	_check(failures, edges == n - 1,
+		"(12) the %d-pole grid produced %d wires, expected %d. The timing below is only meaningful if it timed an MST" % [n, edges, n - 1])
+	_teardown(world)
+	return best_us
+
+## A call with wire_edges' shape and none of its work.
+static func _wire_loop_floor(_world) -> Array:
+	return []
+
 
 ## Lay STONE over a `size` rectangle anchored at `anchor`.
 ##

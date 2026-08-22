@@ -36,10 +36,11 @@ extends RefCounted
 # The basic pole's 3 is a PAUSE 1 user decision, reduced from 5 because
 # "5-tile range produced too many in-range pairs in dense layouts (K4 with 6
 # wires for 4 poles)". That complaint was about WIRE COUNT, not about reach,
-# and Session 3 removes its cause in Task 7 by rendering a minimum spanning
-# tree per component instead of the full mesh grid_world._draw_power_wires
-# still draws today — which is why the substation can afford 11 without
-# reintroducing the hairball.
+# and Task 7 removed its cause: wire_edges renders a minimum spanning tree per
+# component, so a component of N poles draws N-1 wires whatever these numbers
+# say — which is why the substation can afford 11 without reintroducing the
+# hairball. The basic pole's 3 is now a REACH decision only, and nothing about
+# wire density argues for keeping it there any more.
 #
 # Lookup miss returns POLE_RANGE_DEFAULT, so a future pole tier that forgets
 # its row behaves like a basic pole rather than failing to connect at all.
@@ -94,9 +95,31 @@ static func max_supply_radius() -> int:
 		m = max(m, int(SUPPLY_RADIUS_BY_TYPE[t]))
 	return m
 
+## Widest wire range across all pole tiers. Derived from the table rather than
+## hardcoded so it cannot drift from it, exactly as max_supply_radius() is.
+## Starts at POLE_RANGE_DEFAULT, so an unlisted tier — which pole_range()
+## answers with that default — is inside the bound too.
+##
+## Its one caller is wire_edges, which uses max_pole_range() + 1 as the "no
+## edge to the tree yet" value: one past the longest wire any tier pair can
+## form, so the first real candidate always beats it. Same sentinel shape as
+## _covering_component_id's `radius + 1`.
+static func max_pole_range() -> int:
+	var m: int = POLE_RANGE_DEFAULT
+	for t in POLE_RANGE_BY_TYPE:
+		m = max(m, int(POLE_RANGE_BY_TYPE[t]))
+	return m
+
 ## Wire range for one pole type.
 static func pole_range(t: int) -> int:
 	return int(POLE_RANGE_BY_TYPE.get(t, POLE_RANGE_DEFAULT))
+
+## THE lex order on pole anchors: x, then y. One definition, because both
+## walks that depend on it — rebuild_topology's BFS start order and
+## wire_edges' MST tie-break — have to agree on "first" or the two would
+## describe different trees over the same components.
+static func _lex_less(a: Vector2i, b: Vector2i) -> bool:
+	return a.x < b.x or (a.x == b.x and a.y < b.y)
 
 ## Supply radius for one pole type.
 static func supply_radius(t: int) -> int:
@@ -104,9 +127,9 @@ static func supply_radius(t: int) -> int:
 
 ## THE connection predicate — the single source of truth for "are these two
 ## poles wired together". Called by BOTH rebuild_topology's BFS and
-## grid_world._draw_power_wires. That sharing is the entire point: these used
-## to be two independent reads of one constant, and with per-type ranges two
-## reads WILL diverge.
+## wire_edges, which is the only thing grid_world._draw_power_wires walks. That
+## sharing is the entire point: these used to be two independent reads of one
+## constant, and with per-type ranges two reads WILL diverge.
 ##
 ## The divergence is dangerous in one direction specifically. If the renderer
 ## is STRICTER than the BFS, poles are in one component but no wire is drawn —
@@ -115,12 +138,14 @@ static func supply_radius(t: int) -> int:
 ##
 ## NOTHING CATCHES THE LOOSER DIRECTION EITHER, so do not read the above as
 ## "only one direction matters". An earlier draft of this docstring claimed
-## the renderer's same-component guard caught it. It does not: both endpoints
-## there come out of one poles_by_comp bucket, so their ids are equal by
-## construction and the guard cannot fire under any predicate — see
-## grid_world._draw_power_wires. Concretely, for TASK 7: an MST edge pass that
-## skips this function and re-derives the rule has no backstop of any kind.
-## Call it.
+## the renderer's same-component guard caught it. It did not — both endpoints
+## came out of one component bucket, so their ids were equal by construction
+## and the guard could not fire under any predicate — and Task 7 deleted that
+## guard along with the pairwise loop it sat in. There is no backstop of any
+## kind. wire_edges is the one place an MST could have quietly re-derived the
+## rule, since it already computes _pole_distance for the edge WEIGHT and the
+## comparison would have been one more token; it calls this function instead.
+## Keep it that way.
 ##
 ## RULE: EITHER-REACHES — chebyshev(a, b) <= max(range(a), range(b)).
 ## Symmetric, so the BFS stays an undirected flood fill and component grouping
@@ -217,7 +242,7 @@ static func rebuild_topology(world) -> void:
 	for anchor in world.buildings:
 		if Buildings.POLE_TYPES.has(world.buildings[anchor].type):
 			pole_anchors.append(anchor)
-	pole_anchors.sort_custom(func(a, b): return a.x < b.x or (a.x == b.x and a.y < b.y))
+	pole_anchors.sort_custom(func(a, b): return _lex_less(a, b))
 
 	var next_id: int = 0
 	for start in pole_anchors:
@@ -238,10 +263,10 @@ static func rebuild_topology(world) -> void:
 				for fx in range(pole_fp.x):
 					world._pole_cells[p + Vector2i(fx, fy)] = p
 			# Find all poles this one is wired to. poles_connected is the
-			# SHARED predicate — grid_world._draw_power_wires calls the same
-			# function, so the graph the BFS builds and the graph the renderer
-			# draws cannot disagree. It also rejects other == p on its own, so
-			# no self-skip guard is needed here.
+			# SHARED predicate — wire_edges asks the same function when it
+			# builds the tree the renderer draws, so the graph the BFS walks and
+			# the graph the renderer spans cannot disagree. It also rejects
+			# other == p on its own, so no self-skip guard is needed here.
 			for other in pole_anchors:
 				if world._pole_component.has(other):
 					continue
@@ -250,6 +275,154 @@ static func rebuild_topology(world) -> void:
 		next_id += 1
 
 	world._power_network_dirty = false
+
+## THE WIRES TO DRAW: a minimum spanning tree per component, as a flat Array
+## of [anchor_a, anchor_b] pairs. grid_world._draw_power_wires walks this and
+## does nothing else.
+##
+## WHY A TREE. A component of N poles yields exactly N-1 wires whatever the
+## range of the tiers in it. The mesh this replaced drew every in-range pair,
+## so its wire count grew with range — which is what made a 5-tile basic range
+## unshippable at Foundation PAUSE 1 ("K4 with 6 wires for 4 poles", see
+## POLE_RANGE_BY_TYPE) and what would otherwise make the substation's 11
+## far worse. Decoupling count from range is the whole point; the substation's
+## range is spent on REACH, and reach costs one wire.
+##
+## REACHABILITY IS poles_connected. NOT a distance test written here. It is
+## very natural to reach for `_pole_distance(a, b) <= max(pole_range(...),
+## pole_range(...))` in the inner loop below, because the weight already needs
+## _pole_distance and the comparison looks like one more token. That would be a
+## SECOND derivation of the connection rule, and the direction that fails is
+## silent: a renderer stricter than the BFS leaves poles on one network with no
+## wire between them, and nothing — no test, no visual — reports it. See
+## poles_connected's own docstring, which says the same thing from the other
+## end. _pole_distance appears below for the WEIGHT only.
+##
+## PRIM'S, IN THE DENSE FORM — a `key` per remaining pole rather than a rescan
+## of the whole tree. This matters and is not a style preference. The obvious
+## formulation loops over remaining x in-tree on every one of the N-1 steps,
+## which asks poles_connected about O(N^3) pairs; carrying the best-known edge
+## per remaining pole and relaxing it against only the pole just added asks
+## about each pair exactly once, N(N-1)/2 in total. Measured at N = 100 that is
+## the difference between 12.5 ms and 340 ms against a 16.7 ms frame — see
+## test_pole_tiers sub-case (12), which times this on every run and carries the
+## full table.
+##
+## DETERMINISM is house law and the renderer is not exempt: a tree that
+## reshuffled between frames would shimmer. Three keys, in order — shortest
+## edge, then the lex-smaller in-tree endpoint, then the lex-smaller remaining
+## pole. The third is implicit in the `<` comparisons against a list this
+## function lex-sorted, exactly as _covering_component_id's third key is its
+## scan order; it is a key all the same, and a change of iteration order would
+## change which tree comes out.
+##
+## COST: O(N^2) per component, on the render path, once per frame. Sub-case
+## (12) is the tripwire.
+##
+## THE SAME ORDER THE MESH COST, BUT NOT THE SAME PRICE, and the difference is
+## measured rather than argued: both have to ask poles_connected about all
+## N(N-1)/2 pairs, but this also weighs each accepted pair with _pole_distance
+## and rescans for the cheapest edge on every step, so at N = 100 it measured
+## 12.5 ms where the mesh measured 8.3 ms on the same machine — about 1.5x.
+## Both are already too much of a 16.7 ms frame at that size. THIS FUNCTION DID
+## NOT INTRODUCE THAT and does not fix it: the quadratic pair scan is inherited
+## from the mesh, which paid it every frame too. The fix, when the numbers
+## justify one, is to cache the returned Array on the world and invalidate it
+## from mark_dirty — topology only changes on placement, so a cached list is
+## correct for every frame in between. Deliberately NOT done here: the cost was
+## measured first and the decision belongs to whoever reads the measurement.
+static func wire_edges(world) -> Array:
+	if world._power_network_dirty:
+		rebuild_topology(world)
+	# Group anchors by component. Component ids are visited in ascending order
+	# so the returned list has a fixed order across frames, not _pole_component's
+	# insertion order.
+	var by_comp: Dictionary = {}
+	for anchor in world._pole_component:
+		var cid: int = int(world._pole_component[anchor])
+		if not by_comp.has(cid):
+			by_comp[cid] = []
+		by_comp[cid].append(anchor)
+	var comp_ids: Array = by_comp.keys()
+	comp_ids.sort()
+
+	# One past the longest wire any tier pair can form. Every candidate below
+	# has already cleared poles_connected, so its distance is at most
+	# max(range_a, range_b) <= max_pole_range() — strictly less than this. The
+	# first reachable candidate for a pole therefore always beats its initial
+	# key, which is what lets the relaxation below skip a "have I got one yet"
+	# test and never index key_from at -1.
+	var no_edge_yet: int = max_pole_range() + 1
+
+	var edges: Array = []
+	for cid in comp_ids:
+		var poles: Array = by_comp[cid]
+		# A lone pole spans itself. Nothing to draw, and the seeding below
+		# would index poles[0] into an empty tree loop.
+		if poles.size() < 2:
+			continue
+		poles.sort_custom(func(a, b): return _lex_less(a, b))
+		var n: int = poles.size()
+		# Building objects cached alongside the anchors: _pole_distance takes
+		# Buildings, and re-resolving them through world.buildings inside an
+		# O(N^2) loop would add two dictionary lookups to every pair.
+		var bodies: Array = []
+		var in_tree: Array = []
+		var key_dist: Array = []
+		var key_from: Array = []
+		for i in range(n):
+			bodies.append(world.buildings.get(poles[i], null))
+			in_tree.append(false)
+			key_dist.append(no_edge_yet)
+			key_from.append(-1)
+
+		# Seed at the lex-first pole. poles is lex-sorted, so that is index 0.
+		in_tree[0] = true
+		var last_added: int = 0
+		var added: int = 1
+		while added < n:
+			# --- relax every remaining pole against the one just added ---
+			for v in range(n):
+				if in_tree[v]:
+					continue
+				# THE REACHABILITY CHECK. The shared predicate, not arithmetic.
+				if not PowerNetwork.poles_connected(world, poles[last_added], poles[v]):
+					continue
+				var d: int = _pole_distance(bodies[last_added], bodies[v])
+				if d > key_dist[v]:
+					continue
+				# Tie on distance: the lex-smaller in-tree endpoint keeps it.
+				# Cannot see key_from[v] == -1: a first candidate has
+				# d <= max_pole_range() < no_edge_yet, so it took the
+				# assignment below rather than this branch.
+				if d == key_dist[v] and not _lex_less(poles[last_added], poles[key_from[v]]):
+					continue
+				key_dist[v] = d
+				key_from[v] = last_added
+			# --- take the cheapest edge out of the tree ---
+			var best: int = -1
+			for v in range(n):
+				if in_tree[v] or key_from[v] < 0:
+					continue
+				if best < 0 or key_dist[v] < key_dist[best]:
+					best = v
+				elif key_dist[v] == key_dist[best] and _lex_less(poles[key_from[v]], poles[key_from[best]]):
+					best = v
+			if best < 0:
+				# UNREACHABLE BY CONSTRUCTION, not a live guard. These poles
+				# share a component, which means rebuild_topology's BFS walked
+				# from one to the others over this same predicate, so some
+				# remaining pole always touches the tree. It is here because a
+				# wrong answer costs one missing wire while an infinite `while`
+				# costs the frame, and because the two would only ever disagree
+				# if someone gave the renderer its own rule — the thing this
+				# function's docstring exists to prevent.
+				break
+			edges.append([poles[key_from[best]], poles[best]])
+			in_tree[best] = true
+			last_added = best
+			added += 1
+	return edges
 
 ## Per-tick orchestrator. Called from grid_world._on_tick BEFORE the
 ## building tick loop. 3-stage flow (extended at Electricity Session 2):

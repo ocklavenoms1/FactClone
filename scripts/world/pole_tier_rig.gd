@@ -23,12 +23,13 @@ extends RefCounted
 ##   in-range pairs in dense layouts (K4 with 6 wires for 4 poles)" — see the
 ##   POLE_RANGE_BY_TYPE docstring in power_network.gd, which is where that
 ##   history moved when Task 4 replaced the flat POLE_RANGE const with the
-##   per-tier table. Session 3 replaces mesh
-##   rendering with a minimum spanning tree, which changes SHIPPED,
-##   GATE-APPROVED visuals, so the simple basic-pole case needs to be judged
-##   against what it looked like before. All six pairs in this square are at
-##   Chebyshev exactly 3 — still the whole K4 under the CURRENT range — so the
-##   mesh renderer draws six wires here and the MST must draw three.
+##   per-tier table. Task 7 replaced mesh rendering with a minimum spanning
+##   tree, which changed SHIPPED, GATE-APPROVED visuals, so the simple
+##   basic-pole case has to be judged against what it looked like before.
+##   All six pairs in this square are at Chebyshev exactly 3 — the whole K4
+##   under the current range — so the mesh drew six wires here and the MST
+##   draws THREE. That is the before/after this block exists to show, and
+##   test_pole_tiers sub-case (11a) asserts it headlessly on the same square.
 ##
 ## Demand is pinned at exactly 40, matching the electric rig, so the
 ## satisfaction numbers read the same and the F8 lever behaves identically.

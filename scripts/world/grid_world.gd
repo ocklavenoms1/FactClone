@@ -1640,87 +1640,56 @@ func _draw() -> void:
 # Matches power_pole.gd's crossarm offset exactly. See _pole_wire_anchor.
 const MAST_WIRE_Y: float = 0.16
 
-## Draw wires between poles: mesh-within-network. For each pair of poles
-## (i, j) with j > i (dedup), draw a wire if PowerNetwork.poles_connected
-## says they are wired AND they share the same component. Matches the
-## player mental model: "if two poles are in range and on the same
-## network, I see a wire." Visually busier than MST for dense clusters
-## but predictable and never surprises by omitting an expected wire.
-## (Task 7 replaces the mesh with a per-component minimum spanning tree;
-## the shared predicate below is independent of that change.)
+## Draw wires between poles: a MINIMUM SPANNING TREE per component. N poles
+## on one network get N-1 wires, whatever their tiers' ranges are.
 ##
-## THE IN-RANGE CHECK IS A CALL, NOT ARITHMETIC. It used to be a Chebyshev
-## comparison computed right here against the one flat pole-range constant
-## PowerNetwork exported, which was safe only while every pole shared that one
-## range. Deliberately no longer named or recomputed in this file: grepping
-## this module for a range identifier must come back empty, because there is
-## no second reader of the rule left to drift. With per-tier ranges a second
-## derivation would drift, and the dangerous direction is silent:
-## a renderer STRICTER than the BFS draws no wire between two poles that ARE
-## on one network, and nothing — no test, no visual — reports it. Asking
-## poles_connected makes stricter-than-BFS unreachable rather than untested.
+## Replaced the mesh (every in-range same-component pair) at Session 3 Task 7.
+## The mesh's wire count grew with range, which is what capped the basic pole
+## at 3 back at Foundation PAUSE 1 and would have made the substation's range
+## 11 unshippable. This is a change to gate-approved visuals: the dense case
+## that used to draw six wires among four poles now draws three.
 ##
-## The same-network guard that follows is a genuine no-op and no claim is made
-## for it here. The reason is the loop shape, not the shared predicate: both
-## endpoints are drawn from poles_by_comp[cid], so their component ids are
-## equal by construction and no predicate — shared, stricter or looser — could
-## ever make the guard fire. Nothing in the headless suite exercises this at
-## all — there is no draw pass — so any "it would catch X" argument for it
-## would be unverifiable. It is left in place only because Task 7 replaces
-## this whole pairwise loop with a per-component minimum spanning tree, and
-## deleting one dictionary comparison first is churn.
+## THIS FUNCTION OWNS NO PART OF THE RULE. Which poles are wired, which
+## component they belong to and which of the in-range pairs survive into the
+## tree are all decided by PowerNetwork.wire_edges — which asks
+## PowerNetwork.poles_connected, the same predicate rebuild_topology's BFS
+## walks. Grepping this module for a range identifier must still come back
+## empty: with per-tier ranges a second derivation would drift, and the
+## dangerous direction is silent — a renderer stricter than the BFS draws no
+## wire between two poles that ARE on one network, and nothing reports it.
 ##
-## Color reflects component satisfaction: golden if any power, dark
-## brown if dead. Called from _draw between building draws and post-
-## pass indicators.
+## All that is left here is presentation: where a wire terminates
+## (_pole_wire_anchor) and what colour it is. Color reflects component
+## satisfaction: golden if any power, dark brown if dead. The component is
+## read off either endpoint — wire_edges never emits an edge whose ends are in
+## different components, which test_pole_tiers sub-case (11) asserts directly.
 ##
-## Complexity: O(N²) per component per frame, and each pair now costs more
-## than it used to — a static call into PowerNetwork.poles_connected plus its
-## two `buildings` lookups and two POLE_TYPES lookups, where the old inline
-## form was about three integer ops. That trade bought the shared predicate
-## and is the right one at this scale, but the ~500-poles-per-component figure
-## below was measured against the cheap version and should be re-measured, not
-## trusted, if anyone goes looking for the ceiling. The fix is the same either
-## way: cache the edge list and invalidate on _power_network_dirty. Task 7's
-## MST pass reduces the DRAWN edges but still visits every pair to build the
-## tree, so it does not change this.
+## Called from _draw between building draws and post-pass indicators, so
+## wire_edges runs ONCE PER FRAME. Its cost is O(N²) per component and is
+## timed by test_pole_tiers sub-case (12) on every suite run: 0.16 ms at 12
+## poles in one component, 12.5 ms at 100, against a 16.7 ms frame. The mesh
+## measured 8.3 ms at 100 on the same machine, so the quadratic pair scan is
+## INHERITED rather than introduced here — both formulations have to ask
+## poles_connected about every pair — but this is about 1.5x of it, and 100
+## poles on one network was already unaffordable before Task 7. The fix, when
+## it is wanted, is to cache the edge list and invalidate on
+## _power_network_dirty, since topology only changes on placement.
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
-	# Collect poles grouped by component.
-	var poles_by_comp: Dictionary = {}    # comp_id → Array[Vector2i]
-	for pos in _pole_component:
-		var cid: int = int(_pole_component[pos])
-		if not poles_by_comp.has(cid):
-			poles_by_comp[cid] = []
-		poles_by_comp[cid].append(pos)
-	# Draw wires per component. Colors named for the network state they
-	# represent, not for the hue (live = any power, dead = zero supply).
+	# Colors named for the network state they represent, not for the hue
+	# (live = any power, dead = zero supply).
 	const WIRE_THICKNESS: float = 2.0
 	var WIRE_COLOR_LIVE: Color = Color(0.85, 0.70, 0.40)    # golden — network has power
 	var WIRE_COLOR_DEAD: Color = Color(0.30, 0.22, 0.15)    # dark brown — no supply
-	for cid in poles_by_comp:
+	for edge in PowerNetwork.wire_edges(self):
+		var pa: Vector2i = edge[0]
+		var pb: Vector2i = edge[1]
+		var cid: int = int(_pole_component.get(pa, -1))
 		var sat: float = float(_component_satisfaction.get(cid, 0.0))
 		var wire_color: Color = WIRE_COLOR_LIVE if sat > 0.0 else WIRE_COLOR_DEAD
-		var poles: Array = poles_by_comp[cid]
-		# Pairwise mesh draw — j > i dedup avoids drawing each pair twice.
-		for i in range(poles.size()):
-			for j in range(i + 1, poles.size()):
-				var pa: Vector2i = poles[i]
-				var pb: Vector2i = poles[j]
-				# In-range check — THE SHARED PREDICATE, the same call
-				# rebuild_topology's BFS makes. Not a reimplementation of it.
-				if not PowerNetwork.poles_connected(self, pa, pb):
-					continue
-				# Same-network guard — a no-op, and NOT because of the shared
-				# predicate above: pa and pb both come out of
-				# poles_by_comp[cid], so their component ids are equal by
-				# construction, under any predicate at all. See the docstring
-				# for why it is still here rather than deleted.
-				if int(_pole_component.get(pa, -1)) != int(_pole_component.get(pb, -1)):
-					continue
-				# Draw the wire, footprint-derived at BOTH ends.
-				draw_line(_pole_wire_anchor(pa), _pole_wire_anchor(pb), wire_color, WIRE_THICKNESS)
+		# Footprint-derived at BOTH ends — see _pole_wire_anchor.
+		draw_line(_pole_wire_anchor(pa), _pole_wire_anchor(pb), wire_color, WIRE_THICKNESS)
 
 ## Where one pole's wires terminate, in world pixels.
 ##
