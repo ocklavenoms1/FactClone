@@ -22,16 +22,16 @@
     96.0
   ],
   "overhangs_front_edge": false,
-  "normalized_scale": 2.651628,
+  "normalized_scale": 2.652453,
   "normalized_extent_tiles": [
-    1.2244,
-    0.5711,
+    1.1329,
+    0.4634,
     2.6
   ],
   "material_norm": true,
   "material_report": [
     {
-      "material": "tripo_material_6aca50ff-2e03-459e-bdc2-9972ab3b7e19",
+      "material": "tripo_material_726b2664-afa0-40b1-9092-d008d4e177c8",
       "roughness_src": "texture",
       "roughness_after": [
         0.34,
@@ -47,7 +47,7 @@
       "wrought_iron",
       "verdigris"
     ],
-    "sigma": 0.0253,
+    "sigma": 0.0274,
     "dropped": [],
     "materials": 1,
     "mode": "remap"
