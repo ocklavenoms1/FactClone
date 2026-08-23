@@ -58,7 +58,9 @@ def main():
         return True
 
     for a in man["assets"]:
-        if a.get("status") == "proxy":
+        # proxies carry no Tripo texture; the calibration object is synthetic
+        # and deliberately outside the palette entirely
+        if a.get("status") in ("proxy", "calibration"):
             continue
         declared = a.get("palette_era")
         verified = target_matches(a)

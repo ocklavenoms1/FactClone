@@ -1,0 +1,73 @@
+{
+  "name": "_calib_floor",
+  "source": "_calib_floor.glb",
+  "footprint_tiles": 2.0,
+  "fit": "footprint",
+  "height_tiles": null,
+  "yaw_correction": 0.0,
+  "cell_tiles": [
+    2,
+    3
+  ],
+  "sprite_px": [
+    64,
+    96
+  ],
+  "render_px": [
+    256,
+    333
+  ],
+  "anchor_px": [
+    32.0,
+    96.0
+  ],
+  "overhangs_front_edge": false,
+  "normalized_scale": 0.867925,
+  "normalized_extent_tiles": [
+    1.84,
+    1.84,
+    1.4581
+  ],
+  "material_norm": true,
+  "material_report": [
+    {
+      "material": "calib_oak",
+      "roughness_src": "scalar",
+      "roughness_before": 0.6,
+      "roughness_after": 0.6,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "calib_iron",
+      "roughness_src": "scalar",
+      "roughness_before": 0.6,
+      "roughness_after": 0.6,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    },
+    {
+      "material": "calib_fieldstone",
+      "roughness_src": "scalar",
+      "roughness_before": 0.6,
+      "roughness_after": 0.6,
+      "metallic_src": "scalar",
+      "metallic_before": 0.0,
+      "metallic_after": 0.0
+    }
+  ],
+  "albedo_gain_applied": null,
+  "masters": [
+    {
+      "tag": "_calib_floor",
+      "state": null,
+      "yaw": null,
+      "master": "art/renders/_calib_floor_4x.png",
+      "sprite": "art/sprites/_calib_floor.png",
+      "state_hook": null
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f"
+}

@@ -69,7 +69,7 @@ foreach ($a in $manifest.assets) {
     $src = Join-Path $ArtDir "source\$srcName"
     if (-not (Test-Path $src)) { $skipped += "$($a.name) ($srcName)"; continue }
 
-    $flag = if ($a.status -eq "proxy") { " [PROXY]" } else { "" }
+    $flag = switch ($a.status) { "proxy" { " [PROXY]" } "calibration" { " [HF FLOOR]" } default { "" } }
     Write-Host "$($a.name)$flag  footprint=$($a.footprint) fit=$($a.fit)"
 
     $rargs = @((Join-Path $ArtDir "blender\render_asset.py"), "--name", $a.name)
@@ -106,7 +106,7 @@ foreach ($a in $manifest.assets) {
     # The albedo's baked light must not oppose the locked rig. Sign is a hard
     # gate; magnitude is reported and stays advisory until three assets exist
     # to calibrate a threshold against. Proxies have no baked light to check.
-    if ($a.status -ne "proxy") {
+    if ($a.status -ne "proxy" -and $a.status -ne "calibration") {
         Blend @((Join-Path $ArtDir "blender\render_rigonly.py"), "--name", $a.name) |
             Select-String "RIGONLY" | Out-Null
         $rc = python (Join-Path $ArtDir "tools\assert_rig_correlation.py") $a.name

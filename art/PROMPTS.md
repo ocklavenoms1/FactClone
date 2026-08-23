@@ -53,6 +53,14 @@ Every detail at least one eighth of the building's width - nothing thin, no
 narrow lines, no small repeated ornament. Timber is plain, no visible grain.
 Matte, light edge wear only. No grunge, no rust streaking, no dirt.
 
+CONTRAST BY AREA:
+LARGE regions - walls, roof, base, posts - are strongly DIFFERENT in value from
+each other. A stone wall against a timber post should read as light against
+dark at a glance.
+THIN features - bands, straps, bolts, rivets, edging, trim - are CLOSE in value
+to whatever surrounds them. A thin iron band on a timber post is barely darker
+than the post, never a hard dark line.
+
 Colours only: fieldstone grey #5A5E58, wrought iron #46504E, weathered oak
 #6B4E32, leather #7A4438, verdigris green #4E7A66 (accents only).
 
@@ -191,6 +199,27 @@ python art/tools/detail_density.py <sprite_name>
 ```
 
 **Minimum strut or wall thickness 1/16 tile**, or it vanishes on downsample.
+
+**Contrast by AREA, not globally.** This is the rule that separates a cheap
+asset from an expensive one:
+
+| | |
+|---|---|
+| **Large regions** | **HIGH** value contrast - helps the matcher, reads at 32 px |
+| **Thin features** | **LOW** value contrast - close in value to their surroundings |
+
+*"Ironwork reads darker than the oak" was right for a base plate and wrong for
+a band.* Both halves are measured:
+
+- The smelter's rivets proved the second half: **16 of 20 sub-2px features**, and
+  the **lowest HF destruction of the set**, because they were low-contrast and
+  averaged into the strap.
+- The power pole proved the cost of getting it wrong: **10 of 16 features sub-2px
+  AND high-contrast** - dark iron bands against light timber - and **15.6% HF
+  destroyed, worse than the kiln that was rejected for cobbles.**
+
+A thin high-contrast edge is the single most expensive thing you can ask for at
+this resolution. A thin low-contrast one is free.
 
 ---
 

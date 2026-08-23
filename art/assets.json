@@ -10,7 +10,7 @@
     "states": "map of state name -> hook filename in art/blender/states/, or null",
     "yaws": "[0,90,180,270] for 4-way buildings; [] for fixed. Cell is unioned across all four",
     "hsv": "optional {hue,saturation,value} correction injected before Base Color",
-    "status": "real = generated in Tripo; proxy = placeholder stand-in geometry",
+    "status": "real | reference | proxy | test | calibration. 'calibration' is the permanent synthetic HF floor - untextured flat-shaded geometry, committed and never regenerated. A real asset must never be the floor: a floor cannot include the thing it measures.",
     "glow_at": "furnace/firebox position in tiles, after yaw_correction. Drives the emitter fallback until the magenta mask is validated on a real generation.",
     "_mask": "Any region that should glow is painted flat #FF00FF in the CONCEPT IMAGE. normalize.neutralize_mask() replaces it with a dark cavity colour in every state; the smelting hook lights that same mask. Validate per asset with art/tools/keymask.py.",
     "albedo_gain": "per-channel gain measured by art/tools/palette_drift.py (palette -> observed). Normalization applies its INVERSE so every asset lands on a common reference. Tripo's shift is not consistent between generations, so this cannot be fixed by prompting.",
@@ -20,6 +20,18 @@
     "palette_members": "which locked-palette members this asset actually uses. Matching is restricted to these; an undeclared member is SKIPPED, not attempted and dropped. Attempting a colour the building was never going to contain is a category error - and the greedy assignment wastes a cluster on it."
   },
   "assets": [
+    {
+      "name": "_calib_floor",
+      "source": "_calib_floor.glb",
+      "footprint": 2,
+      "fit": "footprint",
+      "yaw_correction": 0,
+      "states": {},
+      "yaws": [],
+      "status": "calibration",
+      "albedo_correction": "none",
+      "note": "PERMANENT HF FLOOR. Untextured flat-shaded battered block, generated once by art/blender/make_calibration.py and committed. NEVER regenerate it - regenerating moves the floor, which is exactly the failure it exists to prevent. Whatever HF the downsample destroys here is the irreducible cost of geometry, silhouette and rig at this camera; everything above it is what an asset's TEXTURE costs."
+    },
     {
       "name": "smelter",
       "source": "smelter.glb",
@@ -36,9 +48,9 @@
       "albedo_correction": "remap",
       "palette_era": "natural-5",
       "albedo_gain": [
-        0.4452,
-        0.5259,
-        0.4316
+        0.4841,
+        0.4421,
+        0.3694
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -46,9 +58,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.04621,
-              0.048513,
-              0.037233
+              0.043738,
+              0.045872,
+              0.034997
             ],
             "target": [
               0.102242,
@@ -56,25 +68,25 @@
               0.097587
             ],
             "gain": [
-              2.2125,
-              2.3073,
+              2.3376,
+              2.4401,
               2.5
             ],
             "gain_raw": [
-              2.2125,
-              2.3073,
-              2.621
+              2.3376,
+              2.4401,
+              2.7885
             ],
             "clamped": true,
-            "chroma_dist": 0.039,
-            "match_ratio": 0.441
+            "chroma_dist": 0.0406,
+            "match_ratio": 0.285
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.035472,
-              0.038457,
-              0.029194
+              0.032673,
+              0.03619,
+              0.027631
             ],
             "target": [
               0.061246,
@@ -82,25 +94,25 @@
               0.076185
             ],
             "gain": [
-              1.7266,
-              2.086,
+              1.8745,
+              2.2166,
               2.5
             ],
             "gain_raw": [
-              1.7266,
-              2.086,
-              2.6096
+              1.8745,
+              2.2166,
+              2.7572
             ],
             "clamped": true,
-            "chroma_dist": 0.0917,
-            "match_ratio": 0.417
+            "chroma_dist": 0.0858,
+            "match_ratio": 0.128
           },
           {
             "member": "weathered_oak",
             "observed": [
-              0.067952,
-              0.037511,
-              0.010214
+              0.063376,
+              0.035316,
+              0.010107
             ],
             "target": [
               0.147027,
@@ -108,25 +120,25 @@
               0.031896
             ],
             "gain": [
-              2.1637,
-              2.031,
+              2.3199,
+              2.1572,
               2.5
             ],
             "gain_raw": [
-              2.1637,
-              2.031,
-              3.1227
+              2.3199,
+              2.1572,
+              3.1558
             ],
             "clamped": true,
-            "chroma_dist": 0.0461,
-            "match_ratio": 0.215
+            "chroma_dist": 0.0418,
+            "match_ratio": 0.332
           },
           {
             "member": "leather",
             "observed": [
-              0.076743,
-              0.026631,
-              0.011258
+              0.092157,
+              0.034696,
+              0.016668
             ],
             "target": [
               0.194618,
@@ -134,18 +146,18 @@
               0.039546
             ],
             "gain": [
-              2.5,
-              2.1706,
-              2.5
+              2.1118,
+              1.6661,
+              2.3726
             ],
             "gain_raw": [
-              2.536,
-              2.1706,
-              3.5128
+              2.1118,
+              1.6661,
+              2.3726
             ],
-            "clamped": true,
-            "chroma_dist": 0.0507,
-            "match_ratio": 0.523
+            "clamped": false,
+            "chroma_dist": 0.0537,
+            "match_ratio": 0.423
           }
         ],
         "dropped": []
@@ -155,9 +167,7 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ],
-      "albedo_pinned": true,
-      "_albedo_pinned_note": "APPROVED PIXELS ARE FROZEN. The gain-refinement pass added for the power pole changed this asset's correction (28.6% of pixels by >8/255, 7.6% by >32/255) even though its measured fit improved 90%->92%. An approved asset does not get silently re-corrected, so its remap is pinned to the approved values. Unpin deliberately, then re-approve the render."
+      ]
     },
     {
       "name": "chest",
@@ -296,9 +306,9 @@
       "albedo_correction": "remap",
       "palette_era": "natural-5",
       "albedo_gain": [
-        0.4452,
-        0.5259,
-        0.4316
+        0.4841,
+        0.4421,
+        0.3694
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -306,9 +316,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.04621,
-              0.048513,
-              0.037233
+              0.043738,
+              0.045872,
+              0.034997
             ],
             "target": [
               0.102242,
@@ -316,25 +326,25 @@
               0.097587
             ],
             "gain": [
-              2.2125,
-              2.3073,
+              2.3376,
+              2.4401,
               2.5
             ],
             "gain_raw": [
-              2.2125,
-              2.3073,
-              2.621
+              2.3376,
+              2.4401,
+              2.7885
             ],
             "clamped": true,
-            "chroma_dist": 0.039,
-            "match_ratio": 0.441
+            "chroma_dist": 0.0406,
+            "match_ratio": 0.285
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.035472,
-              0.038457,
-              0.029194
+              0.032673,
+              0.03619,
+              0.027631
             ],
             "target": [
               0.061246,
@@ -342,25 +352,25 @@
               0.076185
             ],
             "gain": [
-              1.7266,
-              2.086,
+              1.8745,
+              2.2166,
               2.5
             ],
             "gain_raw": [
-              1.7266,
-              2.086,
-              2.6096
+              1.8745,
+              2.2166,
+              2.7572
             ],
             "clamped": true,
-            "chroma_dist": 0.0917,
-            "match_ratio": 0.417
+            "chroma_dist": 0.0858,
+            "match_ratio": 0.128
           },
           {
             "member": "weathered_oak",
             "observed": [
-              0.067952,
-              0.037511,
-              0.010214
+              0.063376,
+              0.035316,
+              0.010107
             ],
             "target": [
               0.147027,
@@ -368,25 +378,25 @@
               0.031896
             ],
             "gain": [
-              2.1637,
-              2.031,
+              2.3199,
+              2.1572,
               2.5
             ],
             "gain_raw": [
-              2.1637,
-              2.031,
-              3.1227
+              2.3199,
+              2.1572,
+              3.1558
             ],
             "clamped": true,
-            "chroma_dist": 0.0461,
-            "match_ratio": 0.215
+            "chroma_dist": 0.0418,
+            "match_ratio": 0.332
           },
           {
             "member": "leather",
             "observed": [
-              0.076743,
-              0.026631,
-              0.011258
+              0.092157,
+              0.034696,
+              0.016668
             ],
             "target": [
               0.194618,
@@ -394,18 +404,18 @@
               0.039546
             ],
             "gain": [
-              2.5,
-              2.1706,
-              2.5
+              2.1118,
+              1.6661,
+              2.3726
             ],
             "gain_raw": [
-              2.536,
-              2.1706,
-              3.5128
+              2.1118,
+              1.6661,
+              2.3726
             ],
-            "clamped": true,
-            "chroma_dist": 0.0507,
-            "match_ratio": 0.523
+            "clamped": false,
+            "chroma_dist": 0.0537,
+            "match_ratio": 0.423
           }
         ],
         "dropped": []
@@ -415,9 +425,7 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ],
-      "albedo_pinned": true,
-      "_albedo_pinned_note": "APPROVED PIXELS ARE FROZEN. The gain-refinement pass added for the power pole changed this asset's correction (28.6% of pixels by >8/255, 7.6% by >32/255) even though its measured fit improved 90%->92%. An approved asset does not get silently re-corrected, so its remap is pinned to the approved values. Unpin deliberately, then re-approve the render."
+      ]
     }
   ]
 }

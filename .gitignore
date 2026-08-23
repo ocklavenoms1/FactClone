@@ -45,6 +45,8 @@ exports/
 art/renders/*_4x.png
 art/renders/turnaround/
 art/source/*.glb
+# ...except the permanent HF calibration object, which MUST be committed
+!art/source/_calib_floor.glb
 
 art/renders/_calib*
 art/renders/tex/

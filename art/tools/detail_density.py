@@ -57,9 +57,17 @@ SUPERSAMPLE = 4
 TILE_PX = 32
 HF_RATIO_CAP = 3.0                        # pass mark: under 3x the flat floor
 CONTRAST_COSTLY = 0.12                    # luminance range above which thin detail costs
-FLOOR_REFS = ("chest",)                    # flat proxies only. power_pole became a REAL
-                                          # asset, so it can no longer define the floor it
-                                          # is measured against.
+# THE FLOOR IS A FIXED SYNTHETIC OBJECT, never a real asset.
+# It used to be whichever proxies were lying around, and it moved: when
+# power_pole graduated from proxy to real it had to leave the floor, and the
+# smelter's ratio shifted 1.45x -> 1.67x on BYTE-IDENTICAL pixels. A floor that
+# moves is not a floor, and a gate whose denominator drifts will eventually pass
+# something it should have caught.
+FLOOR_REFS = ("_calib_floor",)
+# Measured once and recorded here. The tool reports the live floor against this
+# every run, so drift is visible rather than silent.
+FLOOR_EXPECTED_PCT = None                 # set after the first calibration run
+FLOOR_DRIFT_WARN = 0.15                   # warn if the live floor moves >15%
 
 
 def luma(rgb):
@@ -242,8 +250,15 @@ def main():
                 floor_vals.append(h["energy_lost_pct"])
     floor = float(np.mean(floor_vals)) if floor_vals else None
     if floor:
-        print(f"flat-geometry HF floor: {floor:.2f}% "
-              f"(mean of {', '.join(a.floor_refs)})   budget = {HF_RATIO_CAP:g}x = {floor*HF_RATIO_CAP:.1f}%")
+        note = ""
+        if FLOOR_EXPECTED_PCT:
+            drift = floor / FLOOR_EXPECTED_PCT - 1.0
+            note = f"   [expected {FLOOR_EXPECTED_PCT:.2f}%, drift {drift*100:+.1f}%]"
+            if abs(drift) > FLOOR_DRIFT_WARN:
+                note += "  ** FLOOR HAS DRIFTED - the gate denominator moved **"
+        print(f"HF floor: {floor:.2f}%  from {', '.join(a.floor_refs)} "
+              f"(synthetic, permanent){note}")
+        print(f"  budget = {HF_RATIO_CAP:g}x = {floor*HF_RATIO_CAP:.1f}%")
 
     report = {"hf_floor_pct": round(floor, 2) if floor else None,
               "hf_ratio_cap": HF_RATIO_CAP}

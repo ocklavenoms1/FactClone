@@ -1159,3 +1159,82 @@ and should be kept.
 > also means the smelter's ratio moved 1.45x -> 1.67x on the same pixels, purely
 > because the floor changed. Ratios are only comparable within one floor
 > definition, the same caveat that already applies to rig correlation.
+
+---
+
+## 19. The HF floor is now synthetic and permanent - and the cap needs a decision
+
+### The floor object
+
+`art/source/_calib_floor.glb`, built once by `make_calibration.py` and
+**committed**. A real asset is never the floor again: a floor cannot include the
+thing it measures, and when `power_pole` graduated from proxy to real the
+smelter's ratio moved **1.45x -> 1.67x on byte-identical pixels**.
+
+How absurd that gets if you ignore the rule: measured *today*, with the now-real
+`power_pole` still in the floor, the "floor" computes to **8.85%** and every
+asset passes - including the pole, at 1.76x, which is the thing the gate exists
+to catch.
+
+**The floor object is a MODEL ASSET, not a bare solid.** A single-colour block
+measures 0.80%; adding building features took it to 1.10%; giving those features
+real palette colours at high value contrast settled it at **1.00%**. The old
+proxies measured 2.1-2.6% because they carried several materials meeting at
+colour boundaries - and a colour boundary between two large flat regions is
+legitimate, required detail. So the floor obeys the art direction exactly:
+large regions, real palette colours, high contrast between them, no thin
+high-contrast features, no texture. What it costs is the irreducible cost of a
+compliant building.
+
+`detail_density.py` prints the floor with every measurement, and will flag drift
+if it ever moves.
+
+### The cap now needs re-deriving, and that is YOUR call
+
+**I have not moved it.** But the denominator moved underneath it, so the gate
+silently became stricter and that must be visible rather than absorbed:
+
+| | old floor (proxies) | new floor (synthetic) |
+|---|---|---|
+| floor | 2.35% | **1.00%** |
+| budget at 3x | 7.1% absolute | **3.0% absolute** |
+
+The same 3x cap is now roughly **2.4x stricter in absolute terms**. Measured
+against it:
+
+| asset | HF | vs new floor | vs old budget (7.1%) |
+|---|---|---|---|
+| `_calib_floor` | 1.0% | 1.00x pass | pass |
+| chest (proxy) | 2.1% | 2.10x pass | pass |
+| smelter, approved correction | 3.5% | 3.50x **fail** | pass |
+| smelter, refined correction | 6.4% | 6.40x **fail** | pass |
+| **power_pole** | **15.6%** | **15.60x fail** | **fail** |
+
+**The pole fails under either definition** - that conclusion is robust and does
+not depend on this decision. The smelter's status depends entirely on it.
+
+Two coherent options, both defensible, neither taken unilaterally:
+
+1. **Keep 3x and accept the absolute budget is now 3.0%.** The gate genuinely
+   tightened; both real assets need less texture. Honest, and the strictest
+   reading.
+2. **Re-derive the cap so the absolute budget is preserved** - about **7x**
+   against this floor reproduces the ~7% the old gate actually allowed. This is
+   not "moving the cap to accommodate a correction"; it is restoring a threshold
+   after its denominator was redefined. The pole still fails decisively at 15.6x.
+
+My recommendation is (2), with the cap written as a derived value rather than a
+constant, so it is obvious it belongs to a floor definition. But the gate's
+strictness is an art-direction decision, not a measurement one.
+
+### The smelter is unpinned and awaiting re-approval
+
+Pin means "requires explicit re-approval", not "frozen forever" - freezing it
+would recreate the palette-era problem one layer down, with the smelter
+corrected by the old algorithm and the pole by the refined one.
+
+Re-emitted with the refined gain: **measured fit 90% -> 92%**, and **28.6% of
+pixels moved by >8/255, 7.6% by >32/255**. Side by side in
+`art/renders/smelter_reapproval.png`. Its rig correlation moved +0.296 ->
++0.492, which is expected: same asset, different correction, and the magnitude
+is not comparable across pipeline versions.
