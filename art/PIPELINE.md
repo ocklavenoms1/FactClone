@@ -1634,3 +1634,52 @@ cost the thing that makes every building read as solid.
 - The rig is the last locked thing and stays locked. `rig_study.py` remains for
   measuring it; occlusion-aware probes were considered and **deliberately not
   built**, because that is work to justify a change nobody is making.
+
+---
+
+## 26. The silhouette check
+
+`eye_sheet.py --silhouette` renders the sprite as a **solid black mask on
+white**, at true size, with no interior detail whatsoever. If the outline alone
+does not say what the building is, the asset fails however good its interior
+looks.
+
+**This is the cheapest check in the pipeline and it should have existed on day
+one.** The power pole passed four consecutive reviews because every one of them
+looked at 4x masters, where the ironwork, the grain and the verdigris caps all
+read - and the outline does not. Interior detail flatters an asset at
+magnification. The silhouette is what survives at 32 px in peripheral vision,
+which is how a factory game is actually read.
+
+Run on the current assets it is immediately decisive:
+
+- **power_pole** reads as a **crucifix**. A plain vertical post crossed by a
+  plain horizontal bar, with the insulator caps too small to break the outline.
+  Nothing about it says "electrical infrastructure".
+- **smelter** reads as a featureless rectangle. Defensible for a squat furnace
+  block, but the top hopper barely dents the outline, so it is closer to the
+  line than its interior suggests.
+
+Neither of those is visible in any metric this pipeline computes, and neither is
+visible at 4x.
+
+**Rule: judge the silhouette before the interior.** An asset whose outline does
+not identify it cannot be rescued by texture, and time spent on its materials is
+spent before the question that decides it has been asked.
+
+---
+
+## 27. Shadow strength is a composite-time choice
+
+The shadow is a separate layer, so its strength is not baked. `--shadow-levels`
+renders one sprite at several strengths side by side at 1x so the level is
+picked by eye:
+
+```bash
+python art/tools/eye_sheet.py --asset power_pole --shadow-levels 0.25,0.4,0.55,0.7,1.0
+```
+
+At full strength the shadow competes with the object at 32px - it reads as a
+second dark shape rather than as contact. The layer stays at full density on
+disk; Godot scales it with `modulate.a`, the same mechanism the fire glow uses.
+Whatever level is chosen is a game-side constant, not a re-render.

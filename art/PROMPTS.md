@@ -286,8 +286,30 @@ imports, normalizes and renders eight turnaround views in **18 seconds**.
 
 ---
 
+## The silhouette test comes FIRST
+
+Before anything else, look at the concept image as a **solid black shape on
+white**. If the outline alone does not say what the building is, regenerate -
+no amount of interior detail will save it.
+
+*The power pole passed four reviews and then failed on this: its outline reads
+as a crucifix. A plain post crossed by a plain bar, insulator caps too small to
+dent the profile. Every one of those reviews looked at 4x masters, where the
+ironwork reads and the outline does not.*
+
+**Design the outline to be identifiable at 32px:** step the profile, vary the
+widths, let one feature break the rectangle. A shape that is symmetrical and
+smooth in outline is a shape the player cannot name in peripheral vision.
+
+```bash
+python art/tools/eye_sheet.py --asset <name> --silhouette
+```
+
+---
+
 ## Reject before importing
 
+- **Outline unidentifiable as a solid black shape** - the first check, not the last
 - Round, conical, domed, or beehive-shaped
 - Anything projecting outside the footprint
 - Projecting parts not tucked flush inside the corner posts — bellows, chutes,
