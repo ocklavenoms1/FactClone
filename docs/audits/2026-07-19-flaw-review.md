@@ -71,6 +71,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 |---|---|---|
 | 2026-08-22 | — | 7 closed / 77 live |
 | 2026-08-22 | #3 | **8 closed / 76 live** |
+| 2026-08-23 | #4 + #5 (one unit) | **10 closed / 74 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -88,7 +89,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (8)
+### CLOSED (10)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -100,24 +101,36 @@ is closed at all.
 | 10 | Overlay.NONE buildings placeable on water/ore | `6478690` | `test_placement_terrain_guards.gd` |
 | 3 | aggregate `in_buffer` cap deadlocks mixed-input processors | `08e052c` + `6d0f5e9` | `test_inserter_shared_input_cap.gd` |
 | 56 | duplicated slot handlers diverge on empty-cursor | `83a72cc` + `fa4b5ca` — **accidental**, a side effect of deduplicating into `SlotClickHandler` | shared handler |
+| 4 | applicator never pulls or applies COMPOST_HIGH | `4c021fb` | `test_applicator_wasteland_recovery.gd` |
+| 5 | one scarred tile permanently wedges LOW/MID application | `4c021fb` — same commit, see the interlock note below | same |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
 for every type with the drill exemption scoped to the resource-node check only.
 
-### LIVE — HIGH (3)
+### LIVE — HIGH (1)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 4 | applicator never pulls or applies COMPOST_HIGH | `scripts/world/fertilizer_applicator.gd:155-178` |
-| 5 | one scarred tile permanently wedges LOW/MID application | `scripts/world/fertilizer_applicator.gd:196-223` |
 | 7 | grace timer runs on actively-farmed soil-0 tiles | `scripts/world/grid_world.gd:1169` |
 
-**#4 and #5 interlock and must be fixed as one unit.** #5's wedge currently only
-fires for LOW/MID because that is all the applicator can hold — which is #4's pull
-filter. Fixing #4 alone changes which tier hits the scarred tile; fixing #5 alone
-leaves automated wasteland recovery impossible. The combined guard is prescribed in
-#4's own fix text: skip wasteland unless `selected_tier == COMPOST_HIGH`.
+**#4 and #5 interlocked and were fixed as one unit** at `4c021fb` (2026-08-23).
+#5's wedge only fired for LOW/MID because that was all the applicator could hold —
+which was #4's pull filter. Fixing #4 alone would have changed which tier hit the
+scarred tile; fixing #5 alone would have left automated wasteland recovery
+impossible. Both reproduced first: RED showed 0 of 4 belt-fed Premium Compost
+pulled and tier `-1` on the target for #4, and a soil-40 tile still unfertilized
+with the machine in `STATE_BLOCKED` for #5.
+
+The shipped guard is the one prescribed in #4's fix text, with one change worth
+recording. Rather than writing `selected_tier == COMPOST_HIGH` a second time in the
+applicator, the tier rule moved into `GridWorld.wasteland_accepts_tier()`;
+`try_apply_fertilizer` gates on it and the tile picker asks it, so there is one copy
+instead of two that can drift — which is the failure mode that produced #4 in the
+first place. Mutating that predicate to `return true` reddens both `test_wasteland`
+and the new suite, which is what demonstrates it is shared rather than merely
+extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
+skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
 ### LIVE — MEDIUM (26)
 
