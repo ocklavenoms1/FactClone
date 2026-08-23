@@ -73,6 +73,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-22 | #3 | **8 closed / 76 live** |
 | 2026-08-23 | #4 + #5 (one unit) | **10 closed / 74 live** |
 | 2026-08-23 | #83 | **11 closed / 73 live** |
+| 2026-08-23 | #7 | **12 closed / 72 live** — no HIGH remains |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -90,7 +91,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (11)
+### CLOSED (12)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -105,16 +106,17 @@ is closed at all.
 | 4 | applicator never pulls or applies COMPOST_HIGH | `4c021fb` | `test_applicator_wasteland_recovery.gd` |
 | 5 | one scarred tile permanently wedges LOW/MID application | `4c021fb` — same commit, see the interlock note below | same |
 | 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842` now reads 41 with addends that sum | doc-only; no test |
+| 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
 for every type with the drill exemption scoped to the resource-node check only.
 
-### LIVE — HIGH (1)
+### LIVE — HIGH (0)
 
-| # | Finding | Today's citation |
-|---|---|---|
-| 7 | grace timer runs on actively-farmed soil-0 tiles | `scripts/world/grid_world.gd:1169` |
+None. #7 was the last one and closed at `b92a769` (2026-08-23). Every HIGH this
+audit raised is now closed on `main` with test coverage named in the CLOSED
+table above.
 
 **#4 and #5 interlocked and were fixed as one unit** at `4c021fb` (2026-08-23).
 #5's wedge only fired for LOW/MID because that was all the applicator could hold —
@@ -395,6 +397,13 @@ if active_tiles.has(pos):
 	continue
 ```
 **Fix:** In _tick_soil_regen, gate the grace-timer decrement on the tile not being actively farmed: wrap lines 1090-1094 in `if not active_tiles.has(pos):` (active_tiles is already computed at line 1054, before the loop, so no reordering is needed). This pauses the scar countdown while the tile is inside an active planter's 3x3, consistent with the existing rule 'active farming = no regen' — neither decay nor recovery advances while active. Leave the grace-erase else branch (1095-1101) and the same-tick rescue (1136-1139) untouched. Update the comment block at 1071-1076 and the try_apply_fertilizer doc (682-685) to state that grace is paused during active farming. Add a test in test_wasteland.gd: place an active planter (growth > 0 or holding output) whose 3x3 overlaps a soil-0 neighbor, tick past WASTELAND_GRACE_SEC, assert the tile is NOT scarred and grace_remaining is unchanged; optionally also assert that applying COMPOST_HIGH then deactivating the planter lets boosted regen rescue the tile. Alternative (if the design intent is that active tiles CAN scar): instead let fertilizer-boosted regen run on active soil-0 tiles by moving the active_tiles check after a soil==0-with-boost exception — but the pause approach is simpler and matches the documented rescue promise.
+
+**SHIPPED at `b92a769` (2026-08-23) — the Alternative, NOT the prescribed Fix. Do not re-apply the prescribed Fix.**
+The prescribed fix (wrapping the grace decrement in `if not active_tiles.has(pos):`) was **rejected**: it contradicts a recorded design decision. `PROJECT_LOG.md:775` states the `wasteland <x> <y>` console command exists because it "bypasses 60-sec grace — required for testing wasteland mechanics **without setting up active planters to keep soil pinned at 0**" — i.e. active planters pinning soil at 0 IS the organic scarring path, on the record. The audit's own text concedes the point ("this active-tile path is effectively the only organic scarring route") without following it through: since an inactive soil-0 tile always self-rescues (`SECONDS_PER_SOIL_POINT` 30 < `WASTELAND_GRACE_SEC` 60), pausing grace on active tiles makes wasteland **organically unreachable**, and the whole Session 4 arc (v18 schema, wasteland visuals, Premium Compost recipes, the applicator recovery path that closed #4/#5) becomes console-only dead content. The finding is real; the prescription would have traded a broken counter-play for a dead mechanic.
+
+What shipped is the Alternative, scoped narrowly: `grid_world.gd` `_tick_soil_regen` now reads `if active_tiles.has(pos) and not (soil_now == 0 and _fertilizer_boost_multiplier(pos) > 1.0):`. The exception requires soil == 0 **and** a live boost, so "active farming = no regen" still holds for boosted tiles above soil 0; scarred tiles `continue` earlier and can never reach it. Once soil hits 1 the exception lapses and the planter's next harvest takes the tile back to 0 — fertilizer buys the player out of scarring, not out of depletion. The `_tick_soil_regen` doc block and the `try_apply_fertilizer` "Grace rescue" doc were corrected in the same commit; the latter had promised a rescue it could not deliver.
+
+Coverage is `test_wasteland.gd` sub-suite 10, which is built to keep this decision from being re-litigated silently. RED before the fix was exactly the two 10a assertions. Mutation-tested three ways: reverting to the plain `if active_tiles.has(pos):` reddens **10a**; implementing the prescribed pause-grace fix instead reddens **10b** (the control asserting an *unfertilized* soil-0 tile under an active planter still scars) *and* 10a's soil assertion, proving the two candidate designs are distinguishable by test; dropping the `soil_now == 0` clause reddens **10c** (soil climbs 50 → 58). 10b exists specifically so a future session that "simplifies" this into the prescribed fix gets a failure instead of a green suite.
 
 <details><summary>Verification notes</summary>
 
