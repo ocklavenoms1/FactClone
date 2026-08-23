@@ -154,10 +154,11 @@ var _demo_origin: Vector2i = Vector2i.ZERO
 # error.
 const RIG_KIND_ELECTRIC: int = 0
 const RIG_KIND_POLE_TIERS: int = 1
+const RIG_KIND_POLE_GAMEPLAY: int = 2
 
 # The respawn/re-attach key for each kind, indexed by RIG_KIND_*. Named here so
 # the toast and the key gates cannot drift apart.
-const RIG_RESPAWN_KEY: Array = ["F10", "F7"]
+const RIG_RESPAWN_KEY: Array = ["F10", "F7", "F6"]
 
 # Electric-rig scenario state (session-inserter-electric, PAUSE 1). Same
 # dedup shape as the F11 demo above — F10 spawns, Shift+F10 clears the flag.
@@ -186,10 +187,11 @@ const RIG_RESPAWN_KEY: Array = ["F10", "F7"]
 #
 # WHICH key is not guessable from these variables alone, which is why
 # _rig_kind exists. Electricity Session 3 added a SECOND consumer of this whole
-# block, and the two rigs' paved rectangles overlap completely when spawned
-# from the same tile (electric spans player-relative x -10..9, pole-tier
-# -16..16), so telling a user to press the wrong one scatters one rig on top of
-# the other and rebinds F8 to the newcomer.
+# block at PAUSE 1 and a THIRD at PAUSE 2, and their paved rectangles overlap
+# heavily when spawned from the same tile (electric spans player-relative
+# x -10..9, pole-tier -16..16, pole-gameplay -19..14), so telling a user to
+# press the wrong one scatters one rig on top of the other and rebinds F8 to the
+# newcomer.
 #
 # _rig_kind is only meaningful once something has spawned in THIS session. On a
 # relaunch it reads its declared default and means nothing, which is why
@@ -358,7 +360,8 @@ func _ready() -> void:
 	grid_world.update_vision(_player_last_region)
 
 	# Scenario boot flags: `godot --path . -- --scenario=electric_rig`, or
-	# `-- --scenario=pole_tiers` for the Electricity Session 3 rig.
+	# `-- --scenario=pole_tiers` for the Electricity Session 3 PAUSE 1 rig, or
+	# `-- --scenario=pole_gameplay` for its PAUSE 2 four-scenario rig.
 	#
 	# MUST run here and not earlier. The rig is placed relative to the PLAYER
 	# TILE, and the player position is not final until the save-or-generate
@@ -371,16 +374,19 @@ func _ready() -> void:
 	# not consume. A bare `--verbose` without the separator is eaten by the
 	# engine and never reaches the project.
 	#
-	# The two scenarios are mutually exclusive: both rigs register through the
-	# same _rig_* variables and both are lever-driven by F8, so spawning both
-	# would leave F8 attached to whichever ran second while the first went dark
-	# 16 seconds later. `break` on the first match enforces that.
+	# The three scenarios are mutually exclusive: all three rigs register through
+	# the same _rig_* variables and all three are lever-driven by F8, so spawning
+	# two would leave F8 attached to whichever ran second while the first went
+	# dark 16 seconds later. `break` on the first match enforces that.
 	for arg in OS.get_cmdline_user_args():
 		if arg == "--scenario=electric_rig":
 			_spawn_electric_rig(grid_world.world_to_tile(player.global_position))
 			break
 		if arg == "--scenario=pole_tiers":
 			_spawn_pole_tier_rig(grid_world.world_to_tile(player.global_position))
+			break
+		if arg == "--scenario=pole_gameplay":
+			_spawn_pole_gameplay_rig(grid_world.world_to_tile(player.global_position))
 			break
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
@@ -555,6 +561,32 @@ func _process(delta: float) -> void:
 			_show_toast("[rig] A rig already exists at %s. Shift+F7 to allow respawn." % str(_rig_origin))
 		else:
 			_spawn_pole_tier_rig(grid_world.world_to_tile(player.global_position))
+
+	# F6 — spawn the POLE GAMEPLAY rig (Electricity Session 3, PAUSE 2): four
+	# scenarios in one screen. Two basic-pole clusters 9 apart with a TOGGLEABLE
+	# substation between them, a lamp in overlapping coverage, an isolated
+	# basic-to-medium pair exactly 5 apart, and a 16-pole mixed-tier block for
+	# judging wire density. Demand is 4 x 5 + 20 x 1 = exactly 40, as both older
+	# rigs, so F8 reads identically on any of the three. Same dedup contract:
+	# Shift+F6 clears the flag.
+	#
+	# Sits in this group, ABOVE the modal early-return, for the same reason the
+	# F7/F8/F10 group does — see the block comment above them.
+	if Input.is_action_just_pressed("debug_spawn_pole_gameplay_rig"):
+		if Input.is_key_pressed(KEY_SHIFT):
+			_rig_spawned = false
+			_show_toast("[rig] Rig flag cleared. Next F6 re-attaches if you have not moved, or spawns fresh — clean up the old rig manually if you have.")
+		elif _rig_spawned:
+			_show_toast("[rig] A rig already exists at %s. Shift+F6 to allow respawn." % str(_rig_origin))
+		else:
+			_spawn_pole_gameplay_rig(grid_world.world_to_tile(player.global_position))
+
+	# F4 — add or remove the pole-gameplay rig's BRIDGE SUBSTATION in place, so
+	# the merge and the split can be watched rather than reasoned about. Builds
+	# and removes exactly one building and touches nothing else, in particular
+	# not the generators the F8 lever is pointing at.
+	if Input.is_action_just_pressed("debug_toggle_bridge_substation"):
+		_toggle_rig_bridge()
 
 	# F8 is THE LEVER — FULL -> BROWNOUT -> ZERO -> FULL, by changing how many
 	# of the rig's generators have fuel. Nothing is built or removed, so the
@@ -1564,6 +1596,86 @@ func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 		return
 	_show_toast("[rig] Pole tiers ready — substation at %s bridges two clusters. East block is the basic-pole K4 wire control: look for a closed square, no diagonals. F8 cycles power." % str(rig["substation"]))
 
+## Spawn the pole-tier GAMEPLAY rig (Electricity Session 3, PAUSE 2).
+## Mirrors _spawn_pole_tier_rig's dedup + toast conventions exactly. All three
+## rigs share ElectricRig's power lever, so F8 works on whichever is spawned.
+##
+## _rig_source_chest / _rig_source_seeded are reset for the reason
+## _spawn_pole_tier_rig states: this rig has NO source chest, and a stale seeded
+## flag left over from an earlier electric rig would send _cycle_rig_power's
+## refill at whatever is standing at those coordinates now.
+##
+## The ADOPTED branch is load-bearing here for one extra reason on top of
+## re-attaching the lever: this rig's bridge substation is a building the USER
+## adds and removes with F4, so a re-spawn is also how a rig left in the split
+## state gets put back the way it spawns. PoleGameplayRig.build handles that by
+## keeping the bridge outside plan() — see BRIDGE_OFFSET there.
+func _spawn_pole_gameplay_rig(player_tile: Vector2i) -> void:
+	var origin: Vector2i = player_tile + PoleGameplayRig.ORIGIN_OFFSET
+	var rig: Dictionary = PoleGameplayRig.build(grid_world, origin)
+
+	_rig_spawned = true
+	_rig_kind = RIG_KIND_POLE_GAMEPLAY
+	_rig_origin = origin
+	_rig_gen_anchors = rig["gen_anchors"]
+	_rig_source_chest = Vector2i.ZERO
+	_rig_source_seeded = false
+	_rig_power_state = ElectricRig.POWER_FULL
+
+	var placed: int = int(rig["placed"])
+	var skipped: int = int(rig["skipped"])
+	if bool(rig.get("adopted", false)):
+		_show_toast("[rig] Re-attached to the pole-gameplay rig already at %s. F8 cycles power, F4 toggles the bridge." % str(origin))
+		return
+	if skipped > 0:
+		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F6 for a clean one, then clean up the old rig manually." % [placed, placed + skipped, skipped])
+		return
+	# The bridge is placed outside the plan, so a zero skip count says nothing
+	# about it. Report it separately rather than claiming a complete rig.
+	if not bool(rig.get("bridge_present", false)):
+		_show_toast("[rig] Placed %d buildings but the bridge substation at %s did not land — something is standing on its 2x2. Move and Shift+F6." % [placed, str(rig["bridge_anchor"])])
+		return
+	_show_toast("[rig] Four scenarios ready. F4 adds/removes the bridge at %s (watch the two clusters merge and split). F8 cycles power." % str(rig["bridge_anchor"]))
+
+## F4 — add or remove the pole-gameplay rig's bridge substation.
+##
+## Gated on _rig_kind, not merely on _rig_spawned: _rig_origin is shared by all
+## three rigs, so pressing F4 while the ELECTRIC rig is registered would compute
+## a bridge cell from that rig's origin and drop a substation in the middle of
+## it — or, worse on the second press, remove a substation that happened to be
+## sitting there. The rig module refuses to touch a foreign building, but it
+## cannot know which rig the origin belongs to; that is this function's job.
+##
+## The player-collision guard mirrors the one in _try_place: SUBSTATION is not
+## walkable, so placing one on the player's own tile would trap them behind
+## _move_with_passability's escape valve. Removal needs no such guard.
+func _toggle_rig_bridge() -> void:
+	if not _rig_spawned or _rig_kind != RIG_KIND_POLE_GAMEPLAY:
+		_show_toast("[rig] F4 toggles the POLE-GAMEPLAY rig's bridge substation. Press F6 to spawn or re-attach to that rig first.")
+		return
+	var anchor: Vector2i = _rig_origin + PoleGameplayRig.BRIDGE_OFFSET
+	if not PoleGameplayRig.bridge_is_present(grid_world, anchor):
+		var fp: Vector2i = Buildings.footprint_of(Buildings.Type.SUBSTATION)
+		var player_tile: Vector2i = grid_world.world_to_tile(player.global_position)
+		for dx in fp.x:
+			for dy in fp.y:
+				if Vector2i(anchor.x + dx, anchor.y + dy) == player_tile:
+					_show_toast("[rig] You are standing on the bridge cell %s — step off first." % str(anchor))
+					return
+	var res: Dictionary = PoleGameplayRig.toggle_bridge(grid_world, _rig_origin)
+	# Mark every footprint cell dirty so the minimap follows the toggle. Same
+	# call _try_place makes after a multi-tile placement.
+	for dx in 2:
+		for dy in 2:
+			map_panel.mark_tile_dirty(Vector2i(anchor.x + dx, anchor.y + dy))
+	if bool(res.get("blocked", false)):
+		_show_toast("[rig] Something else is standing on the bridge cell %s — F4 changed nothing." % str(anchor))
+		return
+	if bool(res.get("present", false)):
+		_show_toast("[rig] Bridge substation PLACED at %s — %d pole networks on the map. The two clusters are one." % [str(anchor), int(res.get("components", 0))])
+	else:
+		_show_toast("[rig] Bridge substation REMOVED from %s — %d pole networks on the map. The two clusters are separate." % [str(anchor), int(res.get("components", 0))])
+
 ## THE LEVER (F8). FULL -> BROWNOUT -> ZERO -> FULL by changing how many of the
 ## rig's generators have fuel. Builds nothing and removes nothing, which is the
 ## whole point: the rig under observation keeps its exact shape across all
@@ -1581,22 +1693,22 @@ func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 ## so after a save/load the rig is visible but unregistered.
 ##
 ## The recovery key is looked up from _rig_kind rather than hard-coded. Naming
-## the wrong one is not a cosmetic error: the two rigs' paved rectangles
-## overlap completely when spawned from the same tile, so pressing F10 while
-## the POLE-TIER rig is standing scatters a partially-collided electric rig
-## across it and rebinds this lever to the newcomer's generators.
+## the wrong one is not a cosmetic error: the three rigs' paved rectangles
+## overlap heavily when spawned from the same tile, so pressing F10 while the
+## POLE-TIER rig is standing scatters a partially-collided electric rig across it
+## and rebinds this lever to the newcomer's generators.
 ##
 ## Two distinct unregistered cases, and they know different amounts:
 ##
 ##   NOTHING SPAWNED THIS SESSION — a relaunch onto a save that already holds a
 ##     rig. _rig_kind is still its declared default and means nothing, so the
-##     toast must NOT pick a key. It names both, tagged, and lets the user
+##     toast must NOT pick a key. It names all three, tagged, and lets the user
 ##     choose the one matching what they can see.
 ##   SPAWNED BUT NO GENERATORS — _rig_kind was set by that spawn and is
 ##     accurate, so the toast names the one right key.
 func _cycle_rig_power() -> void:
 	if not _rig_spawned:
-		_show_toast("[rig] No rig registered this session. Press F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
+		_show_toast("[rig] No rig registered this session. Press F6 (pole-gameplay rig), F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
 		return
 	if _rig_gen_anchors.is_empty():
 		_show_toast("[rig] The registered rig has no generators. Press %s to re-attach — only works if you have not moved since spawning it." % RIG_RESPAWN_KEY[_rig_kind])

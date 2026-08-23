@@ -319,6 +319,30 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ---
 
+## Queued: extract `RigSupport` — the third rig has now landed, and it is the trigger
+
+`electric_rig.gd`, `pole_tier_rig.gd` and `pole_gameplay_rig.gd` each carry their own copy of
+two things: a **phase-1 pave loop** (fresh `Tile` + `set_overlay(STONE)`, skipping cells that
+already hold a building) and a **phase-2 adopt-or-collide classifier** (walk `plan()`, count
+placed / skipped / matched, `adopted = placed == 0 and matched == entries.size()`, hand back
+generator anchors either way). `pole_tier_rig.gd`'s header names the refactor — a shared
+`RigSupport` with `pave_rect()` and `place_or_adopt()` — and says **a third rig is what should
+trigger it**. Session 3 PAUSE 2 shipped that third rig, so the trigger has fired.
+
+**Deferred at PAUSE 2, deliberately, and not for the reason PoleTierRig gave.** Its reason was
+"nothing needs it yet"; that is now spent. The remaining reason is scheduling: the extraction
+has to touch `electric_rig.gd`, which is Session 3's untouched control — `test_electric_rig.gd`
+pins exact satisfaction values with `==` rather than `is_equal_approx` — and restructuring the
+one stable reference point in the session at its final gate is the wrong trade. Take it at the
+TOP of the next session that opens any rig file, while the suite is green and nothing is gated
+on those three modules.
+
+The three plans differ in ways the extraction has to keep: ElectricRig has a source-chest arm
+the other two do not, PoleGameplayRig paves **three** rectangles rather than one and keeps one
+building (its bridge substation) deliberately outside `plan()`.
+
+---
+
 ## Queued: split `test_pole_tiers.gd` — the seam is measured and clean
 
 1800-odd lines, 12 sub-cases across six tasks. Coherent only under "everything Session 3
