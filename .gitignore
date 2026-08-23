@@ -51,3 +51,7 @@ art/source/*.glb
 art/renders/_calib*
 art/renders/tex/
 art/renders/tex_full/
+
+# byte-cache from art/tools importing art/blender/lock.py
+__pycache__/
+*.pyc
