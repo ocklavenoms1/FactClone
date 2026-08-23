@@ -27,7 +27,7 @@
 > --is-ancestor <sha> main` is.
 >
 > **Status: verified finding-by-finding against `24d4114` on 2026-08-22.
-> 7 CLOSED, 77 LIVE.** Nothing was found MOVED, DISPROVED or UNVERIFIABLE — the
+> 7 CLOSED, 77 LIVE at that verification.** Nothing was found MOVED, DISPROVED or UNVERIFIABLE — the
 > audit's *content* held up; what rotted was the claim that it had been acted on.
 > Full table below. Every citation in that table is a **current** line number.
 >
@@ -60,8 +60,17 @@ Severity is post-verification (verifiers could downgrade/upgrade). Line numbers 
 
 Five independent verifiers took disjoint slices, read-only, forbidden from trusting
 either the audit's line numbers or any prior status claim. Every row required a
-citation in **today's** code. Result: **7 CLOSED, 77 LIVE, 0 MOVED, 0 DISPROVED,
-0 UNVERIFIABLE.**
+citation in **today's** code. Result at verification: **7 CLOSED, 77 LIVE, 0 MOVED,
+0 DISPROVED, 0 UNVERIFIABLE.**
+
+**Progress since that verification** — the two numbers are kept separate on purpose.
+The verification result is a dated measurement and should not be edited; this line is
+the running total, and the CLOSED table below is the authority for which is which.
+
+| date | closed since | running total |
+|---|---|---|
+| 2026-08-22 | — | 7 closed / 77 live |
+| 2026-08-22 | #3 | **8 closed / 76 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -79,7 +88,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (7)
+### CLOSED (8)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
