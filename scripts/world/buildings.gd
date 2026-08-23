@@ -724,7 +724,7 @@ const DATA: Dictionary = {
 		"supports_direction": true,                  # input port rotates with R
 		"player_drainable": false,
 		# Building Interaction UI (session-soil-exhaustion-3-5):
-		# Single input slot accepting both compost tiers. NO output slot —
+		# Single input slot accepting all three compost tiers. NO output slot —
 		# applicator is pure consumer (writes to tile_fertilizer_state via
 		# GridWorld.try_apply_fertilizer, not to belt). Specialized panel
 		# renders 5×5 coverage grid + status; standard slot kind for input
