@@ -73,7 +73,7 @@ const EXPECTED_DEMAND: int = 40
 const EXPECTED_SUPPLY: int = 40
 
 static func test_name() -> String:
-	return "pole tier rig (layout lands + demand 40 + substation bridges + MST control block stays separate + supply 40 on one bus + re-spawn adopts)"
+	return "pole tier rig (layout lands + demand 40 + substation bridges + K4 control block stays separate + supply 40 on one bus + re-spawn adopts)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -173,9 +173,9 @@ static func _case_demand(parent: Node, failures: Array) -> void:
 # (3) THE SUBSTATION BRIDGES, AND THE CONTROL BLOCK STAYS SEPARATE.
 #
 # With the substation: cluster A + the medium pole + the substation + cluster B
-# are ONE component. The MST control block (east, basic poles only) is a SECOND
+# are ONE component. The K4 control block (east, basic poles only) is a SECOND
 # component — it is a rendering control and must not be wired into the bus, or
-# its wire count stops being comparable to the pre-MST behaviour.
+# its wire count stops being comparable across renderers.
 #
 # Without the substation: the bus splits. Cluster A and the medium pole stay
 # joined (distance 5 <= the medium pole's 6, either-reaches), but cluster B is
@@ -203,7 +203,7 @@ static func _case_bridge(parent: Node, failures: Array) -> void:
 	PowerNetwork.rebuild_topology(world)
 	var with_sub: int = _unique_components(world).size()
 	_check(failures, with_sub == 2,
-		"(3) with the substation there should be exactly 2 components (the bridged bus and the MST control block), got %d" % with_sub)
+		"(3) with the substation there should be exactly 2 components (the bridged bus and the K4 control block), got %d" % with_sub)
 
 	# remove_building_at, NOT remove_building — see grid_world.gd, which has
 	# only the former.
@@ -263,7 +263,7 @@ static func _case_supply(parent: Node, failures: Array) -> void:
 
 	# --- (4b) ---
 	_check(failures, bus_ids.size() == 1,
-		"(4b) %d components carry demand, expected exactly 1 (the bridged bus) — the MST control block must stay consumer-free and the bus must not be split" % bus_ids.size())
+		"(4b) %d components carry demand, expected exactly 1 (the bridged bus) — the K4 control block must stay consumer-free and the bus must not be split" % bus_ids.size())
 	if bus_ids.size() != 1:
 		_teardown(world)
 		return

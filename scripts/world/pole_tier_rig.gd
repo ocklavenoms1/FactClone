@@ -16,20 +16,27 @@ extends RefCounted
 ##   with it there is one. That is what makes the either-reaches rule and the
 ##   substation's range 11 visible rather than merely asserted.
 ##
-##   THE CONTROL BLOCK (east, x 26..29) — the MST REGRESSION CONTROL. Basic
-##   poles ONLY, four of them in a square 3 apart on both axes, which is the
-##   dense arrangement behind the original complaint: POLE_RANGE was cut from
-##   5 to 3 at Foundation PAUSE 1 because a 5-tile range "produced too many
-##   in-range pairs in dense layouts (K4 with 6 wires for 4 poles)" — see the
-##   POLE_RANGE_BY_TYPE docstring in power_network.gd, which is where that
-##   history moved when Task 4 replaced the flat POLE_RANGE const with the
-##   per-tier table. Task 7 replaced mesh rendering with a minimum spanning
-##   tree, which changed SHIPPED, GATE-APPROVED visuals, so the simple
-##   basic-pole case has to be judged against what it looked like before.
-##   All six pairs in this square are at Chebyshev exactly 3 — the whole K4
-##   under the current range — so the mesh drew six wires here and the MST
-##   draws THREE. That is the before/after this block exists to show, and
-##   test_pole_tiers sub-case (11a) asserts it headlessly on the same square.
+##   THE CONTROL BLOCK (east, x 26..29) — the WIRE-RENDERING REGRESSION
+##   CONTROL. Basic poles ONLY, four of them in a square 3 apart on both axes,
+##   which is the dense arrangement behind the original complaint: POLE_RANGE
+##   was cut from 5 to 3 at Foundation PAUSE 1 because a 5-tile range "produced
+##   too many in-range pairs in dense layouts (K4 with 6 wires for 4 poles)" —
+##   see the POLE_RANGE_BY_TYPE docstring in power_network.gd, which is where
+##   that history moved when Task 4 replaced the flat POLE_RANGE const with the
+##   per-tier table. All six pairs in this square are at Chebyshev exactly 3 —
+##   the whole K4 under the current range — so it separates every rule this
+##   renderer has had, and that is why it is on screen:
+##
+##     mesh              6 wires, the hairball rejected at Foundation PAUSE 1
+##     spanning tree     3 wires, a STAR — rejected at Foundation PAUSE 1
+##                       ("these 2 should connect directly") and again at
+##                       Session 3 PAUSE 1
+##     Gabriel (shipped) 4 wires, the square's OUTLINE, no diagonals
+##
+##   So the shape to look for is a closed square with nothing across the
+##   middle. test_pole_tiers sub-case (11a) asserts that same edge SET
+##   headlessly, as a set rather than a count, because 3 and 6 are the two
+##   interesting wrong answers.
 ##
 ## Demand is pinned at exactly 40, matching the electric rig, so the
 ## satisfaction numbers read the same and the F8 lever behaves identically.
@@ -99,8 +106,8 @@ const PAVE_MAX: Vector2i = Vector2i(30, 7)
 # 8 from cluster B. Only the substation closes that gap.
 #
 # CLUSTER B SITS AT 16/19 FOR SCREEN FIT, not for the topology. The plan put
-# it at 22/25, which collides with the MST control block's isolation distance
-# (see MST_CONTROL_POLES) and pushes the rig past one 1280x720 screen. Do NOT
+# it at 22/25, which collides with the K4 control block's isolation distance
+# (see K4_CONTROL_POLES) and pushes the rig past one 1280x720 screen. Do NOT
 # "restore" it eastward without re-measuring both — and read the next
 # paragraph first, because the short B link is a consequence of this choice.
 #
@@ -142,9 +149,10 @@ const SUBSTATION_OFFSET: Vector2i = Vector2i(12, 2)
 # the medium pole to bridge it — 8 > 6.
 const MEDIUM_POLE_OFFSET: Vector2i = Vector2i(8, 2)
 
-# --- THE CONTROL BLOCK: MST regression control -----------------------------
+# --- THE CONTROL BLOCK: wire-rendering regression control ------------------
 # Four basic poles, 3 apart on both axes, so all six pairs are at Chebyshev
-# exactly 3 — the K4. Mesh: six wires. MST: three.
+# exactly 3 — the K4. Mesh: six wires. Spanning tree: three, in a star.
+# Gabriel, which is what ships: FOUR, the square's outline.
 #
 # ITS SEPARATION FROM THE BUS IS LOAD-BEARING and is why it sits this far
 # east. A pole anywhere within 11 of the substation joins the bus under
@@ -158,9 +166,9 @@ const MEDIUM_POLE_OFFSET: Vector2i = Vector2i(8, 2)
 # pole (x = 19) against basic range 3.
 #
 # If this block ever merges into the bus, its wire count stops being
-# comparable to the pre-MST behaviour and the exhibit is worthless — which is
-# exactly what sub-case (3) of test_pole_tier_rig.gd pins.
-const MST_CONTROL_POLES: Array = [
+# comparable across renderers and the exhibit is worthless — which is exactly
+# what sub-case (3) of test_pole_tier_rig.gd pins.
+const K4_CONTROL_POLES: Array = [
 	Vector2i(26, 2), Vector2i(29, 2), Vector2i(26, 5), Vector2i(29, 5),
 ]
 
@@ -405,7 +413,7 @@ static func plan() -> Array:
 		out.append([p, Buildings.Type.POWER_POLE, 0])
 	for p in CLUSTER_B_POLES:
 		out.append([p, Buildings.Type.POWER_POLE, 0])
-	for p in MST_CONTROL_POLES:
+	for p in K4_CONTROL_POLES:
 		out.append([p, Buildings.Type.POWER_POLE, 0])
 	out.append([MEDIUM_POLE_OFFSET, Buildings.Type.MEDIUM_POLE, 0])
 	out.append([SUBSTATION_OFFSET, Buildings.Type.SUBSTATION, 0])

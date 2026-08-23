@@ -36,11 +36,19 @@ extends RefCounted
 # The basic pole's 3 is a PAUSE 1 user decision, reduced from 5 because
 # "5-tile range produced too many in-range pairs in dense layouts (K4 with 6
 # wires for 4 poles)". That complaint was about WIRE COUNT, not about reach,
-# and Task 7 removed its cause: wire_edges renders a minimum spanning tree per
-# component, so a component of N poles draws N-1 wires whatever these numbers
-# say — which is why the substation can afford 11 without reintroducing the
-# hairball. The basic pole's 3 is now a REACH decision only, and nothing about
-# wire density argues for keeping it there any more.
+# and wire_edges' GABRIEL GRAPH answers it without capping range: a wire
+# survives only if no third pole sits inside the circle on it as diameter, so
+# widening a range mostly adds BLOCKERS rather than wires. On the K4 that
+# density complaint was about, range 5 and range 3 both draw the same four
+# wires — the square's outline, diagonals suppressed.
+#
+# The count is BOUNDED BY LOCAL GEOMETRY, not by these numbers, but it is not
+# N-1 either (the minimum spanning tree this replaced was, and was rejected —
+# see wire_edges). Sampled, never proved: 180 wires for the 100-pole grid
+# test_pole_tiers sub-case (12) times and prints, which is 1.8 per pole, and at
+# most 1.76 per pole across 1959 randomised mixed-tier components in a
+# standalone model of these same rules. The basic pole's 3 is therefore a REACH
+# decision only, and nothing about wire density argues for keeping it there.
 #
 # Lookup miss returns POLE_RANGE_DEFAULT, so a future pole tier that forgets
 # its row behaves like a basic pole rather than failing to connect at all.
@@ -95,20 +103,14 @@ static func max_supply_radius() -> int:
 		m = max(m, int(SUPPLY_RADIUS_BY_TYPE[t]))
 	return m
 
-## Widest wire range across all pole tiers. Derived from the table rather than
-## hardcoded so it cannot drift from it, exactly as max_supply_radius() is.
-## Starts at POLE_RANGE_DEFAULT, so an unlisted tier — which pole_range()
-## answers with that default — is inside the bound too.
-##
-## Its one caller is wire_edges, which uses max_pole_range() + 1 as the "no
-## edge to the tree yet" value: one past the longest wire any tier pair can
-## form, so the first real candidate always beats it. Same sentinel shape as
-## _covering_component_id's `radius + 1`.
-static func max_pole_range() -> int:
-	var m: int = POLE_RANGE_DEFAULT
-	for t in POLE_RANGE_BY_TYPE:
-		m = max(m, int(POLE_RANGE_BY_TYPE[t]))
-	return m
+# DELETED HERE: max_pole_range(). It existed for exactly one thing — Prim's
+# "no edge to the tree yet" sentinel, max_pole_range() + 1 — and the Gabriel
+# rewrite that removed Prim's left it with no caller anywhere in the repo. It
+# is not kept as a symmetric peer of max_supply_radius(): that one has a live
+# caller (_covering_component_id sizes its scan box to it), this one would have
+# been an uncalled public static with a docstring naming a caller that no
+# longer exists. Restore it from git history if a spatial index for wire_edges'
+# adjacency build ever wants a bounding radius.
 
 ## Wire range for one pole type.
 static func pole_range(t: int) -> int:
@@ -116,8 +118,10 @@ static func pole_range(t: int) -> int:
 
 ## THE lex order on pole anchors: x, then y. One definition, because both
 ## walks that depend on it — rebuild_topology's BFS start order and
-## wire_edges' MST tie-break — have to agree on "first" or the two would
-## describe different trees over the same components.
+## wire_edges' per-component sort — have to agree on "first". wire_edges' RULE
+## no longer depends on order (the Gabriel test is a property of a pair and its
+## common neighbours, not of a traversal), but its EMISSION order does, and a
+## renderer whose edge list reshuffled between frames would shimmer.
 static func _lex_less(a: Vector2i, b: Vector2i) -> bool:
 	return a.x < b.x or (a.x == b.x and a.y < b.y)
 
@@ -142,10 +146,11 @@ static func supply_radius(t: int) -> int:
 ## came out of one component bucket, so their ids were equal by construction
 ## and the guard could not fire under any predicate — and Task 7 deleted that
 ## guard along with the pairwise loop it sat in. There is no backstop of any
-## kind. wire_edges is the one place an MST could have quietly re-derived the
-## rule, since it already computes _pole_distance for the edge WEIGHT and the
-## comparison would have been one more token; it calls this function instead.
-## Keep it that way.
+## kind. wire_edges is the one place the rule could quietly get re-derived: it
+## sits three lines from a SECOND, different metric — the Euclidean-squared
+## blocker test on doubled footprint centres — and writing
+## `_pole_distance(a, b) <= max(pole_range(...), pole_range(...))` inline would
+## look like tidying. It calls this function instead. Keep it that way.
 ##
 ## RULE: EITHER-REACHES — chebyshev(a, b) <= max(range(a), range(b)).
 ## Symmetric, so the BFS stays an undirected flood fill and component grouping
@@ -264,8 +269,8 @@ static func rebuild_topology(world) -> void:
 					world._pole_cells[p + Vector2i(fx, fy)] = p
 			# Find all poles this one is wired to. poles_connected is the
 			# SHARED predicate — wire_edges asks the same function when it
-			# builds the tree the renderer draws, so the graph the BFS walks and
-			# the graph the renderer spans cannot disagree. It also rejects
+			# builds the adjacency the renderer filters, so the graph the BFS
+			# walks and the graph the renderer spans cannot disagree. It also rejects
 			# other == p on its own, so no self-skip guard is needed here.
 			for other in pole_anchors:
 				if world._pole_component.has(other):
@@ -276,61 +281,108 @@ static func rebuild_topology(world) -> void:
 
 	world._power_network_dirty = false
 
-## THE WIRES TO DRAW: a minimum spanning tree per component, as a flat Array
-## of [anchor_a, anchor_b] pairs. grid_world._draw_power_wires walks this and
-## does nothing else.
+## THE WIRES TO DRAW: the GABRIEL GRAPH of each component, restricted to
+## reachable pairs, as a flat Array of [anchor_a, anchor_b] pairs.
+## grid_world._draw_power_wires walks this and does nothing else.
 ##
-## WHY A TREE. A component of N poles yields exactly N-1 wires whatever the
-## range of the tiers in it. The mesh this replaced drew every in-range pair,
-## so its wire count grew with range — which is what made a 5-tile basic range
-## unshippable at Foundation PAUSE 1 ("K4 with 6 wires for 4 poles", see
-## POLE_RANGE_BY_TYPE) and what would otherwise make the substation's 11
-## far worse. Decoupling count from range is the whole point; the substation's
-## range is spent on REACH, and reach costs one wire.
+## THE RULE. Wire A to B unless some third pole C lies inside the circle that
+## has AB as its diameter. On doubled footprint centres that is one exact
+## integer comparison, with no floats and no epsilon anywhere:
 ##
-## REACHABILITY IS poles_connected. NOT a distance test written here. It is
-## very natural to reach for `_pole_distance(a, b) <= max(pole_range(...),
-## pole_range(...))` in the inner loop below, because the weight already needs
-## _pole_distance and the comparison looks like one more token. That would be a
-## SECOND derivation of the connection rule, and the direction that fails is
-## silent: a renderer stricter than the BFS leaves poles on one network with no
-## wire between them, and nothing — no test, no visual — reports it. See
-## poles_connected's own docstring, which says the same thing from the other
-## end. _pole_distance appears below for the WEIGHT only.
+##     C blocks A-B  <=>  |CA|^2 + |CB|^2 <= |AB|^2
 ##
-## PRIM'S, IN THE DENSE FORM — a `key` per remaining pole rather than a rescan
-## of the whole tree. This matters and is not a style preference. The obvious
-## formulation loops over remaining x in-tree on every one of the N-1 steps,
-## which asks poles_connected about O(N^3) pairs; carrying the best-known edge
-## per remaining pole and relaxing it against only the pole just added asks
-## about each pair exactly once, N(N-1)/2 in total. Measured at N = 100 that is
-## the difference between 12.5 ms and 340 ms against a 16.7 ms frame — see
-## test_pole_tiers sub-case (12), which times this on every run and carries the
-## full table.
+## plus TWO MODIFICATIONS to textbook Gabriel, both load-bearing, both below.
 ##
-## DETERMINISM is house law and the renderer is not exempt: a tree that
-## reshuffled between frames would shimmer. Three keys, in order — shortest
-## edge, then the lex-smaller in-tree endpoint, then the lex-smaller remaining
-## pole. The third is implicit in the `<` comparisons against a list this
-## function lex-sorted, exactly as _covering_component_id's third key is its
-## scan order; it is a key all the same, and a change of iteration order would
-## change which tree comes out.
+## WHY NOT A MINIMUM SPANNING TREE. A per-component MST is what this function
+## returned between Task 7 and Task 8, and it FAILED the visual gate — for the
+## SECOND time. NOTES.md records the same rejection at Foundation PAUSE 1:
+## "these 2 should connect directly". An MST routes through intermediates. On a
+## square of four basic poles 3 apart, every tie resolves to the lex-first pole,
+## so the tree is a 3-wire STAR out of the north-west corner and the south-east
+## pole reaches across the DIAGONAL rather than to either of the two neighbours
+## it is visually adjacent to. Gabriel draws that square as a square: four
+## wires, no diagonals. Read the "Wire rendering" section of NOTES.md before
+## touching this function — this is the THIRD pass over this renderer, and the
+## two rejected shapes (mesh at wide range, tree) are both easy to fall back
+## into.
 ##
-## COST: O(N^2) per component, on the render path, once per frame. Sub-case
-## (12) is the tripwire.
+## MODIFICATION 1 — THE COMPARISON IS `<=`, NOT `<`.
+## MODIFICATION 2 — A BLOCKER MUST BE REACHABLE FROM BOTH ENDPOINTS.
+## THESE TWO ARE A PACKAGE. Neither ships without the other, and the reason is
+## not style:
 ##
-## THE SAME ORDER THE MESH COST, BUT NOT THE SAME PRICE, and the difference is
-## measured rather than argued: both have to ask poles_connected about all
-## N(N-1)/2 pairs, but this also weighs each accepted pair with _pole_distance
-## and rescans for the cheapest edge on every step, so at N = 100 it measured
-## 12.5 ms where the mesh measured 8.3 ms on the same machine — about 1.5x.
-## Both are already too much of a 16.7 ms frame at that size. THIS FUNCTION DID
-## NOT INTRODUCE THAT and does not fix it: the quadratic pair scan is inherited
-## from the mesh, which paid it every frame too. The fix, when the numbers
-## justify one, is to cache the returned Array on the world and invalidate it
-## from mark_dirty — topology only changes on placement, so a cached list is
-## correct for every frame in between. Deliberately NOT done here: the cost was
-## measured first and the decision belongs to whoever reads the measurement.
+##   * The four-pole square is EXACTLY DEGENERATE. For a diagonal,
+##     |CA|^2 + |CB|^2 and |AB|^2 are both 72 in doubled units (18 in tiles):
+##     C sits precisely ON the circle. Under `<` the diagonals survive and
+##     Gabriel degenerates to the full 6-wire mesh — the shape rejected at
+##     Foundation PAUSE 1. Under `<=` they are suppressed and the square comes
+##     out as a square. So `<=` is what makes the gate pass.
+##   * But `<=` ALONE suppresses every right-angle configuration (Thales:
+##     any C on the circle blocks), and that DISCONNECTS real layouts. Worked
+##     example, all three mutually in one component: basic (0,0), medium
+##     (-4,0), basic (0,-4) — the edge from the medium pole to (0,-4) is
+##     suppressed by a blocker the medium pole cannot even reach.
+##   * The guard is also what keeps the RENDERER HONEST ABOUT CONNECTIVITY.
+##     Plain Gabriel filtered by range can delete the only reachable bridge,
+##     leaving a pole powered by the BFS and drawn with NO WIRE AT ALL — the
+##     invisible-connection failure poles_connected's docstring exists to
+##     prevent, arriving through the back door. Minimal case: SUBSTATION at
+##     (0,0) with basic poles at (-2,1) and (-3,-3). Unguarded, the pole at
+##     (-3,-3) renders wireless. Randomised sweeps disconnected roughly half to
+##     four fifths of layouts without it — test_pole_tiers sub-case (11d) is a
+##     NEGATIVE CONTROL that re-measures exactly that on every suite run,
+##     because this guard is invisible when it works.
+##   * And it is the PERFORMANCE fix. A blocker has to be a COMMON NEIGHBOUR,
+##     so the search space is one adjacency list rather than the whole
+##     component: O(N^2) adjacency build + O(E*D) filter instead of O(N^3).
+##     MEASURED on sub-case (12)'s 100-pole grid, this code with only the guard
+##     neutered: 17.1 ms unguarded against 9.6-12.5 ms guarded over seven runs,
+##     with the Task 7 MST at 12.5 ms. So the guarded form is the same order as
+##     the tree it replaces and the unguarded form is not. That margin is this
+##     fixture's, not a general one — the grid has about eight neighbours per
+##     pole, and the guard buys less as the graph gets denser.
+##
+## WHY IT STILL SPANS EVERY COMPONENT. Weight the reachable graph by Euclidean
+## distance and take any MST T. If C suppressed an edge A-B of T then
+## |CA| < |AB| and |CB| < |AB| STRICTLY (a point in a closed diameter circle is
+## nearer to both ends than they are to each other, and equality needs C on the
+## segment, which forces one of the two to be shorter anyway), and the guard
+## says C-A and C-B are both reachable — so swapping produces a strictly
+## lighter spanning tree, contradicting minimality. No MST edge is ever
+## suppressed, so the emitted set contains a spanning tree of every component.
+##
+## TWO DIFFERENT METRICS LIVE THREE LINES APART. Do not conflate them.
+##   * REACHABILITY is Chebyshev, footprint-to-footprint, per-tier ranges,
+##     either-reaches — and it is NOT computed here. poles_connected is asked,
+##     exactly as rebuild_topology's BFS asks it. See its docstring for what
+##     re-deriving it costs.
+##   * The BLOCKER TEST is EUCLIDEAN SQUARED on doubled footprint centres. It
+##     is a different distance, a different unit, and it decides a different
+##     question (which reachable pairs survive, never which pairs exist).
+##
+## GEOMETRY POINT: THE FOOTPRINT CENTRE IN DOUBLED INTEGER COORDINATES,
+## _pole_centre_doubled — 1x1 poles land on odd coordinates, the 2x2 substation
+## on even ones, and every squared distance stays an exact integer. NOT
+## "nearest cell of the footprint": that would make A's point depend on B, the
+## test would stop being symmetric, and the connectivity proof above collapses.
+## Two poles can never share a centre (odd/even parity separates the tiers, and
+## two poles of one tier need different cells), so |AB|^2 > 0 always — asserted
+## below rather than assumed.
+##
+## DETERMINISM is house law and the renderer is not exempt. The RULE is
+## order-free (a property of a pair and its common neighbours), but the
+## EMISSION ORDER is not: components in ascending id, poles lex-sorted within a
+## component, pairs in ascending (i, j). A list that reshuffled between frames
+## would shimmer.
+##
+## COST: one O(N^2) adjacency build per component plus an O(E*D) filter, on the
+## render path, once per frame. The quadratic term is INHERITED — every
+## formulation this renderer has had, mesh and MST included, must ask
+## poles_connected about all N(N-1)/2 pairs. Sub-case (12) is the tripwire and
+## carries the table. The fix when it becomes real is still to cache the
+## returned Array on the world and invalidate it from mark_dirty; that is
+## orthogonal to this change and deliberately NOT folded into it, so a visual-
+## gate commit does not double as a performance commit.
 static func wire_edges(world) -> Array:
 	if world._power_network_dirty:
 		rebuild_topology(world)
@@ -346,83 +398,132 @@ static func wire_edges(world) -> Array:
 	var comp_ids: Array = by_comp.keys()
 	comp_ids.sort()
 
-	# One past the longest wire any tier pair can form. Every candidate below
-	# has already cleared poles_connected, so its distance is at most
-	# max(range_a, range_b) <= max_pole_range() — strictly less than this. The
-	# first reachable candidate for a pole therefore always beats its initial
-	# key, which is what lets the relaxation below skip a "have I got one yet"
-	# test and never index key_from at -1.
-	var no_edge_yet: int = max_pole_range() + 1
-
 	var edges: Array = []
 	for cid in comp_ids:
 		var poles: Array = by_comp[cid]
-		# A lone pole spans itself. Nothing to draw, and the seeding below
-		# would index poles[0] into an empty tree loop.
+		# A lone pole has no pair to test. Nothing to draw.
 		if poles.size() < 2:
 			continue
 		poles.sort_custom(func(a, b): return _lex_less(a, b))
 		var n: int = poles.size()
-		# Building objects cached alongside the anchors: _pole_distance takes
-		# Buildings, and re-resolving them through world.buildings inside an
-		# O(N^2) loop would add two dictionary lookups to every pair.
-		var bodies: Array = []
-		var in_tree: Array = []
-		var key_dist: Array = []
-		var key_from: Array = []
-		for i in range(n):
-			bodies.append(world.buildings.get(poles[i], null))
-			in_tree.append(false)
-			key_dist.append(no_edge_yet)
-			key_from.append(-1)
 
-		# Seed at the lex-first pole. poles is lex-sorted, so that is index 0.
-		in_tree[0] = true
-		var last_added: int = 0
-		var added: int = 1
-		while added < n:
-			# --- relax every remaining pole against the one just added ---
-			for v in range(n):
-				if in_tree[v]:
+		# Footprint centres, doubled, computed ONCE per pole. Resolving the
+		# Building through world.buildings inside the pair loop would add a
+		# dictionary lookup to every blocker probe, and the blocker probes are
+		# the inner loop.
+		var centres: Array = []
+		for i in range(n):
+			centres.append(_pole_centre_doubled(world.buildings.get(poles[i], null)))
+
+		# THE ADJACENCY, BUILT ONCE, FROM THE SHARED PREDICATE. This is the
+		# only place reachability is decided, and it is decided by asking
+		# poles_connected — never by re-deriving it from _pole_distance and the
+		# range table, which is right there and looks like the same thing.
+		#
+		# Two parallel structures because two different accesses are needed and
+		# each is O(1) at what it does: `nbrs` is WALKED (candidate blockers
+		# for an edge out of pole i), `nbr_set` is QUERIED (is this candidate
+		# also reachable from pole j). Building only the Array would make the
+		# both-reach test a linear scan and put the O(N^3) back.
+		#
+		# nbrs[k] comes out ASCENDING: the build appends every j < k during
+		# outer passes 0..k-1 in order, then every j > k during pass k in
+		# order. The pair walk below relies on that for its emission order.
+		var nbrs: Array = []
+		var nbr_set: Array = []
+		for i in range(n):
+			nbrs.append([])
+			nbr_set.append({})
+		for i in range(n):
+			for j in range(i + 1, n):
+				if not PowerNetwork.poles_connected(world, poles[i], poles[j]):
 					continue
-				# THE REACHABILITY CHECK. The shared predicate, not arithmetic.
-				if not PowerNetwork.poles_connected(world, poles[last_added], poles[v]):
+				nbrs[i].append(j)
+				nbrs[j].append(i)
+				nbr_set[i][j] = true
+				nbr_set[j][i] = true
+
+		# --- THE GABRIEL FILTER. Each reachable pair survives unless a COMMON
+		# neighbour sits inside the circle on it as diameter. ---
+		#
+		# `j <= i` skips the mirror copy in nbrs[i], so each pair is judged
+		# once and emitted in ascending (i, j) over a lex-sorted list.
+		for i in range(n):
+			for j in nbrs[i]:
+				if j <= i:
 					continue
-				var d: int = _pole_distance(bodies[last_added], bodies[v])
-				if d > key_dist[v]:
-					continue
-				# Tie on distance: the lex-smaller in-tree endpoint keeps it.
-				# Cannot see key_from[v] == -1: a first candidate has
-				# d <= max_pole_range() < no_edge_yet, so it took the
-				# assignment below rather than this branch.
-				if d == key_dist[v] and not _lex_less(poles[last_added], poles[key_from[v]]):
-					continue
-				key_dist[v] = d
-				key_from[v] = last_added
-			# --- take the cheapest edge out of the tree ---
-			var best: int = -1
-			for v in range(n):
-				if in_tree[v] or key_from[v] < 0:
-					continue
-				if best < 0 or key_dist[v] < key_dist[best]:
-					best = v
-				elif key_dist[v] == key_dist[best] and _lex_less(poles[key_from[v]], poles[key_from[best]]):
-					best = v
-			if best < 0:
-				# UNREACHABLE BY CONSTRUCTION, not a live guard. These poles
-				# share a component, which means rebuild_topology's BFS walked
-				# from one to the others over this same predicate, so some
-				# remaining pole always touches the tree. It is here because a
-				# wrong answer costs one missing wire while an infinite `while`
-				# costs the frame, and because the two would only ever disagree
-				# if someone gave the renderer its own rule — the thing this
-				# function's docstring exists to prevent.
-				break
-			edges.append([poles[key_from[best]], poles[best]])
-			in_tree[best] = true
-			last_added = best
-			added += 1
+				var ab2: int = _centre_dist_sq(centres[i], centres[j])
+				# Coincident centres are UNCONSTRUCTIBLE: 1x1 tiers land on odd
+				# coordinates and the 2x2 substation on even ones, and two
+				# poles of one tier cannot occupy the same cell. If this ever
+				# fires, _pole_centre_doubled or a new tier's footprint is
+				# wrong, and the blocker test below would silently divide the
+				# plane at a point instead of a circle. Asserted rather than
+				# assumed, per the "no silent geometry" rule.
+				assert(ab2 > 0, "wire_edges: two poles share a footprint centre")
+				var blocked: bool = false
+				# ONLY COMMON NEIGHBOURS ARE CANDIDATES — this is the both-reach
+				# guard, and it is not an optimisation bolted onto a geometric
+				# rule. See the docstring: it is what keeps `<=` from
+				# disconnecting right-angle layouts, what proves the emitted set
+				# still spans, and only THEN what makes this O(E*D) instead of
+				# O(N^3).
+				#
+				# IT IS EXPRESSED IN TWO PLACES AND BOTH HALVES COUNT: the
+				# candidate list `for k in nbrs[i]` (C must reach A) and the
+				# `nbr_set[j].has(k)` test (C must reach B). MUTATION RUNS:
+				# neutering only the membership test leaves a ONE-SIDED guard
+				# that still saves sub-case (11c)'s triple but disconnects
+				# 1 / 5 / 13 components across (11d)'s three bands. Widening the
+				# candidate list to the whole component as well — plain Gabriel
+				# — additionally fails (11c), which then draws one wire for
+				# three poles and leaves the far one bare.
+				for k in nbrs[i]:
+					if k == j:
+						continue
+					if not nbr_set[j].has(k):
+						continue
+					# EUCLIDEAN SQUARED on doubled centres. NOT _pole_distance,
+					# which is the Chebyshev metric poles_connected uses above
+					# — two different distances, three lines apart, deciding two
+					# different questions.
+					if _centre_dist_sq(centres[k], centres[i]) + _centre_dist_sq(centres[k], centres[j]) <= ab2:
+						blocked = true
+						break
+				if not blocked:
+					edges.append([poles[i], poles[j]])
 	return edges
+
+## A pole's footprint centre in DOUBLED integer tile coordinates — the geometry
+## point wire_edges' blocker test measures from.
+##
+## Doubling is what keeps the arithmetic exact. A 1x1 pole's true centre is
+## anchor + 0.5 and a 2x2 substation's is anchor + 1.0, so in tile units one
+## tier is half-integral and the other integral. Multiplying by two makes 1x1
+## centres ODD and 2x2 centres EVEN, every squared distance an exact int, and
+## every comparison in wire_edges float-free — no epsilon, and in particular no
+## epsilon in the `<=` that decides the degenerate four-pole square.
+##
+## Derived from the footprint, so a future tier gets the right point for free:
+## fp.x on an anchor at x means cells x .. x+fp.x-1, whose centre doubled is
+## 2x + fp.x.
+static func _pole_centre_doubled(b: Building) -> Vector2i:
+	var fp: Vector2i = Buildings.footprint_of(b.type)
+	return Vector2i(2 * b.anchor.x + fp.x, 2 * b.anchor.y + fp.y)
+
+## Squared Euclidean distance between two doubled centres. Exact ints, and only
+## ever compared against each other, so the doubling factor of 4 cancels and no
+## caller has to undo it.
+##
+## NOT interchangeable with _pole_distance. That one is Chebyshev, measured
+## footprint-to-footprint, and answers "are these wired at all". This one is
+## Euclidean, measured centre-to-centre, and answers "does a third pole sit
+## inside the circle". wire_edges uses both, and the whole point of two names is
+## that a reader cannot pick up the wrong one by accident.
+static func _centre_dist_sq(a: Vector2i, b: Vector2i) -> int:
+	var dx: int = a.x - b.x
+	var dy: int = a.y - b.y
+	return dx * dx + dy * dy
 
 ## Per-tick orchestrator. Called from grid_world._on_tick BEFORE the
 ## building tick loop. 3-stage flow (extended at Electricity Session 2):

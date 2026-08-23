@@ -1640,18 +1640,21 @@ func _draw() -> void:
 # Matches power_pole.gd's crossarm offset exactly. See _pole_wire_anchor.
 const MAST_WIRE_Y: float = 0.16
 
-## Draw wires between poles: a MINIMUM SPANNING TREE per component. N poles
-## on one network get N-1 wires, whatever their tiers' ranges are.
+## Draw wires between poles: the GABRIEL GRAPH of each component, restricted to
+## reachable pairs. A wire is drawn between two in-range poles unless a third
+## pole they can BOTH reach sits inside the circle on that wire as diameter.
 ##
-## Replaced the mesh (every in-range same-component pair) at Session 3 Task 7.
-## The mesh's wire count grew with range, which is what capped the basic pole
-## at 3 back at Foundation PAUSE 1 and would have made the substation's range
-## 11 unshippable. This is a change to gate-approved visuals: the dense case
-## that used to draw six wires among four poles now draws three.
+## Two shapes have been tried here and rejected. The MESH (every in-range pair)
+## read as a hairball once ranges widened. The MINIMUM SPANNING TREE that
+## replaced it at Session 3 Task 7 failed the visual gate for the second time —
+## it routes through intermediates, so the dense four-pole square came out as a
+## 3-wire star with the far corner reaching across the DIAGONAL. Gabriel draws
+## that square as a square: four wires, no diagonals. NOTES.md's "Wire
+## rendering" section carries the full history; read it before changing this.
 ##
 ## THIS FUNCTION OWNS NO PART OF THE RULE. Which poles are wired, which
-## component they belong to and which of the in-range pairs survive into the
-## tree are all decided by PowerNetwork.wire_edges — which asks
+## component they belong to and which of the in-range pairs survive the Gabriel
+## filter are all decided by PowerNetwork.wire_edges — which asks
 ## PowerNetwork.poles_connected, the same predicate rebuild_topology's BFS
 ## walks. Grepping this module for a range identifier must still come back
 ## empty: with per-tier ranges a second derivation would drift, and the
@@ -1665,15 +1668,15 @@ const MAST_WIRE_Y: float = 0.16
 ## different components, which test_pole_tiers sub-case (11) asserts directly.
 ##
 ## Called from _draw between building draws and post-pass indicators, so
-## wire_edges runs ONCE PER FRAME. Its cost is O(N²) per component and is
-## timed by test_pole_tiers sub-case (12) on every suite run: 0.16 ms at 12
-## poles in one component, 12.5 ms at 100, against a 16.7 ms frame. The mesh
-## measured 8.3 ms at 100 on the same machine, so the quadratic pair scan is
-## INHERITED rather than introduced here — both formulations have to ask
-## poles_connected about every pair — but this is about 1.5x of it, and 100
-## poles on one network was already unaffordable before Task 7. The fix, when
-## it is wanted, is to cache the edge list and invalidate on
-## _power_network_dirty, since topology only changes on placement.
+## wire_edges runs ONCE PER FRAME. Its cost is O(N²) per component — an
+## adjacency build over every pair — and is timed by test_pole_tiers sub-case
+## (12) on every suite run. The quadratic pair scan is INHERITED, not
+## introduced by any one formulation: mesh, MST and Gabriel all have to ask
+## poles_connected about all N(N-1)/2 pairs. The fix, when it is wanted, is to
+## cache the edge list and invalidate on _power_network_dirty, since topology
+## only changes on placement. Read sub-case (12)'s printed table for the
+## current figures rather than quoting numbers here, where they go stale
+## silently.
 func _draw_power_wires() -> void:
 	if _power_network_dirty:
 		PowerNetwork.rebuild_topology(self)
@@ -1715,8 +1718,14 @@ func _draw_power_wires() -> void:
 ## For every 1x1 pole this returns bit-identical values to the old inline
 ## expression, so no shipped basic-pole visual moved.
 ##
-## Task 7's MST rewrite draws a different SET of wires but the same endpoints,
-## and should call this rather than recomputing.
+## Every rewrite of the edge RULE — mesh, MST, and now the Gabriel graph —
+## draws a different SET of wires but terminates them at the same points, and
+## must call this rather than recomputing. Horizontally this is the footprint
+## centre, the same geometry point PowerNetwork._pole_centre_doubled measures
+## the Gabriel blocker test from — halved, and in pixels rather than doubled
+## tiles. The two are independent derivations of one idea and are allowed to
+## be: this one also has to answer a vertical question the blocker test does
+## not have (mast crossarm versus body centre).
 func _pole_wire_anchor(anchor: Vector2i) -> Vector2:
 	var b: Building = buildings.get(anchor, null)
 	var fp: Vector2i = Vector2i(1, 1) if b == null else Buildings.footprint_of(b.type)

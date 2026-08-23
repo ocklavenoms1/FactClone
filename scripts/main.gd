@@ -537,8 +537,8 @@ func _process(delta: float) -> void:
 
 	# F7 — spawn the POLE TIER rig (Electricity Session 3) below the player:
 	# two basic-pole clusters with a generator each, a medium pole and one
-	# substation bridging them, plus a detached four-pole square as the MST
-	# rendering control. Demand is 4 x 5 + 20 x 1 = exactly 40, same as F10's
+	# substation bridging them, plus a detached four-pole square (the K4) as the
+	# wire-rendering control. Demand is 4 x 5 + 20 x 1 = exactly 40, as F10's
 	# rig, so F8 reads identically on either. Same dedup contract: Shift+F7
 	# clears the flag.
 	#
@@ -1562,7 +1562,7 @@ func _spawn_pole_tier_rig(player_tile: Vector2i) -> void:
 	if skipped > 0:
 		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F7 for a clean one, then clean up the old rig manually." % [placed, placed + skipped, skipped])
 		return
-	_show_toast("[rig] Pole tiers ready — substation at %s bridges two clusters. East block is the basic-pole MST control. F8 cycles power." % str(rig["substation"]))
+	_show_toast("[rig] Pole tiers ready — substation at %s bridges two clusters. East block is the basic-pole K4 wire control: look for a closed square, no diagonals. F8 cycles power." % str(rig["substation"]))
 
 ## THE LEVER (F8). FULL -> BROWNOUT -> ZERO -> FULL by changing how many of the
 ## rig's generators have fuel. Builds nothing and removes nothing, which is the

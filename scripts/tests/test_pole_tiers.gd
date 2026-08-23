@@ -21,7 +21,7 @@ extends RefCounted
 ##      the opposite order (Task 4).
 ##   5. The predicate IS the graph — the BFS components are exactly the
 ##      connected components of PowerNetwork.poles_connected, the same function
-##      wire_edges asks when it builds the tree the renderer draws (Task 4).
+##      wire_edges asks to build the adjacency the renderer filters (Task 4).
 ##   6. Multi-cell supply symmetry — the 2x2 substation's supply area is
 ##      projected from all FOUR of its cells, so it reaches equally far east
 ##      and west (Task 5).
@@ -35,10 +35,12 @@ extends RefCounted
 ##  10. Supply-scan cost tripwire — times power_satisfaction_at over a dense
 ##      consumer field inside a substation's area and prints the us/call on
 ##      every run. Order-of-magnitude budget, not a benchmark (Task 6).
-##  11. MST wire edges — PowerNetwork.wire_edges emits a SPANNING TREE per
-##      component (N-1 wires that reach every pole), every edge one
-##      poles_connected accepts, on the K4 square and on the rig's own
-##      mixed-tier bus (Task 7).
+##  11. GABRIEL wire edges — PowerNetwork.wire_edges emits the Gabriel graph of
+##      each component, restricted to reachable pairs, with the both-reach
+##      blocker guard. Four fixed fixtures (a) the K4 square, (b) the rig's
+##      mixed-tier bus, (c) the substation triple, plus (d) a seeded randomised
+##      sweep AND its negative control, which asserts that removing the guard
+##      disconnects (Task 8, replacing Task 7's MST sub-cases).
 ##  12. Wire-edge cost tripwire — times wire_edges at three component sizes.
 ##      It runs once per FRAME, so this is the harsher of the two timing
 ##      budgets in this file (Task 7).
@@ -75,7 +77,7 @@ static func run(parent: Node) -> Dictionary:
 	_case_generator_against_substation(parent, failures)
 	_case_reach_row_fits_panel(failures)
 	_case_supply_scan_cost(parent, failures)
-	_case_mst_wire_edges(parent, failures)
+	_case_gabriel_wire_edges(parent, failures)
 	_case_wire_edge_cost(parent, failures)
 	if failures.is_empty():
 		return { "ok": true, "message": "12 sub-cases pass — see the sub-case index in test_pole_tiers.gd" }
@@ -384,10 +386,10 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 # Sub-cases (3) and (4) pin the RULE. This one pins the STRUCTURE that makes
 # the rule safe: PowerNetwork.poles_connected is the only place the rule
 # exists, and PowerNetwork.wire_edges — the only thing
-# grid_world._draw_power_wires walks — asks that same function to decide which
-# pairs its spanning tree may use. So the edges the renderer draws are a SUBSET
-# of the edges the BFS walked, never a pair the BFS rejected, and the failure
-# the user cares about — a
+# grid_world._draw_power_wires walks — asks that same function to build the
+# adjacency its Gabriel filter runs over. So the edges the renderer draws are a
+# SUBSET of the edges the BFS walked, never a pair the BFS rejected, and the
+# failure the user cares about — a
 # renderer STRICTER than the BFS, leaving poles on one network with no wire
 # between them and no signal anywhere — is unreachable rather than untested.
 #
@@ -1028,89 +1030,115 @@ static func _scan_loop_floor(_world, _pos: Vector2i) -> float:
 	return 0.0
 
 # ===========================================================================
-# (11) MST WIRE EDGES.
+# (11) GABRIEL WIRE EDGES.
 #
 # The renderer draws to a canvas, which the headless suite has no way to
 # inspect, so the testable unit is the EDGE LIST — PowerNetwork.wire_edges,
 # which grid_world._draw_power_wires now does nothing but walk.
 #
-# Three claims:
-#   (a) A component of N poles produces EXACTLY N-1 wires, and those N-1
-#       wires SPAN it. That is what makes wire count independent of wire
-#       range, which is what lets the substation afford range 11 without the
-#       K4 hairball that forced POLE_RANGE down from 5 to 3 at Foundation
-#       PAUSE 1. N-1 alone is not a spanning tree — N nodes and N-1 edges can
-#       still be a cycle plus a separate piece — so the walk in
-#       _edges_span_component is a second, independent assertion and not a
-#       restatement of the count.
-#   (b) Every emitted edge satisfies poles_connected. The renderer must never
-#       draw a wire the BFS would not have walked, and must never omit one it
-#       did.
-#   (c) On a MIXED-TIER layout the tree is strictly smaller than the mesh.
-#       (a) is satisfiable by a renderer that got lucky on one shape; (11b)
-#       pins it where it actually matters, on the rig's own substation-bridged
-#       bus, by measuring the mesh it replaced in the same world.
+# THE RULE UNDER TEST: an in-range pair A-B gets a wire unless some third pole
+# C that A and B can BOTH reach lies inside the circle on AB as diameter,
+# tested as |CA|^2 + |CB|^2 <= |AB|^2 on doubled footprint centres. The `<=`
+# and the both-reach guard are a package — see wire_edges' docstring — and this
+# sub-case is built to catch the loss of EITHER:
 #
-# The K4 square in (11a) is the exact shape from the original complaint: four
-# poles, all six pairs in range. Mesh drew 6 wires, MST draws 3. Its premise
-# check re-asserts that all six pairs really are connected, because "3 edges"
-# is only interesting against a layout where 6 was available.
+#   (11a) THE K4, the shape the user has now rejected twice. Four basic poles
+#         3 apart, all six pairs in range. The answer is the SQUARE OUTLINE and
+#         it is asserted AS A SET, not as a count, because the two neighbouring
+#         wrong answers are both interesting: 3 wires means a spanning tree is
+#         back (the star the gate rejected), 6 means the blocker test lost its
+#         `<=` and degenerated to the mesh.
+#   (11b) THE MIXED-TIER RIG, so the per-tier ranges and the 2x2 substation
+#         centre are exercised on the layout PAUSE 1 is actually judged
+#         against: 9 wires over 2 components.
+#   (11c) THE SUBSTATION TRIPLE, the minimal layout where the both-reach guard
+#         is the only thing standing between a pole and no wire at all. Its
+#         premise runs plain Gabriel on the same three poles and requires that
+#         it FAILS.
+#   (11d) A SEEDED RANDOMISED SWEEP over mixed-tier layouts, asserting that the
+#         emitted edges connect every BFS component — plus the same sweep with
+#         the guard removed, asserting that it DISCONNECTS. The guard is
+#         invisible when it works, so the sweep that proves it necessary is
+#         worth more than the one that proves it sufficient.
+#
+# Every sub-case also asserts that each emitted edge satisfies poles_connected:
+# the renderer must never draw a wire the BFS would not have walked.
 # ===========================================================================
 
 ## The K4: basic poles at Chebyshev exactly 3 on both axes. The DIAGONAL pairs
 ## are also at 3 — Chebyshev is max(|dx|, |dy|), not a sum — which is what
 ## makes all six pairs in range at the shipped basic range of 3. Same shape as
-## PoleTierRig.MST_CONTROL_POLES, which is the on-screen control for this.
-const MST_K4: Array = [Vector2i(10, 10), Vector2i(13, 10), Vector2i(10, 13), Vector2i(13, 13)]
+## PoleTierRig.K4_CONTROL_POLES, which is the on-screen control for this.
+const K4_POLES: Array = [Vector2i(10, 10), Vector2i(13, 10), Vector2i(10, 13), Vector2i(13, 13)]
 ## A second component, far enough east that no basic pole in the K4 reaches it
-## (x gap 17, against range 3), so the edge total has to come from two trees.
-const MST_FAR_PAIR: Array = [Vector2i(30, 10), Vector2i(33, 10)]
+## (x gap 17, against range 3), so the edge total comes from two components.
+const K4_FAR_PAIR: Array = [Vector2i(30, 10), Vector2i(33, 10)]
+## The four SIDES of the K4, and the whole answer for that component. Written
+## out rather than derived so that a renderer which reproduces the count by
+## some other means still fails. Pairs are lex-ordered (x then y) to match
+## wire_edges' emission, and compared through _edge_key so orientation cannot
+## make an equal set look unequal.
+const K4_SIDES: Array = [
+	[Vector2i(10, 10), Vector2i(10, 13)],
+	[Vector2i(10, 10), Vector2i(13, 10)],
+	[Vector2i(10, 13), Vector2i(13, 13)],
+	[Vector2i(13, 10), Vector2i(13, 13)],
+]
 
-static func _case_mst_wire_edges(parent: Node, failures: Array) -> void:
-	_case_mst_k4(parent, failures)
-	_case_mst_mixed_tier(parent, failures)
+static func _case_gabriel_wire_edges(parent: Node, failures: Array) -> void:
+	_case_gabriel_k4(parent, failures)
+	_case_gabriel_mixed_tier(parent, failures)
+	_case_gabriel_guard_fixture(parent, failures)
+	_case_gabriel_sweep(parent, failures)
 
-static func _case_mst_k4(parent: Node, failures: Array) -> void:
+static func _case_gabriel_k4(parent: Node, failures: Array) -> void:
 	var world = _make_world(parent)
 	var rows: Array = []
-	for p in MST_K4:
+	for p in K4_POLES:
 		rows.append([Buildings.Type.POWER_POLE, p])
-	for p in MST_FAR_PAIR:
+	for p in K4_FAR_PAIR:
 		rows.append([Buildings.Type.POWER_POLE, p])
 	if not _place_all(world, rows, failures, "(11a)"):
 		_teardown(world)
 		return
 	PowerNetwork.rebuild_topology(world)
 
-	# --- PREMISES. 3 edges is only a claim about MST if 6 were on offer. ---
-	var k4_pairs: int = _mesh_pair_count(world, MST_K4)
+	# --- PREMISES. 4 wires is only a claim about the filter if 6 were on
+	# offer, and only a claim about THIS component if the far pair stayed out.
+	var k4_pairs: int = _mesh_pair_count(world, K4_POLES)
 	_check(failures, k4_pairs == 6,
-		"(11a) PREMISE: only %d of the 6 pairs in the K4 square satisfy poles_connected, so this layout is no longer the dense case the mesh renderer drew 6 wires for and a 3-edge result would prove nothing" % k4_pairs)
+		"(11a) PREMISE: only %d of the 6 pairs in the K4 square satisfy poles_connected, so this layout is no longer the dense case the mesh drew 6 wires for and a 4-edge result would prove nothing" % k4_pairs)
 	_check(failures, _component_count(world) == 2,
-		"(11a) PREMISE: the layout formed %d components, expected exactly 2 — the far pair must not reach the K4 or the edge total below stops being 3 + 1" % _component_count(world))
+		"(11a) PREMISE: the layout formed %d components, expected exactly 2 — the far pair must not reach the K4 or the totals below stop separating" % _component_count(world))
 
 	var edges: Array = PowerNetwork.wire_edges(world)
 
-	# --- (a) the count, and the count that names the mutation ---
-	_check(failures, edges.size() == 4,
-		"(11a) four mutually-in-range poles plus a separate pair should yield 3 + 1 = 4 MST wires, got %d (7 means the mesh renderer is still in place: all 6 K4 pairs plus 1 in the far pair)" % edges.size())
-
-	# --- (b) every edge is one the BFS would have walked ---
+	# --- THE SET, not the count. Both neighbouring wrong answers are named. ---
+	var got: Dictionary = {}
 	for e in edges:
-		var ea: Vector2i = e[0]
-		var eb: Vector2i = e[1]
-		_check(failures, PowerNetwork.poles_connected(world, ea, eb),
-			"(11a) the edge list contains %s -> %s, which poles_connected rejects. An edge the BFS would not walk is a wire drawn between poles that are not on one network" % [str(ea), str(eb)])
+		if int(world._pole_component.get(e[0], -1)) == int(world._pole_component.get(K4_POLES[0], -2)):
+			got[_edge_key(e[0], e[1])] = true
+	var want: Dictionary = {}
+	for e in K4_SIDES:
+		want[_edge_key(e[0], e[1])] = true
+	_check(failures, _same_edge_set(got, want),
+		"(11a) the K4 square should be wired as its four SIDES and nothing else, got %d wires %s. THREE means a spanning tree is back, drawn as a star out of the north-west pole with the south-east pole reaching across the DIAGONAL — the shape the user rejected at Foundation PAUSE 1 and again at Session 3 PAUSE 1. SIX means the blocker comparison lost its `<=`, because the diagonals here are EXACTLY degenerate (72 against 72 in doubled units), so `<` lets both through and Gabriel collapses into the mesh" % [got.size(), _edge_list_str(edges)])
 
-	# --- (a again) per component: N-1, and spanning ---
-	_check_trees(world, edges, failures, "(11a)")
+	# --- every edge is one the BFS would have walked ---
+	_check_edges_reachable(world, edges, failures, "(11a)")
+
+	# --- and the whole layout still spans, component by component ---
+	_check_spans(world, edges, failures, "(11a)")
 	_teardown(world)
 
 ## The MIXED-TIER case, built from PoleTierRig so it cannot drift from the
 ## layout PAUSE 1 is judged against. The bus is the point: a medium pole at
 ## range 6 and a substation at range 11 see far more of it than a basic pole
-## does, so the mesh fans out there in a way the basic-only K4 cannot show.
-static func _case_mst_mixed_tier(parent: Node, failures: Array) -> void:
+## does, so the mesh fans out there in a way the basic-only K4 cannot show —
+## and the 2x2 substation is the only pole in the project whose doubled centre
+## is EVEN, so it is the only fixture that exercises that half of
+## _pole_centre_doubled.
+static func _case_gabriel_mixed_tier(parent: Node, failures: Array) -> void:
 	var world = _make_world(parent)
 	PoleTierRig.build(world, Vector2i(40, 40))
 	PowerNetwork.rebuild_topology(world)
@@ -1118,7 +1146,7 @@ static func _case_mst_mixed_tier(parent: Node, failures: Array) -> void:
 	var by_comp: Dictionary = _poles_by_component(world)
 	# The bus is the component holding the substation. Found by TYPE rather
 	# than by coordinate so moving the rig does not silently pick the control
-	# block, which is basic-only and would make (c) below a weaker claim.
+	# block, which is basic-only and would make the subset claim weaker.
 	var bus_id: int = -1
 	for cid in by_comp:
 		for anchor in by_comp[cid]:
@@ -1133,45 +1161,297 @@ static func _case_mst_mixed_tier(parent: Node, failures: Array) -> void:
 		return
 	var bus: Array = by_comp[bus_id]
 	_check(failures, bus.size() >= 4,
-		"(11b) PREMISE: the substation's component holds only %d poles, which is too small a bus for the mesh and the tree to differ meaningfully" % bus.size())
+		"(11b) PREMISE: the substation's component holds only %d poles, which is too small a bus for the mesh and the filtered graph to differ meaningfully" % bus.size())
 
 	var edges: Array = PowerNetwork.wire_edges(world)
-	_check_trees(world, edges, failures, "(11b)")
+	_check_edges_reachable(world, edges, failures, "(11b)")
+	_check_spans(world, edges, failures, "(11b)")
 
-	# --- (c) on the bus the tree is strictly smaller than the mesh ---
+	# --- the whole-rig totals. 6 poles on the bus + the 4-pole control block.
+	# The control block is the K4, so it contributes its four SIDES, and the
+	# bus contributes 5 — which happens to equal a spanning tree's count there
+	# and is NOT asserted as one: the claim is the total, and _check_spans
+	# above is what pins reachability.
+	_check(failures, _component_count(world) == 2,
+		"(11b) the rig should form exactly 2 components (the bridged bus and the K4 control block), got %d — the totals below are meaningless if the blocks merged" % _component_count(world))
+	_check(failures, edges.size() == 9,
+		"(11b) the full rig should draw 9 wires (5 on the 6-pole bus + the K4 control block's 4 sides), got %d. 8 means a spanning tree is back — the K4 would drop to 3" % edges.size())
+
+	# --- on the bus the drawn set is a STRICT SUBSET of the mesh ---
 	var bus_mesh: int = _mesh_pair_count(world, bus)
-	var bus_tree: int = 0
+	var bus_drawn: int = 0
 	for e in edges:
 		if int(world._pole_component.get(e[0], -1)) == bus_id:
-			bus_tree += 1
-	_check(failures, bus_tree == bus.size() - 1,
-		"(11b) the substation's bus holds %d poles so its tree must have %d wires, got %d" % [bus.size(), bus.size() - 1, bus_tree])
-	_check(failures, bus_mesh > bus_tree,
-		"(11b) the mesh and the tree draw the same %d wires on the mixed-tier bus, so this rig no longer demonstrates that MST decouples wire COUNT from wire RANGE — the whole reason the substation may carry 11" % bus_tree)
+			bus_drawn += 1
+	_check(failures, bus_drawn >= bus.size() - 1,
+		"(11b) the substation's bus holds %d poles but only %d wires were drawn on it, which cannot reach them all" % [bus.size(), bus_drawn])
+	_check(failures, bus_mesh > bus_drawn,
+		"(11b) the mesh and the filtered graph draw the same %d wires on the mixed-tier bus, so this rig no longer shows the blocker test doing anything where the wide ranges are" % bus_drawn)
 	_teardown(world)
 
-## Assert, for every component in `world`, that the emitted edges form a
-## spanning tree over it: exactly N-1 edges, and those edges connect all N.
-## Components of one pole must contribute no edge at all.
-static func _check_trees(world, edges: Array, failures: Array, prefix: String) -> void:
+## THE SUBSTATION TRIPLE — the minimal layout where the both-reach guard is the
+## only thing between a pole and no wire at all.
+##
+## Geometry, relative to the substation's anchor: basic poles at (-2, +1) and
+## (-3, -3). The reachable graph is a STAR — both basic poles reach the
+## substation (2 and 3, inside its range 11) and NOT each other (4, outside
+## basic range 3) — so there are exactly two wires available and both are
+## load-bearing. Plain Gabriel deletes one of them anyway: measured on the
+## doubled centres, the near pole sits at 94 against the far edge's 98, i.e.
+## just inside the circle, so it blocks an edge it could not itself replace.
+##
+## Shifted to (20, 20) rather than the origin only so every cell is positive.
+const TRIPLE_SUB: Vector2i = Vector2i(20, 20)
+const TRIPLE_NEAR: Vector2i = Vector2i(18, 21)
+const TRIPLE_FAR: Vector2i = Vector2i(17, 17)
+
+static func _case_gabriel_guard_fixture(parent: Node, failures: Array) -> void:
+	var world = _make_world(parent)
+	if not _place_all(world, [
+		[Buildings.Type.SUBSTATION, TRIPLE_SUB],
+		[Buildings.Type.POWER_POLE, TRIPLE_NEAR],
+		[Buildings.Type.POWER_POLE, TRIPLE_FAR],
+	], failures, "(11c)"):
+		_teardown(world)
+		return
+	PowerNetwork.rebuild_topology(world)
+
+	# --- PREMISES: one component, and a STAR rather than a triangle. ---
+	_check(failures, _component_count(world) == 1,
+		"(11c) PREMISE: the triple formed %d components, expected 1 — all three poles must be on one network or 'spans' is trivially true" % _component_count(world))
+	_check(failures, not PowerNetwork.poles_connected(world, TRIPLE_NEAR, TRIPLE_FAR),
+		"(11c) PREMISE: the two basic poles at %s and %s now reach each other, so the substation is no longer the only route between them and deleting its far wire would cost nothing" % [str(TRIPLE_NEAR), str(TRIPLE_FAR)])
+
+	var edges: Array = PowerNetwork.wire_edges(world)
+	_check_edges_reachable(world, edges, failures, "(11c)")
+	_check_spans(world, edges, failures, "(11c)")
+	_check(failures, edges.size() == 2,
+		"(11c) the substation triple should draw both of its 2 available wires, got %d %s" % [edges.size(), _edge_list_str(edges)])
+
+	# --- THE NEGATIVE CONTROL, AS A FIXTURE. Plain Gabriel — the SAME code
+	# path minus the both-reach guard, see _plain_gabriel_edges — must drop the
+	# far pole's only wire. If this assertion ever stops holding, the fixture
+	# has drifted and (11c) is no longer testing the guard at all.
+	var poles: Array = _poles_by_component(world).values()[0]
+	var plain: Array = _plain_gabriel_edges(world, poles)
+	_check(failures, not _edges_span_component(poles, plain),
+		"(11c) PREMISE: plain Gabriel (no both-reach guard) draws %s over this triple and still reaches every pole, so the guard is doing nothing here and this fixture no longer demonstrates why it exists" % _edge_list_str(plain))
+	_teardown(world)
+
+## Seed for sub-case (11d)'s layouts, as a const so a failure REPRODUCES: the
+## printed layout plus this number is the whole repro. Bands derive their own
+## seeds from it (see _sweep_band) so one band's trial count cannot shift
+## another band's layouts.
+const SWEEP_SEED: int = 20260822
+## The tiers a sweep pole is drawn from — uniform over all three, so a third of
+## the poles are substations and the wide-range / even-centre case is common
+## rather than rare.
+const SWEEP_TIERS: Array = [Buildings.Type.POWER_POLE, Buildings.Type.MEDIUM_POLE, Buildings.Type.SUBSTATION]
+## [pole count, box side]. THE BOX SIDE IS THE WHOLE TRICK and is why these are
+## written down rather than guessed. Too small and every layout collapses to
+## ONE component (a third of the poles are substations at range 11, and in a
+## 16-wide box each of those sees everything) — the sweep then tests one shape
+## repeatedly. Too large and every pole is its own singleton, where spanning is
+## vacuously true.
+##
+## MEASURED IN-ENGINE at these three bands, and re-printed by _sweep_band on
+## every run so the figures cannot go stale silently: 3.2 / 5.5 / 8.2
+## components per trial, largest component 14 / 21 / 33 poles, plain Gabriel
+## disconnecting 5 / 8 / 22 of those components. The PREMISE assertions
+## re-derive both properties on every run rather than trusting these numbers.
+##
+## THE BANDS THIS SHIPPED WITH ARE TWICE AS WIDE AS FIRST PROPOSED. A
+## pre-implementation assessment recorded 16 / 22 / 34 for the same pole
+## counts. At those spans every layout collapses to ~1.0 components — a third
+## of the poles are substations at range 11, and in a 16-wide box each of those
+## sees the whole box — and the mean premise below fails. Roughly doubling each
+## span is what reaches the component counts that assessment reported. If a
+## future change to the tier ranges makes the premise fail, RE-MEASURE THE
+## SPAN, do not relax the premise: the mean is the only thing saying this sweep
+## tests more than one shape.
+const SWEEP_BANDS: Array = [[14, 34], [24, 50], [40, 70]]
+## Trials per band. 12 x 3 bands is 36 worlds and ~900 placements, which is the
+## same order as sub-case (10)'s 97-building rig and finishes in well under a
+## second. The band premises below are what tell you whether 12 is enough.
+const SWEEP_TRIALS: int = 12
+
+static func _case_gabriel_sweep(parent: Node, failures: Array) -> void:
+	for band in SWEEP_BANDS:
+		_sweep_band(parent, failures, int(band[0]), int(band[1]))
+
+## One band of the adversarial sweep. Four claims, and the last two are the
+## ones that keep it honest:
+##
+##   1. Every BFS component is CONNECTED by the wires actually drawn. This is
+##      the property the whole session has been guarding: a pole that the BFS
+##      calls powered while the renderer gives it no wire.
+##   2. PREMISE — the mean component count per trial is strictly between 1 and
+##      the pole count. Outside that band the sweep is vacuous in one of the
+##      two directions described on SWEEP_BANDS.
+##   3. PREMISE — at least one component of 4+ poles was drawn with FEWER wires
+##      than its mesh pair count. Without this, the sweep passes cleanly
+##      against a renderer that simply draws every in-range pair.
+##   4. NEGATIVE CONTROL — the same layouts, filtered WITHOUT the both-reach
+##      guard, must disconnect at least once. The guard is invisible when it
+##      works and catastrophic when it silently stops working, so this is the
+##      assertion that has to fail if someone deletes it.
+static func _sweep_band(parent: Node, failures: Array, n: int, span: int) -> void:
+	var band_seed: int = SWEEP_SEED + n * 1000 + span
+	var rng := RandomNumberGenerator.new()
+	rng.seed = band_seed
+	var comp_total: int = 0
+	var max_comp: int = 0
+	var subset_hits: int = 0
+	var guarded_breaks: int = 0
+	var unguarded_breaks: int = 0
+	var first_break: String = ""
+	for _trial in range(SWEEP_TRIALS):
+		var world = _make_world(parent)
+		for _p in range(n):
+			# Overlaps are simply refused by place_building — a trial with a
+			# few poles fewer than n is a fine layout and rejecting it would
+			# bias the sweep toward sparse ones.
+			var t: int = int(SWEEP_TIERS[rng.randi_range(0, SWEEP_TIERS.size() - 1)])
+			world.place_building(t, Vector2i(rng.randi_range(0, span - 1), rng.randi_range(0, span - 1)))
+		PowerNetwork.rebuild_topology(world)
+		var by_comp: Dictionary = _poles_by_component(world)
+		comp_total += by_comp.size()
+		var edges: Array = PowerNetwork.wire_edges(world)
+		var edges_by_comp: Dictionary = {}
+		for e in edges:
+			var cid: int = int(world._pole_component.get(e[0], -1))
+			if not edges_by_comp.has(cid):
+				edges_by_comp[cid] = []
+			edges_by_comp[cid].append(e)
+		for cid in by_comp:
+			var poles: Array = by_comp[cid]
+			max_comp = max(max_comp, poles.size())
+			var comp_edges: Array = edges_by_comp.get(cid, [])
+			if not _edges_span_component(poles, comp_edges):
+				guarded_breaks += 1
+				if first_break.is_empty():
+					first_break = "%s wired as %s" % [_layout_str(world, poles), _edge_list_str(comp_edges)]
+			if poles.size() >= 4 and comp_edges.size() < _mesh_pair_count(world, poles):
+				subset_hits += 1
+			if not _edges_span_component(poles, _plain_gabriel_edges(world, poles)):
+				unguarded_breaks += 1
+		_teardown(world)
+
+	var mean_comps: float = float(comp_total) / float(SWEEP_TRIALS)
+	print("[sweep] pole tiers (11d) n=%d span=%d seed=%d -> %.1f components/trial (largest %d), %d guarded disconnections, %d UNguarded (the negative control)" % [
+		n, span, band_seed, mean_comps, max_comp, guarded_breaks, unguarded_breaks])
+
+	_check(failures, guarded_breaks == 0,
+		"(11d) n=%d span=%d seed=%d: %d component(s) came out with wires that do not reach every pole in them. That is a pole the BFS calls powered and the renderer draws unconnected. First one: %s" % [n, span, band_seed, guarded_breaks, first_break])
+	_check(failures, mean_comps > 1.0 and mean_comps < float(n),
+		"(11d) PREMISE: n=%d span=%d seed=%d produced %.1f components per trial, which is not strictly between 1 and %d. At 1 the box is too small and every layout is one blob, at %d it is too large and every pole is a singleton — either way 'the wires span every component' is vacuous. Re-measure the band, do not relax this" % [n, span, band_seed, mean_comps, n, n])
+	_check(failures, subset_hits > 0,
+		"(11d) PREMISE: n=%d span=%d seed=%d never produced a component of 4+ poles drawn with fewer wires than its mesh pair count (largest component seen was %d). Without that the sweep passes against a renderer that just draws the mesh" % [n, span, band_seed, max_comp])
+	_check(failures, unguarded_breaks > 0,
+		"(11d) NEGATIVE CONTROL FAILED: n=%d span=%d seed=%d — plain Gabriel, the same filter WITHOUT the both-reach guard, disconnected 0 of these layouts. Either the band stopped generating the blocker geometry the guard exists for, or _plain_gabriel_edges is no longer running unguarded. Until this assertion can fail, nothing in the suite is testing the guard" % [n, span, band_seed])
+
+## Plain Gabriel over ONE component: the production filter with the both-reach
+## guard REMOVED, and nothing else changed.
+##
+## THIS IS TEST-ONLY AND EXISTS TO FAIL. It deliberately calls the same
+## PowerNetwork._pole_centre_doubled and PowerNetwork._centre_dist_sq the
+## renderer calls, and the same poles_connected, so the ONLY difference between
+## this and wire_edges is the two lines that require a blocker to be reachable
+## from both endpoints. If it drifts further than that it stops being a control
+## and starts being a second renderer.
+##
+## Also the O(N^3) shape the guard removes — every pole in the component is a
+## candidate blocker, not just the common neighbours. Fine here (components are
+## small and this is not on any render path) and worth seeing written out.
+static func _plain_gabriel_edges(world, poles: Array) -> Array:
+	var n: int = poles.size()
+	var centres: Array = []
+	for i in range(n):
+		centres.append(PowerNetwork._pole_centre_doubled(world.buildings.get(poles[i], null)))
+	var out: Array = []
+	for i in range(n):
+		for j in range(i + 1, n):
+			if not PowerNetwork.poles_connected(world, poles[i], poles[j]):
+				continue
+			var ab2: int = PowerNetwork._centre_dist_sq(centres[i], centres[j])
+			var blocked: bool = false
+			for k in range(n):
+				if k == i or k == j:
+					continue
+				if PowerNetwork._centre_dist_sq(centres[k], centres[i]) + PowerNetwork._centre_dist_sq(centres[k], centres[j]) <= ab2:
+					blocked = true
+					break
+			if not blocked:
+				out.append([poles[i], poles[j]])
+	return out
+
+## Assert every emitted edge is a pair poles_connected accepts. The renderer
+## must never draw a wire the BFS would not have walked.
+static func _check_edges_reachable(world, edges: Array, failures: Array, prefix: String) -> void:
+	for e in edges:
+		_check(failures, PowerNetwork.poles_connected(world, e[0], e[1]),
+			"%s the edge list contains %s -> %s, which poles_connected rejects. An edge the BFS would not walk is a wire drawn between poles that are not on one network" % [prefix, str(e[0]), str(e[1])])
+
+## An orientation-free key for one edge, so two edge SETS can be compared
+## without caring which endpoint wire_edges emitted first.
+static func _edge_key(a: Vector2i, b: Vector2i) -> String:
+	if PowerNetwork._lex_less(a, b):
+		return "%s|%s" % [str(a), str(b)]
+	return "%s|%s" % [str(b), str(a)]
+
+## Set equality over two _edge_key dictionaries.
+static func _same_edge_set(got: Dictionary, want: Dictionary) -> bool:
+	if got.size() != want.size():
+		return false
+	for k in want:
+		if not got.has(k):
+			return false
+	return true
+
+## Edge list as one readable string for a failure message. Uses " " between
+## edges, never "; " — run() joins failures with that and a message carrying
+## one reads as two failures.
+static func _edge_list_str(edges: Array) -> String:
+	var parts: Array = []
+	for e in edges:
+		parts.append("%s-%s" % [str(e[0]), str(e[1])])
+	return "[" + " ".join(parts) + "]"
+
+## Pole anchors with their tiers, for reproducing a failed sweep layout.
+static func _layout_str(world, poles: Array) -> String:
+	var parts: Array = []
+	for p in poles:
+		var b: Building = world.buildings.get(p, null)
+		parts.append("t%d@%s" % [-1 if b == null else b.type, str(p)])
+	return "[" + " ".join(parts) + "]"
+
+## Assert, for every component in `world`, that the emitted edges CONNECT it —
+## and that no edge crosses between components.
+##
+## NOT a count check. Under Gabriel the per-component wire count is a property
+## of the geometry, not of N: it is at least N-1 (or the wires could not reach
+## every pole) and at most the mesh pair count, and the fixed fixtures assert
+## the exact figure where it is meaningful. What is invariant everywhere, and
+## what the user actually sees, is that no pole is left without a wire.
+## Components of one pole contribute no edge and span trivially.
+static func _check_spans(world, edges: Array, failures: Array, prefix: String) -> void:
 	var by_comp: Dictionary = _poles_by_component(world)
 	var edges_by_comp: Dictionary = {}
 	for e in edges:
 		var cid: int = int(world._pole_component.get(e[0], -1))
 		var cid_b: int = int(world._pole_component.get(e[1], -1))
 		_check(failures, cid >= 0 and cid == cid_b,
-			"%s the edge %s -> %s joins components %d and %d. An MST edge that crosses components is not an edge of any one component's tree" % [prefix, str(e[0]), str(e[1]), cid, cid_b])
+			"%s the edge %s -> %s joins components %d and %d. A wire between two networks is a wire the BFS never walked" % [prefix, str(e[0]), str(e[1]), cid, cid_b])
 		if not edges_by_comp.has(cid):
 			edges_by_comp[cid] = []
 		edges_by_comp[cid].append(e)
 	for cid in by_comp:
 		var poles: Array = by_comp[cid]
 		var comp_edges: Array = edges_by_comp.get(cid, [])
-		var want: int = max(0, poles.size() - 1)
-		_check(failures, comp_edges.size() == want,
-			"%s component %d holds %d poles and should have exactly %d wires, got %d" % [prefix, int(cid), poles.size(), want, comp_edges.size()])
+		_check(failures, comp_edges.size() >= max(0, poles.size() - 1),
+			"%s component %d holds %d poles but was drawn with only %d wires, which cannot reach them all" % [prefix, int(cid), poles.size(), comp_edges.size()])
 		_check(failures, _edges_span_component(poles, comp_edges),
-			"%s component %d has the right wire COUNT but its wires do not reach all %d of its poles. A count-only check passes a cycle plus a stranded piece, which on screen is a pole with no wire at all" % [prefix, int(cid), poles.size()])
+			"%s component %d has enough wires to reach all %d of its poles but they do not: some are in a separate piece. On screen that is a pole with no wire at all, on a network the BFS calls powered" % [prefix, int(cid), poles.size()])
 
 ## Do `comp_edges` connect every anchor in `poles` into one piece? Plain BFS
 ## over the EMITTED edges only — it must not consult poles_connected, or it
@@ -1226,10 +1506,11 @@ static func _poles_by_component(world) -> Dictionary:
 # suite would notice it getting slow. (10) times a per-consumer cost; this
 # times a per-FRAME one, which is the harsher budget of the two.
 #
-# THE COST IS QUADRATIC IN COMPONENT SIZE and that is inherent, not a bug: an
-# MST over a graph given only by a predicate has to ask the predicate about
-# every pair at least once. The figure to watch is therefore how the printed
-# us/call moves between the three sizes below, not any one of them alone.
+# THE COST IS QUADRATIC IN COMPONENT SIZE and that is inherent, not a bug: any
+# renderer over a graph given only by a predicate has to ask the predicate
+# about every pair at least once, to know what the graph IS. Mesh, MST and
+# Gabriel all pay it. The figure to watch is therefore how the printed us/call
+# moves between the three sizes below, not any one of them alone.
 # Sizes: 12 is the shipped rigs, 50 and 100 are a player's endgame bus.
 # ===========================================================================
 
@@ -1243,24 +1524,47 @@ static func _poles_by_component(world) -> Dictionary:
 const WIRE_SIZES: Array = [12, 50, 100]
 
 ## The size the budget below is applied to, and it is deliberately the MIDDLE
-## one. Measured on the Task 7 development machine (Godot 4.6.3 headless
-## console, debug checks on, so every figure is an upper bound):
+## one. Measured on the development machine (Godot 4.6.3 headless console,
+## debug checks on, so every figure is an upper bound). Three formulations of
+## this renderer, on the identical grids:
 ##
-##   poles  shipped dense Prim   the plan's remaining x in_tree form
-##      12          159 us                    732 us   (3.6x)
-##      50         2470 us                  40343 us  (10.5x)
-##     100        12474 us                 339720 us  (27.2x)
+##   poles    Gabriel (shipped)   MST, dense Prim   MST, remaining x in_tree
+##      12         165 -  269 us            159 us                    732 us
+##      50        2310 - 3160 us           2470 us                  40343 us
+##     100       9611 - 12487 us          12474 us                 339720 us
 ##
-## Gating at 12 would not catch the O(N^3) formulation: 732 us sits inside any
+## READ THE COLUMNS DIFFERENTLY. The Gabriel column is the min-of-passes from
+## SEVEN consecutive suite runs on one machine, i.e. an honest spread. The MST
+## columns are SINGLE Task 7 readings with no spread behind them. The two
+## formulations are therefore the SAME ORDER at every size and the data does
+## not support calling either one faster — the Gabriel range at 100 poles
+## straddles the MST's single reading. Do not quote a speedup from this table.
+##
+## That is the expected shape: both are dominated by the same O(N^2)
+## poles_connected call per pair, and Gabriel's filter is O(E*D) on top where
+## the MST rescanned for a minimum on each of its N-1 steps.
+##
+## What DOES separate cleanly is the guard. MUTATION RUN, this same sub-case
+## with only the both-reach guard neutered in power_network.gd:
+## 230 / 3999 / 17129 us. The 100-pole figure is past a whole 60 fps frame and
+## is the only reading in this comment that is unambiguously worse than the MST
+## — so the guard is what keeps the FILTER affordable, not the graph.
+##
+## Gating at 12 would not catch a cubic formulation: 732 us sits inside any
 ## budget loose enough to survive a busy machine. Gating at 100 would need a
 ## constant above 12474, i.e. writing down that three quarters of a frame is
-## acceptable, which it is not. 50 is where the two formulations are already
-## 16x apart and the honest number is still a fraction of a frame.
+## acceptable, which it is not. 50 is where the formulations are already 16x
+## apart and the honest number is still a fraction of a frame.
 const WIRE_GATE_SIZE: int = 50
 ## Microseconds per wire_edges call this sub-case refuses to pass at
-## WIRE_GATE_SIZE. 3x over the 2470 us measured there — the spread across
-## passes at this size ran 2470 to 3192, so a tighter budget would sit inside
-## the noise, and 8000 still catches the O(N^3) form by 5x.
+## WIRE_GATE_SIZE. UNCHANGED across the Gabriel rewrite, which is the point:
+## the both-reach guard makes the filter O(E*D), so the O(N^2) adjacency build
+## still dominates and the shipped cost at 50 landed on 2310-3160 us across
+## seven runs, straddling the MST's single 2470 us reading. A budget that moved
+## for a visual change would have been measuring the wrong thing. 8000 still
+## catches the cubic Prim's form by 5x. It does NOT catch the unguarded blocker
+## search, which measured 3999 us here and is caught by sub-cases (11c) and
+## (11d) on correctness instead.
 const WIRE_BUDGET_US: float = 8000.0
 const WIRE_WARM_PASSES: int = 2
 const WIRE_RUNS: int = 3
@@ -1325,13 +1629,25 @@ static func _time_wire_edges(parent: Node, n: int, failures: Array) -> float:
 		_wire_loop_floor(world)
 	var loop_us: float = float(Time.get_ticks_usec() - t_loop) / float(WIRE_RUNS)
 
-	var edges: int = PowerNetwork.wire_edges(world).size()
-	print("[bench] pole tiers (12) wire_edges: %d poles in 1 component -> %d wires, %.1f us/call (min of %d passes, mean %.1f, max %.1f), %.2f%% of a 60fps frame, empty-loop floor %.3f us/call%s" % [
-		n, edges, best_us, WIRE_RUNS, total_us / float(WIRE_RUNS), worst_pass_us,
+	var all_edges: Array = PowerNetwork.wire_edges(world)
+	var edges: int = all_edges.size()
+	# The mesh over the same grid, for the "it actually filtered" check below.
+	# Outside the timed region, and O(N^2) like everything else here.
+	var grid_poles: Array = _poles_by_component(world).values()[0]
+	var mesh: int = _mesh_pair_count(world, grid_poles)
+	print("[bench] pole tiers (12) wire_edges: %d poles in 1 component -> %d wires (mesh would draw %d), %.1f us/call (min of %d passes, mean %.1f, max %.1f), %.2f%% of a 60fps frame, empty-loop floor %.3f us/call%s" % [
+		n, edges, mesh, best_us, WIRE_RUNS, total_us / float(WIRE_RUNS), worst_pass_us,
 		100.0 * best_us / FRAME_US, loop_us,
 		" <- GATED, budget %.1f" % WIRE_BUDGET_US if n == WIRE_GATE_SIZE else ""])
-	_check(failures, edges == n - 1,
-		"(12) the %d-pole grid produced %d wires, expected %d. The timing below is only meaningful if it timed an MST" % [n, edges, n - 1])
+	# TWO-SIDED, because the timing is only meaningful if it timed a Gabriel
+	# graph over one component. An exact count is not assertable here — it is a
+	# property of the grid's geometry — but both degenerate answers are: fewer
+	# than n-1 wires cannot reach every pole, and the full mesh means the
+	# blocker test did nothing and the figure below is a mesh timing.
+	_check(failures, edges >= n - 1 and edges < mesh,
+		"(12) the %d-pole grid produced %d wires against a mesh of %d and a spanning minimum of %d. Below the minimum nothing is reachable, at the mesh nothing was filtered — either way the timing above is not timing the shipped renderer" % [n, edges, mesh, n - 1])
+	_check(failures, _edges_span_component(grid_poles, all_edges),
+		"(12) the %d-pole grid's wires do not reach every pole in it" % n)
 	_teardown(world)
 	return best_us
 

@@ -231,6 +231,13 @@ When iterating on visual / UX feedback features (wire rendering, lamp brightness
 4. **MST (Kruskal)** → user: "these 2 should connect directly" (MST routed through other poles)
 5. **Mesh-within-network + POLE_RANGE=3 + supply-radius=1** → PASS
 
+**And it happened again.** `session-electricity-pole-tiers` Task 7 shipped MST — option 4
+above — without reading this section, and PAUSE 1 rejected it for the same reason, on the
+same four-pole square. The recovery was NOT another symptom iteration: the rule was written
+down first (the Gabriel graph, with `<=` and the both-reach guard), the failure modes were
+enumerated before any code, and the fix landed in one pass. **That is the protocol working.**
+See "Wire rendering: MST was REJECTED TWICE" above for the rule itself.
+
 Each iteration was symptom-driven: "this wire shouldn't exist" / "this wire is missing" — the user described what they saw, not the underlying expectation. Asking 4-option-choice questions failed twice (user dismissed). The 5th iteration succeeded because the user (and the controller) finally agreed to lock option (b) explicitly, then layer two refinements (range and supply area) once option (b)'s flaws surfaced.
 
 **Pattern:** symptom-driven iteration on visual features is a trap. The user can describe what they see and what they don't want, but extracting the rule requires forcing the conversation past the "doesn't this look better?" loop. Concrete tactics:
@@ -287,19 +294,30 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ## Wire-edge cost: cache the edge list, invalidate from `mark_dirty`
 
-Measured at Electricity Session 3 Task 7, headless console build. `wire_edges` runs
+Measured at Electricity Session 3 Tasks 7 and 8, headless console build. `wire_edges` runs
 **every frame** from `_draw_power_wires`.
 
-| poles in one component | MST (shipped) | the mesh it replaced |
-|---|---|---|
-| 12 (the rigs) | 0.16 ms — ~1% of a 60 fps frame | — |
-| 50 | 2.5 ms — 15% | — |
-| 100 | **12.5 ms — 75%** | **8.3 ms — 50%** |
+| poles in one component | Gabriel (shipped, Task 8) | MST (Task 7) | the mesh before it |
+|---|---|---|---|
+| 12 (the rigs) | 0.17–0.27 ms — ~1–2% of a 60 fps frame | 0.16 ms | — |
+| 50 | 2.3–3.2 ms — 14–19% | 2.5 ms | — |
+| 100 | **9.6–12.5 ms — 58–75%** | **12.5 ms** | **8.3 ms — 50%** |
 
-**The quadratic pair scan is INHERITED, not introduced.** MST is ~1.5× the mesh (it also
-weighs each accepted pair and rescans for the cheapest edge), so 100 poles on one network was
-already unaffordable before Task 7. Nothing in the suite would catch this — it is a rendering
-path.
+The Gabriel column is the spread across **seven** consecutive suite runs; the MST and mesh
+columns are **single** Task 7 readings. Read them as the *same order at every size* — the
+data does not support calling either faster, and quoting a speedup from this table would be
+reading noise.
+
+**The quadratic pair scan is INHERITED, not introduced by any of the three.** All of them
+have to ask `poles_connected` about every pair to know what the graph *is*; what differs is
+what they do afterwards. MST also weighed each accepted pair and rescanned for the cheapest
+edge (~1.5× the mesh). Gabriel's blocker filter is `O(E·D)` **only because of the both-reach
+guard** — a blocker must be a common neighbour, so the search is one adjacency list rather
+than the whole component. Measured on sub-case (12)'s own grids with only the guard neutered,
+the unguarded `O(N³)` filter costs **0.23 / 4.0 / 17.1 ms**: past a whole frame at 100 poles,
+and the only reading in this table that is unambiguously worse than the MST. So 100 poles on
+one network was already unaffordable before Task 7, and still is. Nothing in the suite would
+catch a regression here except sub-case (12) — it is a rendering path.
 
 **The fix, when it becomes real: cache `wire_edges`' return on the world and invalidate it
 from `mark_power_network_dirty`.** Topology only changes on placement or removal, so a cached
@@ -311,39 +329,80 @@ at Task 7 — measurement precedes optimisation, and the number was not yet wort
 three on every run. 12 poles would not catch a regression to a cubic formulation (the plan's
 original `remaining × in_tree` Prim's measured 0.73 ms at 12 — inside any noise-tolerant
 budget — but **340 ms at 100**, twenty frames per frame). 100 would require writing down that
-three quarters of a frame is acceptable.
+three quarters of a frame is acceptable. **The 8000 µs constant did not move across the
+Gabriel rewrite**, which is the point: a budget that has to be relaxed for a visual change was
+measuring the wrong thing.
 
 ---
 
-## Wire rendering: MST was REJECTED once before, at Foundation PAUSE 1
+## Wire rendering: MST was REJECTED TWICE. What ships is the GABRIEL GRAPH
 
-**Read this before changing wire rendering again.** `session-electricity-foundation` PAUSE 1
-took five iterations (full list in "UX iteration trap" below). Iteration **4 was MST
-(Kruskal)** and the user rejected it:
+**Read this before changing wire rendering again. Three rules have now been tried on this
+one function, and two of them were rejected at a visual gate.**
 
-> **"these 2 should connect directly"** — MST routed through other poles.
+| rule | K4 of four basic poles | verdict |
+|---|---|---|
+| mesh (every in-range pair) | 6 wires | "too tangled in clusters" — Foundation PAUSE 1, iteration 1. Survived to ship only because `POLE_RANGE` was capped at 3; unshippable once the substation carries 11 |
+| minimum spanning tree | 3 wires, a **star** | **REJECTED TWICE** — Foundation PAUSE 1 iteration 4 ("these 2 should connect directly") and again at Session 3 PAUSE 1 after Task 7 reintroduced it |
+| **Gabriel graph (shipped, Task 8)** | **4 wires, the square's outline** | passed |
 
-Iteration 5, mesh-within-network at `POLE_RANGE = 3` with supply radius 1, is what PASSED —
-and is what Electricity Session 3 Task 7 replaced with MST.
+**The MST objection is inherent, not tunable.** An MST routes through intermediates. In a
+square of four equidistant poles every tie resolves to the lex-first pole, so the tree is a
+star out of the north-west corner and the south-east pole reaches across the **diagonal**
+rather than to either of the two neighbours it is visually adjacent to. No tie-break fixes
+that; a tree of N-1 edges simply cannot draw a closed square.
 
-**Why the reversal is not a contradiction.** At Foundation there was one tier and every pole
-was interchangeable, so mesh at range 3 was affordable. Per-tier ranges changed the
-arithmetic: a substation at range 11 in a mesh fans out to nearly every pole around it,
-because either-reaches forms the link regardless of the small pole's reach. That is
-iteration 1's "too tangled" complaint at several times the scale. Reverting to mesh means
-capping ranges, which costs the substation its reason to exist.
+**Why mesh could not just come back.** At Foundation there was one tier and every pole was
+interchangeable, so mesh at range 3 was affordable. Per-tier ranges changed the arithmetic:
+a substation at range 11 in a mesh fans out to nearly every pole around it, because
+either-reaches forms the link regardless of the small pole's reach. That is iteration 1's
+"too tangled" at several times the scale. Reverting to mesh means capping ranges, which costs
+the substation its reason to exist.
 
-**The objection is inherent, not tunable.** MST routes through intermediates. In a square of
-four equidistant poles every tie resolves to the lex-first pole, so the tree is a star and the
-far corner reaches across the diagonal rather than to either adjacent neighbour.
+### The rule that ships
 
-### The third option, if the K4 ever reads wrong
+Wire A—B unless a third pole C lies inside the circle with AB as diameter — the **Gabriel
+graph**, tested in exact integers on doubled footprint centres as
+`|CA|² + |CB|² <= |AB|²`, with **two non-negotiable modifications**:
 
-Nobody has costed it: **mesh-within-network for basic and medium poles, MST (or a single
-nearest-neighbour link per cluster) for substations.** Local clusters keep the look that
-passed at Foundation; the backbone stops fanning out. More complex than either pure rule.
-The rule it implements is *"clusters should mesh, backbones shouldn't"* — so if a future gate
-rejects MST and that is the articulated rule, this is the shape it takes.
+1. **`<=`, not `<`.** The four-pole square is *exactly degenerate*: for a diagonal both sides
+   are 72 in doubled units, so C sits precisely on the circle. Under `<` the diagonals
+   survive and Gabriel collapses back into the 6-wire mesh.
+2. **A blocker must be reachable from BOTH endpoints.** Not a refinement — load-bearing three
+   times over. (a) `<=` alone suppresses every right-angle configuration (Thales) and
+   **disconnects real layouts**: plain Gabriel filtered by range can delete the only reachable
+   bridge, leaving a pole the BFS calls powered and the renderer draws with no wire at all.
+   Minimal case: `SUBSTATION` at (0,0) with basic poles at (-2,1) and (-3,-3) — the pole at
+   (-3,-3) renders bare. (b) It is what makes the emitted set provably spanning: weight the
+   reachable graph by Euclidean distance and take any MST T; if C suppressed an edge A—B of T
+   then `|CA| < |AB|` and `|CB| < |AB|` strictly and both C—A and C—B are reachable, so
+   swapping gives a strictly lighter tree — contradiction. No MST edge is ever suppressed.
+   (c) It is the performance fix: a blocker must be a common neighbour, so the filter is
+   `O(E·D)` rather than `O(N³)`. Measured at 100 poles, same code, guard neutered: 17.1 ms
+   unguarded against 9.6–12.5 ms guarded over seven runs, with the MST it replaced at 12.5 ms.
+   The guarded form is the same order as the tree; the unguarded form is past a whole frame.
+
+**`<=` and the both-reach guard are a package.** Neither ships without the other. This is
+stated in `wire_edges`' docstring in the code as well, deliberately, because it is the kind of
+thing that becomes tribal knowledge and then gets "simplified" away.
+
+**Geometry point: the footprint centre in DOUBLED integer coordinates** (`Vector2i(2*anchor.x
++ fp.x, 2*anchor.y + fp.y)`). 1×1 poles land on odd coordinates, the 2×2 substation on even
+ones, every squared distance is an exact int, and there are **no floats and no epsilon
+anywhere**. Not "nearest cell of the footprint" — that makes A's point depend on B, the test
+stops being symmetric, and the connectivity proof above collapses.
+
+**What the change actually moved on screen.** Only the K4. The pole-tier rig's mixed-tier bus
+comes out with the *identical* five-edge chain under MST and under Gabriel — verified against
+the edge lists, not by eye. The east control block is the whole visible diff: a 3-wire star
+with a diagonal becomes a closed 4-wire square.
+
+### If the Gabriel graph is ever itself rejected
+
+Nobody has costed this: **mesh-within-network for basic and medium poles, a sparser rule for
+substations.** Local clusters keep the look that passed at Foundation; the backbone stops
+fanning out. More complex than any pure rule. It implements *"clusters should mesh, backbones
+shouldn't"* — so if that is ever the articulated rule, this is the shape it takes.
 
 ---
 
