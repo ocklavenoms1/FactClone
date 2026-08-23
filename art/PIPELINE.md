@@ -6,6 +6,26 @@ someone who was not here.
 Nothing here touches Godot. This pipeline emits PNGs and JSON sidecars; the
 sprite-loading layer is a separate session.
 
+## How to read this document
+
+**Sections 0–13 are the pipeline as it stands.** Read those to run an asset.
+They are kept current; if one contradicts a later section, the later section
+wins and says so.
+
+**Sections 14–31 are the record**, in the order things were decided, including
+the things we got wrong and how they were caught. They are not a tutorial and
+several reach conclusions that a later section overturns — every such section
+carries a SUPERSEDED line at its top pointing forward. They are kept rather
+than deleted because most of them exist to stop a future session re-making a
+decision that was already paid for.
+
+If you only read three of them, read **§22** (why the gate is the eye and not a
+metric), **§25** (why the rig stays locked), and **§30** (why a small accent
+needs the nearest-texel rescue).
+
+**The shortest path to a working asset** is §3, with §0 for the constants and
+§12 for the tripwires that have actually bitten.
+
 ---
 
 ## 0. The lock
@@ -165,8 +185,31 @@ blender -b -P art/blender/make_template.py
    ```bash
    powershell -ExecutionPolicy Bypass -File art\build.ps1 -Sheet
    ```
-6. Judge `art/renders/verdict_truesize.png` **at 100%**. Never at 4×. A sprite
-   that only works magnified does not work.
+6. Measure the palette drift and write the anchors into the manifest. This is
+   **per generation** — Tripo's shift is not consistent between them, so it
+   cannot be fixed by prompting and a previous version's anchors are wrong:
+   ```bash
+   blender -b -P art/blender/dump_texture.py -- --glb art/source/smelter.glb --out-dir art/renders/tex
+   python art/tools/palette_drift.py art/renders/tex/smelter_basecolor.png --emit smelter --members fieldstone,wrought_iron,weathered_oak,leather
+   ```
+   Read the output. A **DROP** means that member got no correction; a
+   **RESCUED** line means it was too small to win a centroid and was recovered
+   per-texel (§30). `art/tools/remap_audit.py <name>` says which anchor every
+   cluster actually inherited, if you need to ask why a region looks wrong.
+7. **The gate.** Judge these two, at 100%, never at 4×:
+   ```bash
+   python art/tools/eye_sheet.py --asset smelter_idle --shadow
+   python art/tools/eye_sheet.py --asset smelter_idle --silhouette
+   ```
+   The eye sheet is the finished sprite at the size a player sees it, beside an
+   approved asset. The silhouette is the outline alone. **If the outline does
+   not say what the building is, the asset fails however good its interior
+   looks** — a pole passed four reviews because every one of them looked at a
+   4× master. See §22, §23, §26.
+8. On approval, set `"albedo_pinned": true` on the manifest row. `--emit` will
+   then refuse to overwrite it. Pin means *requires explicit re-approval*, not
+   *frozen forever*: a pipeline improvement applies to every asset, and every
+   affected approval gets re-reviewed.
 
 Useful flags: `-Only <name>`, `-Calibrate`, `-NoMaterialNorm`.
 
@@ -739,21 +782,60 @@ Blender is expected at `C:\Program Files\Blender Foundation\Blender 5.2\blender.
 
 ---
 
-## 11. Status
+## 11. Status — end of session 1
 
-| | |
+**Two real assets, one proxy, one calibration fixture.** That is what exists.
+The brief asked for three real assets and we have two; the third slot is filled
+by a placeholder that is not a Tripo asset and is flagged as such everywhere it
+appears.
+
+| Asset | Status | Pinned | Notes |
+|---|---|---|---|
+| `smelter` | **real, APPROVED** | yes | Reference asset. 2×2, idle + smelting, magenta firebox mask, all four declared members matched with zero drops. |
+| `power_pole` | **real, APPROVED** | yes | v5, one-sided. 1×1 footprint, `fit: height` 2.6, cell 1×3. Weakest of the set — see below. |
+| `chest` | **PROXY — not a Tripo asset** | n/a | Untextured placeholder. It proves the 1×1 path and **nothing else**. It is not part of the consistency verdict and must not be cited as evidence of anything about art direction. |
+| `_calib_floor` | calibration | n/a | Permanent synthetic HF floor, 1.00%. Committed, gitignore-exempt, **never regenerated** — regenerating moves the floor, which is the failure it exists to prevent. |
+
+| Check | State |
 |---|---|
 | Camera calibration | **PASS** — emissive 1×1 plane measures 32×32 |
-| Real Tripo assets | **1 of 3** (smelter). Chest and power pole are proxies. |
-| Consistency verdict | **pending** — needs all three real |
-| Smelter art direction | **REJECTED**, regenerate from `PROMPTS.md` |
-| Smelter detail density | **FAIL** — 8.75 features/tile vs cap 6; 14.3% HF energy destroyed |
-| Emission mask (magenta) | **built, validated analytically** (15× margin); awaiting a real generation to key on |
-| Shipping state mechanism | per-asset `glow_at` emitter — **not deprecated** until the mask passes |
+| Lock stamp | `434c0cf56d8f`, written into every asset's metadata |
+| Emission mask (magenta) | **live on a real generation** (smelter firebox), not just analytic |
+| Glow | ships as a separate additive layer; the `glow_at` emitter fallback is retired |
+| Shadow | separate layer, composite strength `lock.SHADOW_STRENGTH` = 0.4 |
+| Palette era | `natural-5`; build FAILS on mismatch |
+| HF destruction | **diagnostic, not a gate** (§22). Cap 3× the synthetic floor. |
+| The gate | the 32 px sprite and its silhouette, judged by eye (§22, §26) |
 
-The pipeline is complete and verified end to end. What it now needs is assets:
-three concept images in one batch, verified by silhouette, through Tripo
-image-to-3D. Everything up to that point has passed.
+### The consistency verdict
+
+**The two real assets read as one game.** Both sit under the same locked camera
+and rig, both land on `natural-5` after per-cluster correction, and at true
+size they agree about material, weight and where the sun is. The sheet is
+[`renders/consistency_1x.png`](renders/consistency_1x.png) — smelter idle,
+smelter smelting, and the pole, all at 32 px, mid-grey, shadow 0.4.
+
+Two assets is a thin basis for a verdict and it should be re-taken at five. It
+is enough to say the pipeline produces agreeing assets; it is not enough to say
+the style holds across the whole building set.
+
+### The pole is the weakest of the set, and the reason is EQUIPMENT REACH
+
+Not colour and not silhouette — both of those were chased and both came back
+clean. The cross read that killed v4 is gone (asymmetry 26% → 52%, mast-above
+36% → 18%), and after the nearest-texel rescue the verdigris lands on palette.
+
+What is weak: **the transformer box widens the outline from 13 px to 19 px and
+stops.** At 1× the pole reads as a post with a small cluster near the top. Its
+value contrast against the oak is already 2.08× and does not need changing —
+the box needs to project further from the mast. When Pole Tiers needs variants,
+that is the note to start from.
+
+### What session 1 did not do
+
+Out of scope and untouched: any Godot code, the other ~17 buildings, animation
+frame sequences, terrain, items, UI. Moving parts are specified (§9) but not
+built.
 
 ---
 
@@ -1058,6 +1140,12 @@ prompt feedback, still not a gate.
 
 ## 18. The power pole: tall-thin proven, verdigris confirmed, HF gate FAILED
 
+> **SUPERSEDED in part by §22.** The HF gate referred to here no longer exists:
+> it rejected a pole that looked correct, and was demoted to a diagnostic. The
+> tall-thin and verdigris findings stand. The pole described here is v1; the
+> approved asset is v5 (§30, §11).
+
+
 ### K = 6 x members holds away from the value it was derived on
 
 Three declared members, so K = 18. Swept:
@@ -1169,6 +1257,10 @@ and should be kept.
 
 ## 19. The HF floor is now synthetic and permanent - and the cap needs a decision
 
+> **The floor stands; the cap question is closed by §21, and the gate it was a
+> cap FOR is demoted by §22.** The synthetic floor remains correct and in use.
+
+
 ### The floor object
 
 `art/source/_calib_floor.glb`, built once by `make_calibration.py` and
@@ -1248,6 +1340,10 @@ is not comparable across pipeline versions.
 
 ## 20. Pole v2: the band fix was right and insufficient - GRAIN dominates
 
+> **SUPERSEDED.** Grain was later made INTENTIONAL on this asset and must not be
+> flagged. See §21. The measurement technique here is still sound.
+
+
 Five high-contrast bands became two low-contrast bands. The result, plainly:
 
 | | HF destroyed | vs synthetic floor |
@@ -1319,6 +1415,10 @@ halfway to the neighbour, not keeping the value close. `PROMPTS.md` now says so.
 ---
 
 ## 21. HF cap DECIDED: 3x the synthetic floor, locked
+
+> **Still the cap, but read §22 first** — HF destruction is a diagnostic, not a
+> gate, so the cap no longer rejects anything on its own.
+
 
 The cap stays at **3x**, measured against the permanent synthetic floor
 (`_calib_floor`, 1.00%), giving an absolute budget of **3.0%**. Closed; not
@@ -1501,6 +1601,9 @@ rather than shipped - see the session report.
 ---
 
 ## 24. Clamp raised, a correction to my own diagnosis, and the rig measured
+
+> **The clamp raise and the rig measurement stand; the rig DECISION is §25.**
+
 
 ### The clamp is now a safety rail at 12x, and it speaks when it binds
 
@@ -1854,3 +1957,55 @@ is population-weighted now.
 projection: it widens the outline from 13px to 19px and no more. The v6
 ordering stands - bigger box first - but for reach away from the mast, not for
 value.
+
+## 31. Session 1 close
+
+### Against the brief
+
+| Deliverable | State |
+|---|---|
+| A locked Blender template | **done** — `art/template.blend`, regenerable from `make_template.py`, stamp `434c0cf56d8f` |
+| Three test assets | **two of three.** smelter and power_pole are real and approved. The chest is a PROXY and is flagged as one in the manifest, in §11 and here. |
+| A consistency verdict | **given** (§11), on two assets, with the caveat that two is thin |
+| A prompt template | **done** — [`PROMPTS.md`](PROMPTS.md) |
+| `art/PIPELINE.md` | this file |
+
+The three assets were chosen to expose different failure modes and they did:
+the smelter proved the 2×2 path, the emission mask and the palette matcher; the
+pole proved the tall-thin path, `fit: height`, and — expensively — that the
+silhouette is the gate. The chest's failure mode is that it was never
+generated. It proves the 1×1 code path and must not be read as anything more.
+
+### What actually cost the most
+
+Not the rendering. Every real problem this session was a **measurement** problem,
+and the same shape recurred four times: *the review was looking at the wrong
+thing.*
+
+- A pole passed four reviews at 4× and failed instantly as a silhouette (§23, §26).
+- Shadow opacity judged at 4× reads as an opaque rectangle at 32 px (§27).
+- A states sheet built from the lit render judges pixels that never ship (§29).
+- A region metric built from a geometric box measured mostly not-the-box (§30).
+
+Two of those were caught only because a number was computed and disagreed with
+the story being told about it. The lesson worth carrying: **when a measurement
+supports a conclusion you already reached, that is when to check what it
+actually measured.**
+
+### Where the ground is soft
+
+- **Two assets is a thin consistency verdict.** Re-take it at five.
+- **The prompt palette is advisory** (§14). What binds is material presence and
+  distinctness. Do not expect prompting to control colour; the remap owns it.
+- **The chest is a proxy.** The 1×1 *textured* path has never been run.
+- **Moving parts are specified, not built** (§9).
+- **The nearest-texel rescue is one asset old.** It fired correctly once. Watch
+  the RESCUED lines on the next few assets rather than trusting it silently.
+
+### First things to do in session 2
+
+1. Generate a real 1×1 textured asset and retire the chest proxy. It is the
+   only code path with no real coverage.
+2. Re-take the consistency verdict once five real assets exist.
+3. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
+   not from colour or silhouette.

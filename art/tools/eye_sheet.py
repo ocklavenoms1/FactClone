@@ -192,14 +192,19 @@ def main():
         ap.error("need --asset (or --states)")
 
     if a.states:
+        # a name may carry a "+glow" suffix to light that panel and no other,
+        # so one sheet can hold a building's unlit and lit states side by side
         names = [s.strip() for s in a.states.split(",")]
+        zs = [int(z) for z in a.zooms.split(",")]
         panels = []
         for n in names:
-            im = load(n, a.shadow, a.shadow_strength, a.glow, a.glow_strength)
-            panels += [zoom(im, 1), zoom(im, 2)]
+            lit = n.endswith("+glow")
+            nm = n[:-5] if lit else n
+            im = load(nm, a.shadow, a.shadow_strength, a.glow or lit, a.glow_strength)
+            panels += [zoom(im, z) for z in zs]
         out = a.out or os.path.join(REPO, "art", "renders", f"states_{names[0]}.png")
         compose(panels, BG).convert("RGB").save(out)
-        print(f"STATES {out}   {names} at 1x and 2x")
+        print(f"STATES {out}   {names} at {zs}")
         return
 
     if a.shadow_levels:

@@ -71,5 +71,23 @@
       "state_hook": "smelter_smelting.py"
     }
   ],
-  "lock_stamp": "434c0cf56d8f"
+  "lock_stamp": "434c0cf56d8f",
+  "glow_layer": {
+    "file": "art/sprites/smelter_glow.png",
+    "body_sprite": "art/sprites/smelter_idle.png",
+    "derived_from": [
+      "smelter_smelting_4x.png",
+      "smelter_idle_4x.png"
+    ],
+    "blend": "additive; dst += rgb * a. Pulse modulate.a for flicker.",
+    "lit_px": 148,
+    "coverage_pct": 2.41,
+    "peak_alpha": 1.0,
+    "bbox": [
+      22,
+      75,
+      40,
+      83
+    ]
+  }
 }

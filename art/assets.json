@@ -192,7 +192,7 @@
       "states": {},
       "yaws": [],
       "status": "real",
-      "note": "Tripo power_pole.glb. Tall-thin case: fit=height is mandatory, the 1x1 footprint carries no usable scale signal. First asset under the rewritten style core, and the first real test of verdigris (two insulator caps).",
+      "note": "APPROVED AND PINNED (v5, one-sided design). Tall-thin case: fit=height is mandatory, the 1x1 footprint carries no usable scale signal. Cell 1x3. yaw_correction 0 confirmed by turnaround - the equipment falls on the key-lit left, and at yaw 90/270 it vanishes (0.6% silhouette asymmetry), so facing is load-bearing on this asset in a way it is not on the smelter. First asset to use the nearest-texel rescue: verdigris is 4.31% of the texture and never won a centroid at K=18. WEAKEST OF THE APPROVED SET, and the reason is EQUIPMENT REACH - not colour, not silhouette. The cross read is gone (asymmetry 52%, mast-above 18%) and the palette lands. What is weak is that the transformer box widens the outline from 13px to 19px and stops, so at 1x it reads as a post with a small cluster near the top. When Pole Tiers needs variants, start there: project the box further from the mast. Its value contrast is already 2.08x against the oak and does not need changing.",
       "palette_era": "natural-5",
       "albedo_correction": "remap",
       "palette_members": [
@@ -290,7 +290,8 @@
           }
         ],
         "dropped": []
-      }
+      },
+      "albedo_pinned": true
     },
     {
       "name": "smelter_rot",
