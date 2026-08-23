@@ -784,17 +784,79 @@ Blender is expected at `C:\Program Files\Blender Foundation\Blender 5.2\blender.
 
 ## 11. Status — end of session 1
 
-**Two real assets, one proxy, one calibration fixture.** That is what exists.
-The brief asked for three real assets and we have two; the third slot is filled
-by a placeholder that is not a Tripo asset and is flagged as such everywhere it
-appears.
+**Three real assets and a calibration fixture. No proxies.** The chest proxy is
+retired; every asset in the set is now a real Tripo generation through the full
+pipeline.
 
 | Asset | Status | Pinned | Notes |
 |---|---|---|---|
 | `smelter` | **real, APPROVED** | yes | Reference asset. 2×2, idle + smelting, magenta firebox mask, all four declared members matched with zero drops. |
 | `power_pole` | **real, APPROVED** | yes | v5, one-sided. 1×1 footprint, `fit: height` 2.6, cell 1×3. Weakest of the set — see below. |
-| `chest` | **PROXY — not a Tripo asset** | n/a | Untextured placeholder. It proves the 1×1 path and **nothing else**. It is not part of the consistency verdict and must not be cited as evidence of anything about art direction. |
+| `chest` | **real, awaiting approval** | not yet | 1×1, `fit: footprint`, fill 0.90, cell 1×2, single state. **First 1×1 textured asset** and **first two-member asset**. Retires the proxy. |
 | `_calib_floor` | calibration | n/a | Permanent synthetic HF floor, 1.00%. Committed, gitignore-exempt, **never regenerated** — regenerating moves the floor, which is the failure it exists to prevent. |
+
+### The chest: what it exercised that nothing else had
+
+**The 1×1 textured path.** It had only ever been walked by an untextured
+placeholder, so every part of the pipeline downstream of a texture — palette
+matching, the remap, the material clamps — was unproven at 1×1. It works. Rig
+correlation +0.681 (strong), the highest in the set.
+
+**The `K = 6 × members` rule at its low end.** The rule was fitted on a
+four-member asset. The chest is the first two-member one, so K=12, the floor.
+Result, from `art/tools/k_sweep.py`:
+
+| K | trusted | oak gain (R) | iron gain (R) |
+|---|---|---|---|
+| 12 *(derived)* | 2/2 | 1.40 | **1.08** |
+| 16 | 2/2 | 1.41 | **1.21** |
+| 20 | 2/2 | 1.64 | 1.42 |
+| 24 | 2/2 | 1.59 | 1.38 |
+| 32 | 2/2 | 1.56 | 1.40 |
+| 48 | 2/2 | 1.49 | 1.30 |
+| 64 | 2/2 | 1.34 | 1.29 |
+
+**`trusted` carries no signal at two members** — two declared members are
+maximally separable, so the column is 2/2 everywhere including K=4. The
+diagnostic that decided the rule at four members is blind at two.
+
+The gains are not blind, and they say **K=12 is under-resolved**: iron reads
+1.08 at the derived K against 1.29–1.42 for K≥20, and iron's chroma match
+distance is 0.115 at K=12 against 0.120 at K=24 while oak's is 0.021. The
+chest's texture is oak-dominated, so at 12 clusters the minority ironwork gets
+too few centroids and its own is contaminated by dark oak.
+
+**It was not raised, and the reason is measured, not assumed.** Rendering the
+same asset at K=12 and K=24 and differencing the sprites: **mean 8-bit sRGB
+delta 3.2, p95 5, max 8**. The ironwork is 17.5% brighter at K=24 in relative
+terms, but these are dark values and the absolute difference is invisible at
+32 px. Against that, raising `K_MIN` would change K for every asset with three
+or fewer members — including the **approved and pinned** power pole (18 → 20) —
+and force it back through the gate. An invisible correction is not worth an
+approval.
+
+Recorded as a known soft spot rather than fixed: **if a future two- or
+three-member asset shows visible material disagreement, raise `K_MIN` first.**
+
+### The chest's plan is rectangular, and here is what that costs
+
+`fit: footprint` scales by the **larger** XY extent, so a non-square plan fills
+the tile in its long axis and leaves a gap in the short one. Measured:
+
+| | |
+|---|---|
+| Normalized extent | X 0.900, Y 0.581, Z 0.479 tiles |
+| **Plan ratio X:Y** | **1.549 : 1** |
+| Tile coverage | X 90.0%, Y 58.1% |
+| Plan area covered | 52.3% of the tile, 64.5% of the 0.90 fill box |
+| Gap along Y | 0.319 tiles = **10.2 px** at 32 px/tile |
+
+Not a defect — Factorio's chests are rectangular too, and the sprite is
+centred, so the gap is symmetric front and back. It is written down because it
+becomes a habit across twenty buildings: **`footprint_fill` controls the long
+axis only.** An asset whose plan ratio drifts past roughly 2:1 will start to
+look lost in its tile, and the fix at that point is a rectangular footprint in
+the manifest, not a larger fill.
 
 | Check | State |
 |---|---|
@@ -807,17 +869,46 @@ appears.
 | HF destruction | **diagnostic, not a gate** (§22). Cap 3× the synthetic floor. |
 | The gate | the 32 px sprite and its silhouette, judged by eye (§22, §26) |
 
-### The consistency verdict
+### The consistency verdict — three real assets, no proxies
 
-**The two real assets read as one game.** Both sit under the same locked camera
-and rig, both land on `natural-5` after per-cluster correction, and at true
-size they agree about material, weight and where the sun is. The sheet is
-[`renders/consistency_1x.png`](renders/consistency_1x.png) — smelter idle,
-smelter smelting, and the pole, all at 32 px, mid-grey, shadow 0.4.
+[`renders/consistency_1x.png`](renders/consistency_1x.png): chest, smelter
+idle, smelter smelting, power pole, all at true 32 px on mid-grey with shadow
+0.4. This is the first time the verdict can honestly exist.
 
-Two assets is a thin basis for a verdict and it should be re-taken at five. It
-is enough to say the pipeline produces agreeing assets; it is not enough to say
-the style holds across the whole building set.
+**They read as one game.** All three sit under the same locked camera and rig,
+all land on `natural-5` after per-cluster correction, and they agree about
+material, weight and where the sun is.
+
+**With one measured disagreement, and it is the pole.** Mean rendered
+luminance of the weathered-oak pixels in each sprite:
+
+| Asset | oak px | mean luminance | vs smelter |
+|---|---|---|---|
+| `smelter` | 876 | 0.0992 | 1.00× |
+| `chest` | 597 | 0.1137 | 1.15× |
+| `power_pole` | 364 | 0.0326 | **0.33×** |
+
+Smelter and chest agree within 15%, which is close. The pole's oak renders
+**three times darker** than either.
+
+It is not the correction. In *albedo* the pole's oak is the **brightest** of
+the three (population-weighted corrected luminance 0.196, against 0.105 for the
+chest and 0.085 for the smelter). Brighter albedo arriving darker on screen
+means the loss is entirely **form**: the pole is almost all vertical surface,
+and a fixed key at 50° elevation puts far less light on a vertical face than on
+the lids and tops that dominate the chest and smelter.
+
+That is the form-driven lightness accepted in **§25**, where the rig was
+measured and deliberately left locked. Three assets is the first sample large
+enough to show its size, and 0.33× is larger than that decision anticipated.
+It is not re-opened here — the trade was argued and settled — but it is the
+single number most worth re-checking at five assets. If tall vertical assets
+keep landing near a third of the set's mean, the decision deserves re-litigating
+with better evidence than two probes.
+
+Three assets is still a thin basis. It is enough to say the pipeline produces
+agreeing assets across both footprints, both fit modes, and two through four
+palette members. It is not enough to say the style holds across twenty.
 
 ### The pole is the weakest of the set, and the reason is EQUIPMENT REACH
 
@@ -1965,16 +2056,20 @@ value.
 | Deliverable | State |
 |---|---|
 | A locked Blender template | **done** — `art/template.blend`, regenerable from `make_template.py`, stamp `434c0cf56d8f` |
-| Three test assets | **two of three.** smelter and power_pole are real and approved. The chest is a PROXY and is flagged as one in the manifest, in §11 and here. |
-| A consistency verdict | **given** (§11), on two assets, with the caveat that two is thin |
+| Three test assets | **three of three, all real.** smelter and power_pole approved and pinned; chest rendered and awaiting approval. No proxies remain. |
+| A consistency verdict | **given** (§11), on three real assets, with the pole's 0.33× oak as the one measured disagreement |
 | A prompt template | **done** — [`PROMPTS.md`](PROMPTS.md) |
 | `art/PIPELINE.md` | this file |
 
 The three assets were chosen to expose different failure modes and they did:
 the smelter proved the 2×2 path, the emission mask and the palette matcher; the
 pole proved the tall-thin path, `fit: height`, and — expensively — that the
-silhouette is the gate. The chest's failure mode is that it was never
-generated. It proves the 1×1 code path and must not be read as anything more.
+silhouette is the gate; the chest proved the 1×1 TEXTURED path, which had only
+ever been walked by a placeholder, and tested `K = 6 × members` at its low end
+where it turned out to be under-resolved but invisibly so.
+
+Each one broke something different, which is what choosing them for failure
+modes was supposed to achieve.
 
 ### What actually cost the most
 
@@ -1994,18 +2089,24 @@ actually measured.**
 
 ### Where the ground is soft
 
-- **Two assets is a thin consistency verdict.** Re-take it at five.
+- **Three assets is still a thin consistency verdict.** Re-take it at five.
+- **The pole renders at 0.33× the set's oak luminance** — form, not correction
+  (§11). Accepted under §25, but it is the number to watch as tall assets
+  accumulate.
+- **`K_MIN = 12` is under-resolved for two-member assets**, by measurement, but
+  the error is invisible (max 8/255). Raise it if a future low-member asset
+  shows visible material disagreement — and expect to re-approve the pole.
 - **The prompt palette is advisory** (§14). What binds is material presence and
   distinctness. Do not expect prompting to control colour; the remap owns it.
-- **The chest is a proxy.** The 1×1 *textured* path has never been run.
 - **Moving parts are specified, not built** (§9).
 - **The nearest-texel rescue is one asset old.** It fired correctly once. Watch
   the RESCUED lines on the next few assets rather than trusting it silently.
 
 ### First things to do in session 2
 
-1. Generate a real 1×1 textured asset and retire the chest proxy. It is the
-   only code path with no real coverage.
-2. Re-take the consistency verdict once five real assets exist.
-3. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
+1. Re-take the consistency verdict once five real assets exist, and watch the
+   oak-luminance spread — the pole's 0.33× is the open question.
+2. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
    not from colour or silhouette.
+3. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
+   the long axis only, and the chest already leaves 10.2 px of gap at 1.549:1.

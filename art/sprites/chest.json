@@ -22,34 +22,35 @@
     64.0
   ],
   "overhangs_front_edge": false,
-  "normalized_scale": 0.989247,
+  "normalized_scale": 0.918128,
   "normalized_extent_tiles": [
-    0.92,
-    0.7469,
-    0.6034
+    0.9,
+    0.5809,
+    0.4793
   ],
   "material_norm": true,
   "material_report": [
     {
-      "material": "rust",
-      "roughness_src": "scalar",
-      "roughness_before": 0.85,
-      "roughness_after": 0.85,
-      "metallic_src": "scalar",
-      "metallic_before": 0.0,
-      "metallic_after": 0.0
-    },
-    {
-      "material": "steel",
-      "roughness_src": "scalar",
-      "roughness_before": 0.7,
-      "roughness_after": 0.7,
-      "metallic_src": "scalar",
-      "metallic_before": 0.0,
-      "metallic_after": 0.0
+      "material": "tripo_material_85d93cba-92be-44d3-ac2f-00494a8ad719",
+      "roughness_src": "texture",
+      "roughness_after": [
+        0.34,
+        0.86
+      ],
+      "metallic_src": "texture",
+      "metallic_after": "<= 0.55"
     }
   ],
-  "albedo_gain_applied": null,
+  "albedo_gain_applied": {
+    "anchors": [
+      "weathered_oak",
+      "wrought_iron"
+    ],
+    "sigma": 0.0268,
+    "dropped": [],
+    "materials": 1,
+    "mode": "remap"
+  },
   "masters": [
     {
       "tag": "chest",

@@ -176,11 +176,81 @@
       "source": "chest.glb",
       "footprint": 1,
       "fit": "footprint",
+      "footprint_fill": 0.9,
       "yaw_correction": 0,
       "states": {},
       "yaws": [],
-      "status": "proxy",
-      "note": "PLACEHOLDER. Not a Tripo asset - proves the 1x1 path only."
+      "status": "real",
+      "note": "Tripo chest.glb. Retires the last proxy. FIRST 1x1 TEXTURED asset - the 1x1 path had only ever been exercised by an untextured placeholder. Also the first TWO-member asset, so the first test of the K = 6 x members rule at its low end (K=12).",
+      "palette_era": "natural-5",
+      "albedo_correction": "remap",
+      "palette_members": [
+        "weathered_oak",
+        "wrought_iron"
+      ],
+      "albedo_gain": [
+        0.7935,
+        0.7146,
+        0.5909
+      ],
+      "albedo_remap": {
+        "sigma": 0.0268,
+        "anchors": [
+          {
+            "member": "weathered_oak",
+            "observed": [
+              0.105078,
+              0.053277,
+              0.019506
+            ],
+            "target": [
+              0.147027,
+              0.076185,
+              0.031896
+            ],
+            "gain": [
+              1.3992,
+              1.43,
+              1.6352
+            ],
+            "gain_raw": [
+              1.3992,
+              1.43,
+              1.6352
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0211,
+            "match_ratio": 0.153
+          },
+          {
+            "member": "wrought_iron",
+            "observed": [
+              0.056657,
+              0.055584,
+              0.042302
+            ],
+            "target": [
+              0.061246,
+              0.08022,
+              0.076185
+            ],
+            "gain": [
+              1.081,
+              1.4432,
+              1.801
+            ],
+            "gain_raw": [
+              1.081,
+              1.4432,
+              1.801
+            ],
+            "clamped": false,
+            "chroma_dist": 0.1147,
+            "match_ratio": 0.118
+          }
+        ],
+        "dropped": []
+      }
     },
     {
       "name": "power_pole",

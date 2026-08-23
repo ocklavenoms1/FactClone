@@ -493,6 +493,9 @@ def emit(name, a):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("textures", nargs="+")
+    ap.add_argument("--k", type=int,
+                    help="override the derived K. Diagnostic only - the rule is "
+                         "K = 6 x declared members; see art/tools/k_sweep.py")
     ap.add_argument("--render", action="store_true",
                     help="inputs are rendered RGBA sprites/masters, not albedo textures")
     ap.add_argument("--emit", metavar="ASSET",
@@ -500,6 +503,9 @@ def main():
     ap.add_argument("--members", help="comma-separated palette members this asset uses; "
                                       "defaults to the asset's palette_members in assets.json")
     a = ap.parse_args()
+    if a.k:
+        globals()["clusters_for"] = lambda n, _k=a.k: _k
+        print(f"  ** K OVERRIDDEN to {a.k} (diagnostic, not the rule)")
 
     out = []
     for t in a.textures:
