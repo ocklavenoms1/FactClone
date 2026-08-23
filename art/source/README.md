@@ -72,8 +72,17 @@ only the prompt fixes style, form, and detail density.
 
 | File | Status |
 |---|---|
-| `smelter.glb` | **Real** — Tripo `stone kiln 3d model`, 65 MB, 1.95M tris. Renders correctly but is **rejected on art direction**; see `PROMPTS.md`. |
-| `chest.glb` | **Proxy.** Crude stand-in from `make_proxies.py`. Proves the 1×1 path only. |
-| `power_pole.glb` | **Proxy.** Stand-in; exercises `fit: height`. |
+| `smelter.glb` | **REAL — reference asset, approved and pinned.** Tripo `SMELTER.glb`. Its albedo correction is frozen (`albedo_pinned`); `palette_drift.py --emit` refuses to overwrite it. |
+| `power_pole.glb` | **REAL.** Tripo `power_pole.glb`. Tall-thin case, `fit: height`, three palette members including the first working verdigris. **Currently fails the HF detail gate** — see `PIPELINE.md`. |
+| `chest.glb` | **Proxy.** Crude stand-in from `make_proxies.py`. Now the *only* flat-geometry reference, so it alone defines the HF floor until a real chest lands. |
 
-Overwrite each proxy as you generate the real model. No other change is needed.
+Overwrite each proxy as you generate the real model, then flip `status` to
+`real` in `assets.json` and declare its `palette_members`.
+
+**Note on the HF floor:** `detail_density.py` measures high-frequency
+destruction as a ratio against flat untextured geometry. `power_pole` used to
+be part of that floor and no longer can be, now that it is a real textured
+asset - a floor cannot include the thing it measures. The floor is currently
+`chest` alone, i.e. **n = 1**, which is fragile. When the real chest lands,
+either keep a dedicated flat proxy purely as the floor reference or re-base the
+budget on the approved reference asset instead.

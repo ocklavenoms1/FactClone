@@ -98,6 +98,8 @@ def main():
     mode = a.get("albedo-mode", cfg.get("albedo_correction", "gain"))
     if no_matnorm:
         mode = "none"
+    if cfg.get("albedo_pinned"):
+        print("ALBEDO pinned: using the approved remap, not re-measuring")
     if mode == "remap" and cfg.get("albedo_remap"):
         albedo_report = normalize.apply_albedo_remap(norm["meshes"], cfg["albedo_remap"])
         albedo_report["mode"] = "remap"

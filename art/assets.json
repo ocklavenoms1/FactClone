@@ -155,7 +155,9 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true,
+      "_albedo_pinned_note": "APPROVED PIXELS ARE FROZEN. The gain-refinement pass added for the power pole changed this asset's correction (28.6% of pixels by >8/255, 7.6% by >32/255) even though its measured fit improved 90%->92%. An approved asset does not get silently re-corrected, so its remap is pinned to the approved values. Unpin deliberately, then re-approve the render."
     },
     {
       "name": "chest",
@@ -177,8 +179,104 @@
       "yaw_correction": 0,
       "states": {},
       "yaws": [],
-      "status": "proxy",
-      "note": "PLACEHOLDER. fit=height is the point: fitting a pole to its footprint would make it enormous."
+      "status": "real",
+      "note": "Tripo power_pole.glb. Tall-thin case: fit=height is mandatory, the 1x1 footprint carries no usable scale signal. First asset under the rewritten style core, and the first real test of verdigris (two insulator caps).",
+      "palette_era": "natural-5",
+      "albedo_correction": "remap",
+      "palette_members": [
+        "weathered_oak",
+        "wrought_iron",
+        "verdigris"
+      ],
+      "albedo_gain": [
+        0.5385,
+        0.3573,
+        0.2951
+      ],
+      "albedo_remap": {
+        "sigma": 0.02,
+        "anchors": [
+          {
+            "member": "weathered_oak",
+            "observed": [
+              0.061669,
+              0.025332,
+              0.003668
+            ],
+            "target": [
+              0.147027,
+              0.076185,
+              0.031896
+            ],
+            "gain": [
+              2.3841,
+              2.5,
+              2.5
+            ],
+            "gain_raw": [
+              2.3841,
+              3.0074,
+              8.6947
+            ],
+            "clamped": true,
+            "chroma_dist": 0.1353,
+            "match_ratio": 0.396
+          },
+          {
+            "member": "wrought_iron",
+            "observed": [
+              0.029006,
+              0.035837,
+              0.026808
+            ],
+            "target": [
+              0.061246,
+              0.08022,
+              0.076185
+            ],
+            "gain": [
+              2.1115,
+              2.2385,
+              2.5
+            ],
+            "gain_raw": [
+              2.1115,
+              2.2385,
+              2.8418
+            ],
+            "clamped": true,
+            "chroma_dist": 0.071,
+            "match_ratio": 0.268
+          },
+          {
+            "member": "verdigris",
+            "observed": [
+              0.041356,
+              0.053626,
+              0.041055
+            ],
+            "target": [
+              0.076185,
+              0.194618,
+              0.132868
+            ],
+            "gain": [
+              1.8422,
+              2.5,
+              2.5
+            ],
+            "gain_raw": [
+              1.8422,
+              3.6292,
+              3.2363
+            ],
+            "clamped": true,
+            "chroma_dist": 0.1475,
+            "match_ratio": 0.465
+          }
+        ],
+        "dropped": []
+      }
     },
     {
       "name": "smelter_rot",
@@ -317,7 +415,9 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true,
+      "_albedo_pinned_note": "APPROVED PIXELS ARE FROZEN. The gain-refinement pass added for the power pole changed this asset's correction (28.6% of pixels by >8/255, 7.6% by >32/255) even though its measured fit improved 90%->92%. An approved asset does not get silently re-corrected, so its remap is pinned to the approved values. Unpin deliberately, then re-approve the render."
     }
   ]
 }

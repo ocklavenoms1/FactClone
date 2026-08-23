@@ -6,68 +6,52 @@
   "height_tiles": 2.6,
   "yaw_correction": 0.0,
   "cell_tiles": [
-    1,
+    2,
     3
   ],
   "sprite_px": [
-    32,
+    64,
     96
   ],
   "render_px": [
-    128,
+    256,
     333
   ],
   "anchor_px": [
-    16.0,
+    32.0,
     96.0
   ],
   "overhangs_front_edge": false,
-  "normalized_scale": 0.9319,
+  "normalized_scale": 2.658661,
   "normalized_extent_tiles": [
-    0.8387,
-    0.5125,
+    1.1886,
+    0.5636,
     2.6
   ],
   "material_norm": true,
   "material_report": [
     {
-      "material": "creosote",
-      "roughness_src": "scalar",
-      "roughness_before": 0.95,
-      "roughness_after": 0.86,
-      "metallic_src": "scalar",
-      "metallic_before": 0.0,
-      "metallic_after": 0.0
-    },
-    {
-      "material": "ceramic",
-      "roughness_src": "scalar",
-      "roughness_before": 0.35,
-      "roughness_after": 0.35,
-      "metallic_src": "scalar",
-      "metallic_before": 0.0,
-      "metallic_after": 0.0
-    },
-    {
-      "material": "concrete",
-      "roughness_src": "scalar",
-      "roughness_before": 0.95,
-      "roughness_after": 0.86,
-      "metallic_src": "scalar",
-      "metallic_before": 0.0,
-      "metallic_after": 0.0
-    },
-    {
-      "material": "galvanized",
-      "roughness_src": "scalar",
-      "roughness_before": 0.4,
-      "roughness_after": 0.4,
-      "metallic_src": "scalar",
-      "metallic_before": 0.8,
-      "metallic_after": 0.55
+      "material": "tripo_material_9dc44767-09b2-46f7-b2f9-befa70285fea",
+      "roughness_src": "texture",
+      "roughness_after": [
+        0.34,
+        0.86
+      ],
+      "metallic_src": "texture",
+      "metallic_after": "<= 0.55"
     }
   ],
-  "albedo_gain_applied": null,
+  "albedo_gain_applied": {
+    "anchors": [
+      "weathered_oak",
+      "wrought_iron",
+      "verdigris"
+    ],
+    "sigma": 0.02,
+    "dropped": [],
+    "materials": 1,
+    "mode": "remap"
+  },
   "masters": [
     {
       "tag": "power_pole",

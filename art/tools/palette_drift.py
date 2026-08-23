@@ -54,6 +54,7 @@ import lock  # noqa: E402
 # it scales: a three-material chest gets 18, a six-material building gets 36,
 # instead of one number over- or under-resolving both.
 CLUSTERS_PER_MEMBER = 6
+GAIN_REFINE_PASSES = 4   # aggregate seed, then 3 refinements from trusted anchors
 K_MIN, K_MAX = 12, 64
 
 
@@ -153,36 +154,58 @@ def analyse(path, sample=200_000, is_render=False, members=None):
     pal = {n: hexlin(lock.PALETTE[n]) for n in declared}
     P = np.array(list(pal.values()))
 
-    # (a) GLOBAL GAIN FIRST, from aggregate albedo, with NO matching at all.
+    # (a) GLOBAL GAIN SEED, from aggregate albedo, with NO matching at all.
     #     Matching before this point forces the metric to be value-invariant,
     #     and a value-invariant metric cannot separate two near-neutrals - which
     #     is the whole reason the old palette needed distorting. Estimating the
     #     gain from aggregate means needs no correspondence, so it can run first.
     gain = lin.mean(axis=0) / np.maximum(P.mean(axis=0), 1e-9)
 
-    # (b) divide it out. Value is meaningful again from here on.
-    Y = lin / np.maximum(gain, 1e-6)
-
-    # (c) match on FULL LINEAR RGB - chromaticity AND value together.
+    # (b) divide it out, then REFINE. The aggregate seed assumes the asset's
+    #     material mix resembles the palette's, and that assumption breaks when
+    #     one material dominates. On the power pole - mostly timber, only three
+    #     declared members - the seed came out R 1.050 / G 0.462 / B 0.203, a
+    #     5.2x channel spread, and the skew pushed verdigris out of range even
+    #     though its cluster was present and correctly the greenest.
+    #
+    #     So the seed is only a seed: match with it, then re-estimate the gain
+    #     from the TRUSTED correspondences alone and repeat. This is not the
+    #     circular "match before removing the gain" that the ordering fix
+    #     eliminated - the first estimate still needs no correspondence, and
+    #     each refinement uses only anchors that already passed the trust tests.
+    #
+    #     Measured convergence, trusted anchors and gain spread by iteration:
+    #       pole    5.17x 2/3  ->  2.96x 2/3  ->  2.51x 3/3  ->  1.82x 3/3
+    #       smelter 1.22x 4/4  ->  1.29x 4/4  ->  1.31x 4/4  ->  1.31x 4/4
+    #     It rescues a skewed asset and leaves a well-mixed one alone.
     K = clusters_for(len(P))
-    cent, w = kmeans(Y, K)
+    min_pair_seed = (min(float(np.linalg.norm(P[i] - P[j]))
+                         for i, j in __import__("itertools").combinations(range(len(P)), 2))
+                     if len(P) >= 2 else 1.0)
 
-    # INDEPENDENT nearest-cluster matching, NOT a forced one-to-one assignment.
-    #
-    # Both alternatives were tried and both are wrong here:
-    #   greedy   - order-dependent and cascades. Removing verdigris from the
-    #              declared set freed a cluster, leather took the one oak
-    #              wanted, and oak went from matching to ambiguous with nothing
-    #              about oak having changed.
-    #   optimal  - minimising TOTAL cost sacrifices individual members to help
-    #              the sum: fieldstone got handed the iron cluster and iron got
-    #              a brown one, each individually absurd but cheap overall.
-    #
-    # The flaw both share is forcing a bijection when some declared members may
-    # simply have no corresponding cluster. So each member takes its own nearest
-    # cluster independently, and the trust tests then decide. Two members
-    # landing on the SAME cluster is not a conflict to resolve arbitrarily - it
-    # is exactly the ambiguity the d1/d2 test exists to catch.
+    cent = w = None
+    for _pass in range(GAIN_REFINE_PASSES):
+        Y = lin / np.maximum(gain, 1e-6)
+        cent, w = kmeans(Y, K)
+        D = np.array([[float(np.linalg.norm(cent[i] - P[j])) for i in range(K)]
+                      for j in range(len(P))])
+        trial = {}
+        for j, name in enumerate(pal):
+            i = int(np.argmin(D[j]))
+            others = sorted(D[k][i] for k in range(len(P)) if k != j)
+            trial[name] = (i, float(D[j][i]), others[0] if others else float("inf"))
+        kept = [n for n in pal
+                if trial[n][1] <= min_pair_seed
+                and trial[n][1] / max(trial[n][2], 1e-9) <= MATCH_RATIO_TEST]
+        if _pass == GAIN_REFINE_PASSES - 1 or not kept:
+            break
+        names = list(pal)
+        O = np.array([cent[trial[n][0]] * gain for n in kept])
+        T = np.array([P[names.index(n)] for n in kept])
+        gain = (O.mean(0) / np.maximum(T.mean(0), 1e-9) if len(kept) > 1
+                else (T * O).sum(0) / np.maximum((T * T).sum(0), 1e-12))
+
+    # (c) final match on FULL LINEAR RGB - chromaticity AND value together.
     D = np.array([[float(np.linalg.norm(cent[i] - P[j])) for i in range(K)]
                   for j in range(len(P))])
     result = {}
@@ -331,6 +354,9 @@ def emit(name, a):
     man = _json.load(open(p))
     hit = False
     for row in man["assets"]:
+        if row.get("albedo_pinned") and (row["name"] == name):
+            print(f"  {name} is PINNED (approved pixels frozen) - refusing to overwrite its remap.")
+            return
         if row["name"] == name or row.get("source", "") == f"{name}.glb":
             row["albedo_gain"] = [round(float(v), 4) for v in a["gain"]]
             row["albedo_remap"] = build_remap(a)

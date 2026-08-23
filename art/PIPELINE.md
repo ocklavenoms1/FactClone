@@ -1048,3 +1048,114 @@ The diagnostic now reports thickness x contrast:
 
 Half the thin detail is free. Only the other half is worth prompting away. Still
 prompt feedback, still not a gate.
+
+---
+
+## 18. The power pole: tall-thin proven, verdigris confirmed, HF gate FAILED
+
+### K = 6 x members holds away from the value it was derived on
+
+Three declared members, so K = 18. Swept:
+
+| clusters per member | 2 | 3 | 4 | **5** | **6** | 8 | 10 |
+|---|---|---|---|---|---|---|---|
+| trusted (of 3) | 1 | 1 | 1 | 2 | **3** | 3 | 3 |
+
+The plateau starts at 6 here rather than 5, so **the 6x rule sits exactly on the
+knee for this asset** - it holds, but with no margin below it. Three assets now
+sweep clean at 6x (smelter 4/4, kiln 5/6, pole 3/3) at three different absolute
+K values (24, 36, 18). Keep 6x; do not lower it.
+
+### Verdigris clears - but only after a gain fix
+
+The first run dropped verdigris at **every** K, which looked like the
+prune-membership rule failing on its first real test. It was not. The caps are
+present: 2.84% of texels, median `#2F4F41`, hue ratio G/R 2.79 against the
+target's 2.55.
+
+The fault was the **aggregate gain seed**. It assumes the asset's material mix
+resembles the palette's, and this asset is overwhelmingly timber with only three
+declared members - so the seed came out `R 1.050 / G 0.462 / B 0.203`, a **5.2x
+channel spread**, and the skew pushed verdigris out of range.
+
+Fixed by **refining the gain iteratively**: match with the seed, re-estimate the
+gain from the trusted anchors only, repeat. Convergence:
+
+| pass | pole gain spread | pole trusted | smelter gain spread | smelter trusted |
+|---|---|---|---|---|
+| 0 (seed) | 5.17x | 2/3 | 1.22x | 4/4 |
+| 1 | 2.96x | 2/3 | 1.29x | 4/4 |
+| 2 | 2.51x | **3/3** | 1.31x | 4/4 |
+| 3 | 1.82x | **3/3** | 1.31x | 4/4 |
+
+It rescues a mix-skewed asset and leaves a well-mixed one alone. This is not the
+circular "match before removing the gain" the ordering fix eliminated: the seed
+still needs no correspondence, and each refinement uses only anchors that
+already passed the trust tests.
+
+**So the prune-membership rule is confirmed, not merely assumed.** Verdigris
+clears at 0.47 of min-pair on the asset that has it, and is skipped on the one
+that does not.
+
+### An approved asset must not be silently re-corrected
+
+The refinement changed the *smelter's* correction too - improving its measured
+fit 90% -> 92% while altering **28.6% of its pixels by >8/255 and 7.6% by
+>32/255**. Better numbers, different picture, on an asset that was already
+approved.
+
+Its remap is now **pinned** (`albedo_pinned: true`): the approved values are
+frozen in the manifest, `palette_drift.py --emit` refuses to overwrite them, and
+the render reports the pin. Verified byte-identical to the approved sprite
+(mean delta 0.00/255).
+
+The general rule: **a pipeline improvement is not a licence to re-render an
+approved asset.** Pin it, and unpin deliberately when re-approving.
+
+### Tall-thin case: confirmed
+
+| | |
+|---|---|
+| fit | `height`, 2.6 tiles - mandatory, the 1x1 footprint carries no scale signal |
+| normalized extent | 1.19 x 0.56 x 2.60 tiles |
+| cell | **2 x 3 tiles** -> 64 x 96 sprite |
+| anchor | **[32.0, 96.0]** = exactly sprite bottom-centre |
+| overflows front edge | **false** - the cell grows UPWARD only |
+
+### Crossarm overhang: 26.3% each side
+
+Measured, both sides symmetric: **40 px past the notch, 26.3% of silhouette
+width, 15.6% of canvas.** That is what forces `cell_w` to 2 and gives the
+64 x 96 sprite, exactly as expected.
+
+It is **not** pushing past 2 tiles: the full silhouette is 152 px of a 256 px
+(2-tile) canvas, so there is 40% of the cell still spare. A crossarm would have
+to grow by roughly 1.7x before it forced a 3-tile cell. Tiered variants have
+room.
+
+### HF detail gate: FAILED at 7.43x
+
+| asset | HF destroyed | ratio | gate |
+|---|---|---|---|
+| chest (proxy, the floor) | 2.1% | 1.00x | pass |
+| smelter (reference) | 3.5% | 1.67x | pass |
+| **power_pole** | **15.6%** | **7.43x** | **FAIL** |
+| first kiln (rejected) | 14.3% | 6.1x | fail |
+
+**The pole destroys more high-frequency energy than the kiln that was rejected
+for cobbles.** The shape is not the excuse: the flat-shaded pole *proxy*, same
+silhouette and same 41% bbox coverage, measured 2.6%. The difference is
+contrast - 10 of its 16 features are sub-2px **and** high-contrast, mostly the
+dark iron bands against light timber.
+
+**The cap has not been moved.** Recommendation: regenerate with fewer iron
+bands - two instead of five - and lower contrast between band and post. The
+silhouette, the crossarm, the verdigris caps and the base plate all read well
+and should be kept.
+
+> **Floor caveat:** `power_pole` used to be one of the two flat-geometry floor
+> references and cannot be now that it is a real textured asset - a floor cannot
+> include the thing it measures. The floor is `chest` alone, **n = 1**. That
+> also means the smelter's ratio moved 1.45x -> 1.67x on the same pixels, purely
+> because the floor changed. Ratios are only comparable within one floor
+> definition, the same caveat that already applies to rig correlation.

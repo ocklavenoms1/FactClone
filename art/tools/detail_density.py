@@ -57,7 +57,9 @@ SUPERSAMPLE = 4
 TILE_PX = 32
 HF_RATIO_CAP = 3.0                        # pass mark: under 3x the flat floor
 CONTRAST_COSTLY = 0.12                    # luminance range above which thin detail costs
-FLOOR_REFS = ("chest", "power_pole")      # flat untextured proxies define the floor
+FLOOR_REFS = ("chest",)                    # flat proxies only. power_pole became a REAL
+                                          # asset, so it can no longer define the floor it
+                                          # is measured against.
 
 
 def luma(rgb):
