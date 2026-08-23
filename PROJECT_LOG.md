@@ -9,6 +9,132 @@ Each entry has three sections:
 
 ---
 
+## Electricity Arc Session 3 — Pole Tiers
+
+**Date:** 2026-08-22
+**Tag:** `session-electricity-pole-tiers`
+**Save:** v18 (no schema bump — the enum is append-only, poles carry empty state, and the network caches are never serialized; Task 9 exists to prove all three)
+**Tests:** 42 → 48
+
+Third of the Electricity Arc. Converts `PowerNetwork`'s two hardcoded constants into per-tier
+tables, adds `MEDIUM_POLE` and `SUBSTATION`, replaces mesh wire rendering with a Gabriel graph,
+and closes an audit finding on the way. Nine planned tasks plus a gate-failure response, each
+through a subagent triad.
+
+### What shipped
+
+- **Two tiers.** `MEDIUM_POLE` (1×1, wire range 6, supply radius 2) and `SUBSTATION` (**2×2**,
+  range 11, radius 4). `POLE_RANGE = 3` / `SUPPLY_RADIUS = 1` became `POLE_RANGE_BY_TYPE` /
+  `SUPPLY_RADIUS_BY_TYPE`, the same parametric shape `inserter.gd` uses.
+- **`poles_connected` — one predicate, two callers.** The topology BFS and the wire renderer
+  now ask the same function. Before, each read the constant independently; with per-tier ranges
+  two reads *will* diverge, and the dangerous direction fails silently (a renderer stricter than
+  the BFS leaves poles in one component with no wire and no signal anywhere).
+- **`_pole_cells`** — every pole footprint cell maps to its anchor, so a 2×2 substation resolves
+  from all four cells rather than only its top-left.
+- **One consumer resolver.** `power_satisfaction_at` and `_supply_component_id` collapsed into
+  `_covering_component_id`, with a nearest-pole tie-break. Three `POWER_POLE`-only filters
+  widened, including the generator-side one that no task originally owned.
+- **Gabriel-graph wire rendering**, replacing the mesh — see Decisions.
+- **Audit finding #1 closed** (HIGH). `load_game` repopulated `grid_world.buildings` directly,
+  bypassing the only paths that mark the network caches dirty, so a mid-session quick-load left
+  both topologies describing the pre-load world. `mark_fluid_network_dirty()` had **zero
+  callers** since the audit described it that way in July.
+- **Three rigs, all permanent infrastructure.** `--scenario=pole_tiers` (PAUSE 1) and
+  `--scenario=pole_gameplay` (PAUSE 2) join `electric_rig`, each with a headless test asserting
+  the same entry points the game calls.
+- **A registration guard.** `test_registration_completeness.gd` asserts every `test_*.gd` on
+  disk appears in the runner — see Lessons.
+
+### Decisions
+
+- **Either-reaches, `max(range_a, range_b)`, not min.** Symmetric, so the BFS stays an
+  undirected flood fill and component grouping cannot depend on lex start order. A `min` rule
+  would cap a substation talking to basic poles at the basic pole's 3, costing the backbone tier
+  its reason to exist.
+- **Gabriel graph for wires — and the arc that got there is the story.** Wire rendering has now
+  taken **six iterations across two sessions**. Foundation PAUSE 1 burned five, all
+  symptom-driven: mesh → nearest-neighbour → Euclidean-nearest → **MST (rejected)** → mesh-within-network.
+  This session replaced that with MST, which failed the gate for the *same* reason it failed at
+  Foundation — a 4-pole square renders as a star, and the far corner reaches diagonally instead
+  of to its adjacent neighbours.
+
+  **The user had rejected MST at Foundation and re-approved it here without knowing.** The
+  design pass was made far from the record and contradicted it; `NOTES.md` held the rejection
+  the whole time. That is the failure mode to watch: a decision made on fresh reasoning that a
+  written record already settles.
+
+  What ended it in **one** iteration rather than five was the user stating a **rule** before any
+  implementation — the Gabriel graph, an edge suppressed when a third pole lies inside the circle
+  on it as diameter — instead of reacting to another screenshot. `NOTES.md`'s "UX iteration trap"
+  protocol, earned at Foundation, says exactly this. It worked.
+- **`<=` and both-reach ship as a package.** The 4-pole square is *exactly degenerate*: for the
+  diagonal, `|AC|²+|BC|² = 18` against `|AB|² = 18`, so the blocker sits precisely on the circle.
+  `<` keeps the diagonals and Gabriel becomes the mesh; `<=` gives the square. But `<=` alone
+  suppresses every right-angle configuration (Thales) and disconnects real layouts.
+- **Both-reach is the MECHANISM, not optional hardening.** Suppressing an edge only when the
+  blocker is reachable from *both* endpoints does three jobs at once: it prevents disconnection
+  (plain Gabriel filtered by range disconnected **46/68/86%** of random layouts at 14/24/40
+  poles), it removes the `<=` Thales hazard, and it *is* the performance fix — a blocker must be
+  a common neighbour, which turns an O(N³) search into an O(E·D) adjacency walk, 52 ms/frame to
+  8.7. **Anyone reading it as a safety check will delete it.**
+- **Nearest-pole tie-break, though it is currently unobservable.** Two poles that both cover a
+  cell are always already in the same component — the triangle inequality gives `rA+rB` and every
+  tier pair clears its `max(range)`. Kept because predictable beats documented-arbitrary, and
+  because a future tier with `supply_radius > range/2` makes it load-bearing. The proof and the
+  breaking condition are in `_covering_component_id`.
+- **Measured, then did nothing.** The supply scan went 1.03 → 10.68 µs/call, but that is **1.1%
+  of a tick** at the shipped 24 consumers. The gate's own premise turned out wrong: the
+  tie-break is not the expense, the box walk is (~8.4 of the 10.7 µs), and the early return does
+  not touch it. A per-tick memo is both larger a win (2.17× vs 2.0×) and free of correctness
+  cost. Recorded in NOTES as the lever to reach for.
+- **Deferred three things deliberately**, each recorded with its seam: the edge-list cache, the
+  `test_pole_tiers.gd` split, and the `RigSupport` extraction (whose trigger — a third rig — fired
+  this session, but which must touch the protected control).
+
+### Lessons
+
+- **A dropped test registration is the only failure where green means nothing.** A reviewer ran
+  `git checkout <ref> -- <path>` to read an older revision; that command **stages**, and the
+  concurrent art session's next bare `git commit` swept the staged deletion into its own commit.
+  HEAD stopped preloading a test file. A clean checkout would have printed "45 passed, 0 failed"
+  and been believed while that coverage did not execute — a missing test is indistinguishable
+  from a passing one, and nothing reddens.
+
+  **Third incident of the shared-index class, and the first where the damage was a test silently
+  not running** rather than files being swept into a commit. The existing rule (explicit pathspec)
+  protected *our* commits from absorbing `art/`; it did nothing about a bare commit from either
+  session absorbing what the other had staged. Both directions are now covered — and the rule got
+  a **detector**, because a rule with no detector is a rule you find out about later. Worth noting
+  the rule was then broken *one command after being written*, which is the argument for the
+  detector rather than against the rule.
+- **Two save-round-trip holes left the suite fully green.** Nothing pinned the on-disk enum
+  integers — moving the new tiers out of the enum tail, precisely what the "no schema bump" claim
+  says did not happen, was undetectable, and that is silent corruption with no version mismatch to
+  catch it. And *partial* occupancy loss (dropping the bottom row of every 2×2 on load) passed;
+  the existing test caught only *total* loss, and only incidentally. **A claim nobody tests is not
+  a claim, however carefully it is reasoned.**
+- **The plan was wrong twenty-plus times and the triad caught all of it.** Two nonexistent API
+  names, a compile break, a self-contradicting test, a `9×9` that should have been `10×10`, and
+  two rig layout faults that would each have produced a *silently dead gate* — generators touching
+  lamps instead of poles, and the MST control block sitting inside the substation's reach where it
+  could never have gone green. **Zero originated in implementer judgement.** The DBV rule ("if the
+  brief and the code disagree, the code wins") is what converted those into reports instead of bugs.
+- **A test can pass for a structural reason unrelated to its claim.** The plan's order-independence
+  sub-case mirrored *placement order*, but `pole_anchors` is lex-sorted before the walk, so the
+  topology is a function of the anchor *set* — it was incapable of failing under any predicate. The
+  fix mirrors the *layout* instead. The same defect recurred twice more and was caught both times.
+- **Retention comments are where nobody re-runs the test.** Comments asserting "this is the only
+  assertion catching X" proved false six times this session, every one written to justify *keeping*
+  something. Mutation-testing them became a standing rule; the implementer that adopted it then
+  caught its own false claim mid-write.
+- **When a change makes a statement false, the sweep follows the BEHAVIOUR, not the diff.** Task 4
+  shipped five wrong comments in files it never opened. The rule that fixed it also caught a subtler
+  case: three comments claimed two metrics lived "three lines apart" — true under the old code, false
+  the moment a rewrite moved them 63 lines apart.
+
+---
+
 ## Inserter Arc Session 4 — Electric Inserter
 
 **Date:** 2026-08-20

@@ -543,7 +543,32 @@ instead of guessed at.
 
 ---
 
-## Electricity Arc — 2 of N sessions shipped (+ first non-lamp consumer, via the Inserter Arc)
+## Electricity Arc — 3 of N sessions shipped
+
+**Session 3 (`session-electricity-pole-tiers`) — POLE TIERS.** MEDIUM_POLE (1×1, wire range 6,
+supply radius 2) and SUBSTATION (**2×2**, range 11, radius 4). The two flat constants became
+`POLE_RANGE_BY_TYPE` / `SUPPLY_RADIUS_BY_TYPE`, and four things came with them:
+
+- **`poles_connected` is the single reachability predicate**, called by both the topology BFS
+  and the wire renderer. Never re-derive the rule from a distance check — the dangerous
+  divergence (renderer stricter than BFS) leaves poles in one component with no wire and no
+  signal anywhere. `_pole_distance` is Chebyshev footprint-to-footprint; the Gabriel blocker
+  test is Euclidean-squared on doubled centres. **Two metrics, not interchangeable.**
+- **Either-reaches**, `max(range_a, range_b)`. Symmetric, so the BFS stays order-independent.
+- **`_pole_cells`** maps every pole footprint cell to its anchor, so 2×2 poles resolve from all
+  four cells. Consumer supply is one resolver, `_covering_component_id`, nearest-pole tie-break.
+- **Wire rendering is a GABRIEL GRAPH** — see the wire-rendering section above before touching
+  it. `<=` and the both-reach guard ship as a package and neither is optional.
+
+**Queued Session 3 "Power Pole Tiers" below is DONE — ignore it.** Sessions 4 (electric
+processors) and 5 (electric inserters) were both partly absorbed by the Inserter Arc; re-scope
+rather than building as written.
+
+**Density judged, not assumed** (PAUSE 2, hand-inspected): 16 poles across all three tiers draw
+**26 wires** — an orthogonal lattice with short diagonals off the substations, no crossings, no
+wire passing over a pole. Far sparser than mesh at range 11, modestly denser than MST's `n-1`.
+That is the reference point for the next power session; if the "too tangled" complaint returns,
+compare against this, not against memory.
 
 **The arc's consumer side is no longer theoretical.** `session-inserter-electric` shipped
 ELECTRIC_INSERTER — the first consumer that is not the lamp, and the first to use the
