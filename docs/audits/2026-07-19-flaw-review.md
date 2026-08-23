@@ -72,6 +72,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-22 | — | 7 closed / 77 live |
 | 2026-08-22 | #3 | **8 closed / 76 live** |
 | 2026-08-23 | #4 + #5 (one unit) | **10 closed / 74 live** |
+| 2026-08-23 | #83 | **11 closed / 73 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -89,7 +90,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (10)
+### CLOSED (11)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -103,6 +104,7 @@ is closed at all.
 | 56 | duplicated slot handlers diverge on empty-cursor | `83a72cc` + `fa4b5ca` — **accidental**, a side effect of deduplicating into `SlotClickHandler` | shared handler |
 | 4 | applicator never pulls or applies COMPOST_HIGH | `4c021fb` | `test_applicator_wasteland_recovery.gd` |
 | 5 | one scarred tile permanently wedges LOW/MID application | `4c021fb` — same commit, see the interlock note below | same |
+| 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842` now reads 41 with addends that sum | doc-only; no test |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
@@ -163,7 +165,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
 
-### LIVE — LOW (47)
+### LIVE — LOW (46)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -212,7 +214,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | `NOTES.md:767, 769, 773` |
 | 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:998, 1000, 1039` |
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1007` vs `:834` |
-| 83 | "31 sub-suites total" but components sum to 35 | `NOTES.md:842` |
 | 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
 
 ### Severity note — #19 is arguably mis-rated
