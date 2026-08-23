@@ -1,0 +1,30 @@
+{
+  "name": "chest_shadow",
+  "cell_tiles": [
+    1,
+    2
+  ],
+  "sprite_px": [
+    32,
+    64
+  ],
+  "render_px": [
+    128,
+    222
+  ],
+  "anchor_px": [
+    16.0,
+    64.0
+  ],
+  "masters": [
+    {
+      "tag": "chest_shadow",
+      "state": null,
+      "yaw": null,
+      "master": "art/renders/chest_shadow_4x.png",
+      "sprite": "art/sprites/chest_shadow.png"
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f",
+  "blend": "draw UNDER the body sprite, same anchor; alpha is shadow density"
+}

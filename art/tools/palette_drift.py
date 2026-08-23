@@ -72,7 +72,24 @@ ITERS = 40
 # green on an asset with no green in it. Each question alone is wrong.
 MATCH_ABS_RATIO = 1.0
 MATCH_RATIO_TEST = 0.8
-GAIN_CLAMP = (0.4, 2.5)  # per-anchor gain limits; beyond this the cure is worse
+# SAFETY RAIL, NOT A TUNING PARAMETER. Deliberately set high enough to be
+# non-binding in normal operation.
+#
+# It used to be (0.4, 2.5) and it bound on EVERY anchor of EVERY asset - 52% of
+# raw gain channels sat at or above the ceiling, and the pole's oak asked for
+# 6.53x and got 2.5x. Tripo returns albedos around 0.2x of target, so a real
+# correction needs 4-5x; a 2.5 cap was the binding constraint on the whole
+# pipeline, truncating by a different amount per asset and feeding the
+# cross-asset lightness gap directly.
+#
+# Worse, it was introduced for a case that turned out not to exist: fired_clay
+# "wanting 4.4x" was later shown to be a K=10 clustering artifact.
+#
+# At 12x it should never bind. If it does, that is a SIGNAL, not a fix: an
+# anchor demanding more than 12x means the MATCH is wrong, and silently
+# truncating it would hide the bad match instead of surfacing it. So binding is
+# logged loudly.
+GAIN_CLAMP = (0.4, 12.0)
 SEED = 12345
 
 
@@ -320,6 +337,14 @@ def build_remap(a):
         # 4.4x) amplifies compression noise and clips highlights. Clamping
         # trades exact mean-matching for not destroying the texture.
         clamped = np.clip(g, GAIN_CLAMP[0], GAIN_CLAMP[1])
+        if np.any(np.abs(clamped - g) > 1e-6):
+            print(f"  ** CLAMP BOUND on {r['member']}: raw "
+                  f"{[round(float(v), 2) for v in g]} -> "
+                  f"{[round(float(v), 2) for v in clamped]}")
+            print(f"     The rail is set at {GAIN_CLAMP[1]}x to be non-binding. It binding "
+                  f"means the MATCH is suspect, not that the gain needs capping.")
+            print(f"     Check this anchor: match d1/d2 = {r['ratio_test']:.2f}, "
+                  f"population {r['cluster_pct']:.1f}%.")
         anchors.append({
             "member": r["member"],
             "observed": [round(float(v), 6) for v in c],

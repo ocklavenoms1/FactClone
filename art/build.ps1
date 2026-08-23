@@ -103,6 +103,18 @@ foreach ($a in $manifest.assets) {
         continue
     }
 
+    # Contact shadow, as its own layer. Assets have no ground contact without
+    # it - what looks like a shadow otherwise is the asset's own base plate.
+    if ($a.status -ne "calibration") {
+        Blend @((Join-Path $ArtDir "blender\render_shadow.py"), "--name", $a.name) |
+            Select-String "SHADOW" | Out-Null
+        $shMeta = Join-Path $ArtDir "sprites\$($a.name)_shadow.json"
+        if (Test-Path $shMeta) {
+            python (Join-Path $ArtDir "tools\downsample.py") $shMeta |
+                ForEach-Object { Write-Host "  $_" }
+        }
+    }
+
     # The albedo's baked light must not oppose the locked rig. Sign is a hard
     # gate; magnitude is reported and stays advisory until three assets exist
     # to calibrate a threshold against. Proxies have no baked light to check.

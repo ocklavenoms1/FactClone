@@ -118,6 +118,7 @@ art/
     make_proxies.py        stand-in geometry for testing without Tripo
     render_rigonly.py      flat-albedo render: the rig's shading, alone
     render_shadow.py       contact shadow as its own transparent layer
+    rig_study.py           measures key:fill vs form-driven lightness; changes nothing
     palette_swatch.py      a palette on flat proxies, no Tripo, no correction
     states/                per-state material/light hooks
   tools/                   system Python (needs Pillow + numpy)
@@ -1496,3 +1497,80 @@ was built for a phantom and has been quietly degrading every asset since.
 
 Raising it is a pipeline change that touches approved pixels, so it is proposed
 rather than shipped - see the session report.
+
+---
+
+## 24. Clamp raised, a correction to my own diagnosis, and the rig measured
+
+### The clamp is now a safety rail at 12x, and it speaks when it binds
+
+`GAIN_CLAMP` was `(0.4, 2.5)` and bound on every anchor of every asset. It is
+now `(0.4, 12.0)` - high enough to be non-binding - and if it ever does bind it
+logs loudly, because **an anchor demanding more than 12x means the MATCH is
+wrong**, and truncating it silently would hide the bad match instead of
+surfacing it.
+
+Both assets re-emitted. Nothing binds. The pole's oak now receives its full
+**6.53x** on blue where it previously received 2.5x.
+
+### I was wrong about what the clamp was doing, and the correction matters
+
+Last round I reported the albedo correction "under-correcting to 0.18-0.24x of
+target". **That was wrong.** Checked directly, every anchor lands exactly on
+its target:
+
+| asset | member | observed Y | x gain | corrected | target | ratio |
+|---|---|---|---|---|---|---|
+| smelter | fieldstone | 0.0446 | 2.52 | 0.1088 | 0.1088 | **1.00x** |
+| smelter | wrought iron | 0.0348 | 2.28 | 0.0759 | 0.0759 | **1.00x** |
+| smelter | weathered oak | 0.0395 | 2.54 | 0.0880 | 0.0880 | **1.00x** |
+| pole | weathered oak | 0.0372 | 3.70 | 0.0880 | 0.0880 | **1.00x** |
+| pole | wrought iron | 0.0234 | 3.56 | 0.0759 | 0.0759 | **1.00x** |
+
+The 0.21x figure compared a **region median** against a single flat hex. The
+albedo carries heavy baked shading - measured earlier at ~100% coarse-scale
+variance - so a region's median sits far below its cluster MEAN. Correcting the
+mean onto target is exactly right; the spread around it is baked light, which
+the remap was never meant to remove.
+
+**The clamp was still a real bug** - but it was causing a per-channel HUE error,
+not a lightness shortfall. The pole's oak was getting 2.5x where it needed 6.53x
+on blue alone, a blue deficit that read as a warm cast. Raising it moved
+**90.1% of the pole's pixels** by more than 8/255.
+
+**So the bleaching has exactly one cause: the rig responding to form.** Not the
+correction, not the view transform.
+
+### The rig, measured - NOT changed
+
+`rig_study.py` renders three flat-shaded probes at one albedo and reports the
+multiplier for each. It writes nothing and touches no locked value.
+
+| variant | key:fill | top | front | post | spread | top/post |
+|---|---|---|---|---|---|---|
+| **locked** | 3.76:1 | 11.67 | 5.30 | 5.30 | 6.37 | **2.20x** |
+| fill x2 | 1.88:1 | 11.96 | 6.18 | 6.31 | 5.78 | 1.90x |
+| fill x3 + ambient x1.5 | 1.25:1 | 12.39 | 7.59 | 7.62 | 4.81 | **1.63x** |
+
+Form readability, top-vs-front separation: **54.6% -> 48.4% -> 38.8%**.
+
+**The trade is roughly one for one.** Going from the locked rig to the widest
+fill tested cuts the form-driven spread by 26% and costs 29% of the contrast
+between a lit face and a turned-away one. There is no free lunch in the fill
+knob: consistency is bought from form readability at about par.
+
+Note also that fill lifts only the shadowed side - the top face barely moves
+(11.67 -> 12.39) while front and post rise from 5.30 to 7.6. It compresses the
+range from below, which is the mechanism to expect.
+
+> **The probes UNDERSTATE the real problem, and that limitation is the most
+> important thing here.** They read 2.20x top-to-post, but the real assets
+> measured **8.63x vs 2.85x = 3.03x**. The probes isolate ORIENTATION; they
+> cannot reproduce self-shadowing and inter-part occlusion, which is where the
+> rest of the real gap comes from. An isolated post catches as much fill as a
+> wall does - my "post" and "front" probes returned an identical 5.30 - whereas
+> a post standing among crossarm, plate and its own bracing does not.
+>
+> So raising fill would narrow the gap by *less* than this table suggests, at
+> the readability cost the table shows in full. If the rig is unlocked, it
+> should be on probes that include occlusion, not these.
