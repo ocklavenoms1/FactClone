@@ -292,6 +292,32 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ---
 
+## Queued: split `test_pole_tiers.gd` — the seam is measured and clean
+
+1758 lines, ~12 sub-cases across six tasks. Coherent only under "everything Session 3
+touched". **Deferred at Session 3's PAUSE 1 re-gate** — moving 700 lines of the session's own
+safety net immediately before a visual gate is the wrong trade for a pure refactor. It is one
+task away from being a junk drawer, so take it early in whatever session next opens the file.
+
+**Cut between sub-cases (11) and (12) — NOT (10)/(11).** (10) times `power_satisfaction_at`
+and belongs with the supply-area cases; (12) times `wire_edges` and shares helpers with (11).
+
+Everything below moves to `test_wire_edges.gd`. Verified to have **zero callers** elsewhere in
+the file:
+
+- helpers: `_plain_gabriel_edges`, `_edge_key`, `_same_edge_set`, `_edge_list_str`,
+  `_layout_str`, `_check_edges_reachable`, `_check_spans`, `_edges_span_component`,
+  `_mesh_pair_count`, `_poles_by_component`
+- constants: `K4_POLES`, `K4_FAR_PAIR`, `K4_SIDES`, `TRIPLE_*`, `SWEEP_*`, `WIRE_*`, `FRAME_US`
+
+Only generic scaffolding is shared — `_check`, `_make_world`, `_teardown`, `_place_all`,
+`_component_count`, about 40 lines to duplicate or hoist.
+
+The justification is not size alone: the wire renderer now has its own rule, its own fixture
+set, its own budget constant and its own history section in this file. That is a subsystem.
+
+---
+
 ## Wire-edge cost: cache the edge list, invalidate from `mark_dirty`
 
 Measured at Electricity Session 3 Tasks 7 and 8, headless console build. `wire_edges` runs
