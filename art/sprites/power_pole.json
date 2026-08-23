@@ -44,12 +44,11 @@
   "albedo_gain_applied": {
     "anchors": [
       "weathered_oak",
-      "wrought_iron"
-    ],
-    "sigma": 0.0307,
-    "dropped": [
+      "wrought_iron",
       "verdigris"
     ],
+    "sigma": 0.0218,
+    "dropped": [],
     "materials": 1,
     "mode": "remap"
   },

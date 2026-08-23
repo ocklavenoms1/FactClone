@@ -1782,3 +1782,75 @@ defect has been in what the review LOOKED at rather than in the asset.
 
 `--glow-strength` renders the flicker range (0.35 / 0.7 / 1.0) so the pulse
 bounds are chosen by eye rather than guessed.
+
+## 30. A small accent cannot win a centroid - the nearest-texel rescue
+
+Two of the three defects charged to pole v5 were checked against the pipeline
+before writing v6. One was ours. One was mine, and it was a measurement error.
+
+### Verdigris: ours, and it would have recurred on every accent
+
+`d1/d2 = 1.36` on the insulators was read as ambiguity. It was ABSENCE. At
+K=18 on a mostly-timber asset, a 4%-of-texture accent never wins a centroid, so
+the cluster verdigris "matched" was a blend that was never the insulators. It
+then kept Tripo's raw shift - R,G at 0.65x of target with B at 0.99x - which is
+a hue skew to cyan, not a dimming, and it was the one feature carrying
+"electrical".
+
+The ratio test was not wrong. It was applied at the wrong RESOLUTION. Asking
+"is this CLUSTER decisively verdigris" asks about a blend; asking it of each
+TEXEL finds the accent. 4.31% of the pole's texels are decisively
+verdigris-chromatic, mean #2A4C3C, a real dark teal - and its chroma distance
+to target is 0.038, better than either k-means anchor (iron 0.142, oak 0.128).
+
+After the rescue: observed/target went from [0.648, 0.638, 0.993] to
+[0.815, 0.764, 0.870]. Channel spread 1.56x -> 1.14x, so what is left is
+shading rather than hue.
+
+**Chosen over seeding k-means with the palette members**, which was the other
+option on the table. Seeding re-clusters every asset including approved ones.
+The rescue can only fire when a member drops, so a zero-drop asset re-emits
+bit-identically - verified on the smelter, all four gains unchanged to the last
+digit, sigma unchanged. An approval should never be invalidated by a fix aimed
+at a different asset.
+
+**The first cut of this was wrong and is worth keeping on the record.** It
+selected texels within a radius of `target * gain` in absolute linear space and
+"rescued" 7.0% of the texture at #434C40 - a neutral grey. Around a dark
+target, a radius in absolute linear space sweeps in every dark texel regardless
+of hue. That is exactly the "call a grey cluster green" failure the ratio test
+exists to prevent, reintroduced by the thing meant to work around it. Selecting
+on chromaticity fixed it.
+
+### The transformer box: MY error, and the diagnosis is withdrawn
+
+I reported the box at 1.27x value contrast against the oak and called it a
+design failure. That number came from a crude geometric region - "right of
+centre, upper half" - which mixed post pixels and bright hardware into the
+sample. It was not the box.
+
+Measured properly, the box texels routed to wrought_iron with 98-100% weight
+share and received its ~2.2x gain. The pipeline did its job:
+
+| | iron : oak |
+|---|---|
+| raw texture albedo | 3.18x |
+| after remap | 2.70x |
+| rendered sprite, darkest 60% of iron | 2.08x |
+
+The remap does compress the separation slightly (3.18 -> 2.70), because iron's
+gain is larger than oak's and lifts the dark toward the light. Worth knowing,
+not worth fixing at that magnitude.
+
+`art/tools/remap_audit.py` exists so this question is answerable without
+guessing: it prints, per cluster, which anchor's basin it fell into and what
+gain it actually received. Its own `--pair` had the same bug in its first cut -
+it compared each member's single NEAREST centroid, and reported 1.14x, because
+iron's nearest cluster is a 6%-population mid-grey while the box's mass sits in
+two darker clusters that also route to iron. One centroid is not a region; it
+is population-weighted now.
+
+**So the box is not a contrast defect.** What it lacks is SILHOUETTE
+projection: it widens the outline from 13px to 19px and no more. The v6
+ordering stands - bigger box first - but for reach away from the mast, not for
+value.

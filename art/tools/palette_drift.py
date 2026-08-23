@@ -90,6 +90,14 @@ MATCH_RATIO_TEST = 0.8
 # truncating it would hide the bad match instead of surfacing it. So binding is
 # logged loudly.
 GAIN_CLAMP = (0.4, 12.0)
+# Nearest-texel rescue for declared members too small to win a centroid.
+# Selection is by CHROMATICITY ownership plus the same d1/d2 decisiveness test
+# used on clusters, applied per TEXEL - see build_remap for why absolute linear
+# distance is the wrong space. MIN_FRAC is the floor below which we accept the
+# member really is absent rather than merely small; 0.02% of a 200k sample is
+# 40 texels. Note texture area is not screen area: the pole's insulators are
+# 4.4% of the TEXTURE and about 15 pixels of the 32x96 SPRITE.
+FALLBACK_MIN_FRAC = 0.0002
 SEED = 12345
 
 
@@ -269,7 +277,11 @@ def analyse(path, sample=200_000, is_render=False, members=None):
         "mask_pct": mask_pct,
         "rows": rows,
         "gain": gain,
+        # kept for the small-accent fallback in build_remap(). In memory only -
+        # emit() must never write these to the manifest.
+        "texels": lin,
         "min_pair": min_pair,
+        "palette_lin": {n: pal[n] for n in pal},
         "k": K,
         "declared": declared,
         "skipped": skipped,
@@ -356,10 +368,95 @@ def build_remap(a):
             "match_ratio": round(r["match_ratio"], 3),
         })
 
+    # ---- FALLBACK: a small accent cannot win a centroid -------------------
+    # A 15-texel insulator on a mostly-timber asset will never form its own
+    # cluster at K=18, and it then keeps Tripo's raw shift while everything
+    # around it is corrected - which is exactly how the pole's verdigris came
+    # out cyan (R,G at 0.65x of target, B at 0.99x). d1/d2 = 1.36 on a region
+    # that size is not ambiguity, it is ABSENCE. The cluster it matched against
+    # was never the insulators.
+    #
+    # So for any declared member that failed to form a trusted cluster, go
+    # looking for its texels directly. The refined global gain already predicts
+    # WHERE that member should sit (observed ~ target * gain); the only open
+    # question is whether texels actually live there. If enough do, they are
+    # that material and they get an anchor built from their own mean.
+    #
+    # Chosen over seeding k-means with the palette members because seeding
+    # re-clusters every asset, including approved ones. This path cannot fire
+    # on an asset with no drops, so an approved asset re-emits bit-identically.
+    if dropped and a.get("texels") is not None:
+        X = np.asarray(a["texels"])
+        gain = np.asarray(a["gain"], dtype=float)
+        min_pair = float(a.get("min_pair", 1.0))
+        # SELECT ON CHROMATICITY, per texel - not on absolute linear distance.
+        # The first cut used a radius around target*gain and "rescued" 7% of the
+        # pole's texture as verdigris at #434C40, a neutral grey. Of course it
+        # did: around a dark target, a radius in absolute linear space sweeps in
+        # every dark texel regardless of hue, which is precisely the "call a
+        # grey cluster green" failure the ratio test exists to stop.
+        #
+        # The ratio test was never wrong - it was applied at the wrong
+        # RESOLUTION. A 4%-of-texture accent cannot win a centroid at K=18, so
+        # asking "is this CLUSTER decisively verdigris" answers a question about
+        # a blend. Asking it of each TEXEL finds the accent: 4.4% of the pole's
+        # texels are decisively verdigris-chromatic, mean #2A4B3C, a real teal.
+        # Same threshold, finer grain.
+        chX = chromaticity(X)
+        chP = {m: chromaticity(np.asarray(v, dtype=float))
+               for m, v in a["palette_lin"].items()}
+        order = list(chP)
+        DC = np.stack([np.linalg.norm(chX - chP[m], axis=1) for m in order])
+        owner = DC.argmin(0)
+        rescued, still = [], []
+        for member, ratio, why in dropped:
+            t = np.asarray(a["palette_lin"][member], dtype=float)
+            k = order.index(member)
+            sel = owner == k
+            if sel.any():
+                d1 = DC[k][sel]
+                d2 = np.sort(DC[:, sel], axis=0)[1] if len(order) > 1 else np.full_like(d1, np.inf)
+                decisive = d1 / np.maximum(d2, 1e-9) < MATCH_RATIO_TEST
+                idx = np.where(sel)[0][decisive]
+                sel = np.zeros(len(X), dtype=bool)
+                sel[idx] = True
+            frac = float(sel.mean())
+            if frac < FALLBACK_MIN_FRAC:
+                still.append((member, ratio, why, frac))
+                continue
+            c = X[sel].mean(0)
+            g = np.array([t[k] / max(c[k], 1e-4) for k in range(3)])
+            clamped = np.clip(g, GAIN_CLAMP[0], GAIN_CLAMP[1])
+            if np.any(np.abs(clamped - g) > 1e-6):
+                print(f"  ** CLAMP BOUND on rescued {member}: raw "
+                      f"{[round(float(v), 2) for v in g]} -> "
+                      f"{[round(float(v), 2) for v in clamped]}")
+            anchors.append({
+                "member": member,
+                "observed": [round(float(v), 6) for v in c],
+                "target": [round(float(v), 6) for v in t],
+                "gain": [round(float(v), 4) for v in clamped],
+                "gain_raw": [round(float(v), 4) for v in g],
+                "clamped": bool(np.any(np.abs(clamped - g) > 1e-6)),
+                "chroma_dist": round(float(np.linalg.norm(
+                    chromaticity(c) - chromaticity(t))), 4),
+                "match_ratio": None,
+                "via": "nearest-texel",
+                "texel_frac": round(frac, 6),
+            })
+            rescued.append((member, frac, tohex(c)))
+        for m, frac, hx in rescued:
+            print(f"  RESCUED {m:15} by nearest-texel: {frac*100:.3f}% of texels "
+                  f"decisively {m}-chromatic (d1/d2 < {MATCH_RATIO_TEST}), observed {hx}")
+        dropped = still
+
     if dropped:
         print("  anchors dropped (not trusted):")
-        for m, d, why in dropped:
-            print(f"    {m:15} chroma_d {d}  - {why}")
+        for d in dropped:
+            m, r, why = d[0], d[1], d[2]
+            extra = (f", nearest-texel found only {d[3]*100:.3f}% "
+                     f"(need {FALLBACK_MIN_FRAC*100:.3f}%)") if len(d) > 3 else ""
+            print(f"    {m:15} chroma_d {r}  - {why}{extra}")
 
     # sigma from the anchors' own spacing: half the median nearest-neighbour
     # distance. Too small bands at cluster boundaries; too large and every

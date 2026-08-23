@@ -45,7 +45,7 @@
       },
       "yaws": [],
       "status": "reference",
-      "note": "REFERENCE ASSET - approved and locked. Tripo SMELTER.glb: squared block, large courses, no overhang either side, magenta firebox mask, all four declared palette members matching with zero drops (90% variance explained). Prompted with the superseded draft palette, which is how we established the prompt palette is ADVISORY - see PIPELINE.md section 14.",
+      "note": "REFERENCE ASSET - APPROVED AND PINNED at 1x on the eye sheet, after the clamp raise to 12x and the re-emit. Tripo SMELTER.glb: squared block, large courses, no overhang either side, magenta firebox mask, all four declared palette members matching with zero drops. Because it has zero drops, the nearest-texel rescue cannot fire on it - verified bit-identical after that change. Prompted with the superseded draft palette, which is how we established the prompt palette is ADVISORY - see PIPELINE.md section 14.",
       "albedo_correction": "remap",
       "palette_era": "natural-5",
       "albedo_gain": [
@@ -168,7 +168,8 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true
     },
     {
       "name": "chest",
@@ -205,7 +206,7 @@
         0.2646
       ],
       "albedo_remap": {
-        "sigma": 0.0307,
+        "sigma": 0.0218,
         "anchors": [
           {
             "member": "weathered_oak",
@@ -258,11 +259,37 @@
             "clamped": false,
             "chroma_dist": 0.1415,
             "match_ratio": 0.165
+          },
+          {
+            "member": "verdigris",
+            "observed": [
+              0.02287,
+              0.071453,
+              0.045619
+            ],
+            "target": [
+              0.076185,
+              0.194618,
+              0.132868
+            ],
+            "gain": [
+              3.3313,
+              2.7237,
+              2.9125
+            ],
+            "gain_raw": [
+              3.3313,
+              2.7237,
+              2.9125
+            ],
+            "clamped": false,
+            "chroma_dist": 0.0382,
+            "match_ratio": null,
+            "via": "nearest-texel",
+            "texel_frac": 0.043085
           }
         ],
-        "dropped": [
-          "verdigris"
-        ]
+        "dropped": []
       }
     },
     {
