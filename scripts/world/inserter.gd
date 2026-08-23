@@ -664,15 +664,31 @@ static func _drop_to_processor(dst: Building, item: int) -> bool:
 		var accepts: Array = slot.get("accepts", [])
 		if not accepts.is_empty() and not accepts.has(item):
 			continue
-		# Capacity check: don't exceed input_capacity (recipe-defined).
+		# Capacity check, PER ITEM TYPE — not against the bag total.
+		#
+		# Oven (dough + fuel) and Mixer (flour + yeast) bind two input slots
+		# to ONE in_buffer, a deliberate multi-type bag. Both the Processor
+		# and the slot descriptor cap that bag per type: Processor's pull
+		# tests `_buffer_count(in_buffer, item_type) >= recipe.input_capacity`
+		# (processor.gd), and buildings.gd documents max_stack as
+		# "per-item-type capacity in the slot's buffer".
+		#
+		# This used to sum every entry in the bag and compare that aggregate
+		# against one slot's max_stack, which deadlocked the bread line: a
+		# belt fills the dough input to 8, the recipe also needs fuel so it
+		# cannot start, the bag never drains, and the inserter's fuel is
+		# refused forever (audit finding #3). Counting per type is exactly
+		# what the Processor already does, so reuse its counter rather than
+		# keep a second copy that can drift.
 		var in_buf: Array = dst.state.get("in_buffer", [])
-		var current_total: int = 0
-		for entry in in_buf:
-			current_total += int(entry[1])
-		# Use recipe capacity if a recipe is set; otherwise use the
-		# slot's max_stack as fallback.
+		# Cap source is this slot's max_stack. Every "input"-kind slot in
+		# buildings.gd declares 8 and all 19 recipes in recipes.gd declare
+		# input_capacity 8, so the slot-side and recipe-side ceilings agree.
+		# The slot is the right source here because this whole function is
+		# slot_layout-driven (the accepts check above is too) and a slot
+		# layout exists even when recipe_id is unset.
 		var cap: int = int(slot.get("max_stack", 8))
-		if current_total >= cap:
+		if Processor._buffer_count(in_buf, item) >= cap:
 			return false
 		# Top-up or append.
 		for entry in in_buf:

@@ -59,6 +59,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_pole_gameplay_rig.gd"),
 	preload("res://scripts/tests/test_load_network_invalidation.gd"),
 	preload("res://scripts/tests/test_mixed_tier_save_roundtrip.gd"),
+	preload("res://scripts/tests/test_inserter_shared_input_cap.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
