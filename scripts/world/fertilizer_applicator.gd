@@ -4,9 +4,9 @@ extends RefCounted
 ## Fertilizer Applicator — automation tier for the fertilizer chain
 ## (session-soil-exhaustion-3-5).
 ##
-## 1×1 footprint, 5×5 coverage area centered on anchor. Pulls COMPOST_LOW
-## or COMPOST_MID from belts at the input port (canonical W edge, rotates
-## with b.dir), or accepts drag-drop into the input slot. Once per
+## 1×1 footprint, 5×5 coverage area centered on anchor. Pulls any compost
+## tier in TIER_PREFERENCE from belts at the input port (canonical W edge,
+## rotates with b.dir), or accepts drag-drop into the input slot. Once per
 ## APPLY_INTERVAL_TICKS, scans the 5×5 area for the most-depleted eligible
 ## tile and applies one fertilizer item via GridWorld.try_apply_fertilizer
 ## — same call hand-apply uses, same stacking rules.
@@ -43,6 +43,26 @@ const INPUT_PORT_DIR: int = Belt.DIR_W
 # means even a tightly-packed belt won't overflow the 16-stack buffer
 # — applicator burns 1 item per 100 ticks, belt feeds at most 1 per tick.
 const INPUT_BUFFER_CAPACITY: int = 16
+
+# Every fertilizer tier the applicator handles, richest first. This one
+# list is BOTH the belt-pull accept list and the buffer-selection order,
+# so a tier can never be intake-able but unselectable (or the reverse).
+#
+# It must stay set-equal to the `accepts` array on the FERTILIZER_APPLICATOR
+# input slot in buildings.gd — that list is what the drag-drop path and the
+# inserter validate against. The two drifted apart once: Session 4 added
+# COMPOST_HIGH to the slot with the comment "so applicators can be belt-fed
+# Premium Compost for wasteland-recovery automation", but the tick logic
+# kept two hardcoded [MID, LOW] lists, so HIGH could enter the buffer by
+# hand and then sit there inert forever while the machine reported IDLE
+# (audit #4). test_applicator_wasteland_recovery.gd sub-suite 5 walks the
+# slot's own accepts list and drives each entry through belt → buffer →
+# tile, which is the assertion that closes that gap.
+const TIER_PREFERENCE: Array = [
+	Items.Type.COMPOST_HIGH,
+	Items.Type.COMPOST_MID,
+	Items.Type.COMPOST_LOW,
+]
 
 # State machine values. APPLYING is collapsed into a single-tick
 # transition (apply happens, state goes back to SCANNING).
@@ -126,9 +146,12 @@ static func tick(b: Building, world) -> void:
 		b.state["state"] = STATE_BLOCKED
 		return
 
-	# Apply. try_apply_fertilizer returns false only on lower-tier-rejected,
-	# which _pick_most_depleted_eligible_tile already filters — so the
-	# `false` branch is defensive (treat as BLOCKED if it ever fires).
+	# Apply. try_apply_fertilizer rejects on two grounds — an equal-or-better
+	# boost already on the tile, and a non-restoring tier on scarred
+	# wasteland — and _tile_eligible pre-filters both, so the `false` branch
+	# is defensive (treat as BLOCKED if it ever fires). It used to filter
+	# only the first, which is what let one scarred tile wedge the machine
+	# here permanently (audit #5).
 	if world.try_apply_fertilizer(target, selected_tier):
 		_buffer_remove(b.state["in_buffer"], selected_tier, 1)
 		b.state["scan_progress"] = 0
@@ -153,39 +176,72 @@ static func _try_pull_input(b: Building, world) -> void:
 		if neighbor == null or neighbor.type != Buildings.Type.BELT:
 			continue
 		var pulled: int = Belt.try_pull_matching(neighbor, b.anchor,
-			[Items.Type.COMPOST_LOW, Items.Type.COMPOST_MID])
+			TIER_PREFERENCE)
 		if pulled >= 0:
 			_buffer_add(b.state["in_buffer"], pulled, 1)
 			return  # 1 pull per tick
 
 # ---------- tier + tile selection ----------
 
-## Select highest-tier fertilizer in buffer (MID before LOW). Two-pass
-## because the buffer is short (≤2 entries — only 2 valid item types).
+## Select the richest fertilizer tier present in the buffer, walking
+## TIER_PREFERENCE (HIGH → MID → LOW). One pass per tier; the buffer is
+## short (≤3 entries — one per valid item type).
 ## Returns -1 if buffer empty or all entries have count <= 0.
 ##
 ## Static + pure: tests call directly.
 static func _select_fertilizer_from_buffer(b: Building) -> int:
 	var buf: Array = b.state.get("in_buffer", [])
-	# Pass 1: prefer MID.
-	for entry in buf:
-		if int(entry[1]) > 0 and int(entry[0]) == Items.Type.COMPOST_MID:
-			return Items.Type.COMPOST_MID
-	# Pass 2: fall back to LOW.
-	for entry in buf:
-		if int(entry[1]) > 0 and int(entry[0]) == Items.Type.COMPOST_LOW:
-			return Items.Type.COMPOST_LOW
+	for tier in TIER_PREFERENCE:
+		for entry in buf:
+			if int(entry[1]) > 0 and int(entry[0]) == int(tier):
+				return int(tier)
 	return -1
+
+## Would applying `selected_tier` to `pos` do something useful, and would
+## GridWorld.try_apply_fertilizer accept it? The single eligibility test —
+## the picker, the Q-inspect count and the panel's coverage grid all call
+## this, so "the applicator will fertilize that tile" means the same thing
+## everywhere.
+##
+## Rejects, in order:
+##   - out of world bounds (WORLD_MIN ≤ pos < WORLD_MAX per WorldGenerator);
+##     an applicator near the edge scans only the in-bounds subset of its 5×5
+##   - pristine soil (== 100) — no benefit from fertilizer
+##   - an equal-or-better boost already active — same rule as hand-apply Q5
+##     stacking, which try_apply_fertilizer enforces upstream
+##   - a scarred wasteland tile the selected tier cannot restore
+##
+## That last one is audit #5. A scarred tile holds soil 0 permanently
+## (regen skips wasteland), so it wins the most-depleted sort every time,
+## while try_apply_fertilizer refuses every tier below HIGH on scarred
+## ground. Without this rejection the applicator nominated the scar, was
+## refused, went STATE_BLOCKED, and re-nominated the same tile next tick —
+## forever, with ordinary depleted tiles sitting eligible in the same 5×5.
+## The tier half of the question is delegated to
+## GridWorld.wasteland_accepts_tier, the same predicate try_apply_fertilizer
+## gates on, so the picker and the apply cannot drift into disagreeing.
+## Note this is a rejection, not a blanket skip: with COMPOST_HIGH selected
+## the scar stays eligible and — being soil 0 — is exactly the tile that
+## wins, which is the belt-fed wasteland-recovery automation the input
+## slot advertises.
+static func _tile_eligible(world, pos: Vector2i, selected_tier: int) -> bool:
+	if pos.x < WorldGenerator.WORLD_MIN or pos.x >= WorldGenerator.WORLD_MAX:
+		return false
+	if pos.y < WorldGenerator.WORLD_MIN or pos.y >= WorldGenerator.WORLD_MAX:
+		return false
+	if world.tile_soil_health(pos) >= GridWorld.TILE_SOIL_FULL:
+		return false
+	if world.tile_fertilizer_tier(pos) >= selected_tier:
+		return false
+	if world.is_wasteland_at(pos) and not world.wasteland_accepts_tier(selected_tier):
+		return false
+	return true
 
 ## Find the most-depleted eligible tile in the 5×5 coverage area for the
 ## given fertilizer tier. Returns _NO_TARGET if no eligible tiles.
 ##
-## Eligibility:
-##   - tile soil < 100 (depleted)
-##   - tile fertilizer tier < selected_tier OR no fertilizer present
-##     (i.e., applying selected_tier would actually upgrade or freshly
-##      apply — same rule as hand-apply Q5 stacking, enforced upstream
-##      by try_apply_fertilizer)
+## Eligibility is _tile_eligible() — one shared test, so the picker and
+## the UI's eligible-count can't disagree about what this machine will do.
 ##
 ## Tile sort: lowest soil_health first. Tiebreak: topmost-leftmost
 ## (smaller y, then smaller x) — mirrors MiningDrill's deterministic
@@ -199,18 +255,9 @@ static func _pick_most_depleted_eligible_tile(b: Building, world, selected_tier:
 	for dx in range(-COVERAGE_RADIUS, COVERAGE_RADIUS + 1):
 		for dy in range(-COVERAGE_RADIUS, COVERAGE_RADIUS + 1):
 			var pos: Vector2i = Vector2i(b.anchor.x + dx, b.anchor.y + dy)
-			# In-world bounds: WORLD_MIN ≤ pos < WORLD_MAX (per WorldGenerator).
-			if pos.x < WorldGenerator.WORLD_MIN or pos.x >= WorldGenerator.WORLD_MAX:
+			if not _tile_eligible(world, pos, selected_tier):
 				continue
-			if pos.y < WorldGenerator.WORLD_MIN or pos.y >= WorldGenerator.WORLD_MAX:
-				continue
-			# Eligibility check.
 			var soil: int = world.tile_soil_health(pos)
-			if soil >= GridWorld.TILE_SOIL_FULL:
-				continue   # pristine — no benefit from fertilizer
-			var current_tier: int = world.tile_fertilizer_tier(pos)
-			if current_tier >= selected_tier:
-				continue   # already has equal-or-better fertilizer
 			# Eligible. Track most-depleted (smallest soil); tiebreak
 			# topmost-leftmost.
 			if soil < best_soil:
@@ -286,22 +333,15 @@ static func info_lines(b: Building, world) -> Array:
 	return lines
 
 ## Count eligible tiles in coverage for the given tier. Used by info_lines
-## + ApplicatorPanel header. Same eligibility test as
-## _pick_most_depleted_eligible_tile but doesn't track best — just counts.
+## + ApplicatorPanel header. Literally _pick_most_depleted_eligible_tile's
+## scan without the best-tracking — both call _tile_eligible, so the
+## number the player reads is the number of tiles the machine will act on.
 static func _count_eligible_tiles(b: Building, world, selected_tier: int) -> int:
 	var n: int = 0
 	for dx in range(-COVERAGE_RADIUS, COVERAGE_RADIUS + 1):
 		for dy in range(-COVERAGE_RADIUS, COVERAGE_RADIUS + 1):
-			var pos: Vector2i = Vector2i(b.anchor.x + dx, b.anchor.y + dy)
-			if pos.x < WorldGenerator.WORLD_MIN or pos.x >= WorldGenerator.WORLD_MAX:
-				continue
-			if pos.y < WorldGenerator.WORLD_MIN or pos.y >= WorldGenerator.WORLD_MAX:
-				continue
-			if world.tile_soil_health(pos) >= GridWorld.TILE_SOIL_FULL:
-				continue
-			if world.tile_fertilizer_tier(pos) >= selected_tier:
-				continue
-			n += 1
+			if _tile_eligible(world, Vector2i(b.anchor.x + dx, b.anchor.y + dy), selected_tier):
+				n += 1
 	return n
 
 # ---------- rendering ----------

@@ -38,6 +38,7 @@ const CELL_PRISTINE: Color = Color(0.20, 0.30, 0.20, 0.85)         # dim sage
 const CELL_ELIGIBLE: Color = Color(0.55, 0.50, 0.20, 0.95)         # mustard yellow
 const CELL_FERT_LOW: Color = Color(0.45, 0.75, 0.35, 0.95)         # light green
 const CELL_FERT_MID: Color = Color(0.20, 0.55, 0.25, 0.95)         # saturated green
+const CELL_FERT_HIGH: Color = Color(0.10, 0.38, 0.18, 0.95)        # deep green — Premium Compost
 const CELL_IMPASSABLE: Color = Color(0.10, 0.12, 0.15, 0.85)       # near-black
 const CELL_BORDER: Color = Color(0.05, 0.05, 0.05)
 const CELL_BORDER_ANCHOR: Color = Color(1.0, 0.92, 0.40)           # bright yellow on the applicator's own cell
@@ -140,7 +141,7 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 			status_text = "Status: SCANNING"
 			status_color = COLOR_SCANNING
 		FertilizerApplicator.STATE_BLOCKED:
-			status_text = "Status: BLOCKED — coverage is fully fertilized or pristine."
+			status_text = "Status: BLOCKED — nothing in coverage this tier can improve."
 			status_color = COLOR_BLOCKED
 	draw_string(font, Vector2(status_x, status_y), status_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, status_color)
@@ -154,9 +155,12 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 ## Compute the display color for a coverage cell at world position `pos`.
 ## Color hierarchy (most-specific wins):
 ##   1. Impassable (water OR has another building) → near-black.
-##   2. Currently fertilized → green tint matching tier.
-##   3. Eligible (depleted soil, no/lower fertilizer for highest available tier) → yellow.
-##   4. Pristine → dim sage.
+##   2. Currently fertilized → green tint matching tier (LOW / MID / HIGH).
+##   3. Eligible for the highest tier currently in the buffer → yellow.
+##      "Eligible" is FertilizerApplicator._tile_eligible, the same test the
+##      picker and the header count use — so a mustard cell always means
+##      "this machine will fertilize that tile", wasteland rules included.
+##   4. Pristine (or nothing the current tier can improve) → dim sage.
 func _cell_color(pos: Vector2i) -> Color:
 	# Out-of-world: render as impassable.
 	if pos.x < WorldGenerator.WORLD_MIN or pos.x >= WorldGenerator.WORLD_MAX:
@@ -177,11 +181,14 @@ func _cell_color(pos: Vector2i) -> Color:
 		return CELL_FERT_LOW
 	if fert_tier == Items.Type.COMPOST_MID:
 		return CELL_FERT_MID
-	# Eligible? (depleted soil, no current fertilizer of equal-or-better
-	# tier for what's available to apply right now)
-	var soil: int = world.tile_soil_health(pos)
-	if soil < GridWorld.TILE_SOIL_FULL:
-		var available_tier: int = FertilizerApplicator._select_fertilizer_from_buffer(building)
-		if available_tier >= 0 and (fert_tier == -1 or fert_tier < available_tier):
-			return CELL_ELIGIBLE
+	if fert_tier == Items.Type.COMPOST_HIGH:
+		return CELL_FERT_HIGH
+	# Eligible for the tier the machine would actually reach for right now.
+	# Delegated to FertilizerApplicator._tile_eligible rather than re-derived
+	# here: this used to be a third copy of the soil-and-tier test, and it
+	# knew nothing about wasteland, so a scarred tile painted mustard
+	# "eligible" beside a header count and a machine that both refused it.
+	var available_tier: int = FertilizerApplicator._select_fertilizer_from_buffer(building)
+	if available_tier >= 0 and FertilizerApplicator._tile_eligible(world, pos, available_tier):
+		return CELL_ELIGIBLE
 	return CELL_PRISTINE

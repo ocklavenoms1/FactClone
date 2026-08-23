@@ -769,17 +769,22 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
 	if fertilizer_duration(tier) <= 0.0:
 		return false   # unknown tier — defensive guard
-	# Wasteland branch: HIGH on scarred tile triggers de-wastelanding
-	# BEFORE the normal apply path. _restore_wasteland erases the scarred
-	# flag and snaps soil to 30; apply path then writes the boost state.
-	# Lower-than-HIGH tiers on a scarred tile fall through to the normal
-	# stacking-rule path, which (since scarred tiles never have an active
-	# boost — fertilizer state is decoupled) would freshly apply LOW or
-	# MID. But that's useless: scarred tiles don't regen, so the boost
-	# multiplies zero progress. We REJECT lower-than-HIGH on wasteland
-	# explicitly so the player isn't silently wasting their compost.
+	# Wasteland branch: a restoring tier on a scarred tile triggers
+	# de-wastelanding BEFORE the normal apply path. _restore_wasteland
+	# erases the scarred flag and snaps soil to 30; apply path then writes
+	# the boost state. Non-restoring tiers on a scarred tile would
+	# otherwise fall through to the normal stacking-rule path, which (since
+	# scarred tiles never have an active boost — fertilizer state is
+	# decoupled) would freshly apply LOW or MID. But that's useless:
+	# scarred tiles don't regen, so the boost multiplies zero progress. We
+	# REJECT them explicitly so the player isn't silently wasting compost.
+	#
+	# The tier test itself lives in wasteland_accepts_tier() so callers that
+	# need to know the answer BEFORE committing — the Fertilizer Applicator
+	# picks a target tile a tick before it applies to it — ask this same
+	# predicate instead of keeping a second copy that can drift.
 	if is_wasteland_at(pos):
-		if tier != Items.Type.COMPOST_HIGH:
+		if not wasteland_accepts_tier(tier):
 			return false   # only Premium Compost restores wasteland
 		_restore_wasteland(pos)
 		# Fall through to apply HIGH boost on the now-restored tile.
@@ -830,6 +835,21 @@ func _tick_fertilizer_decay(delta: float) -> void:
 func is_wasteland_at(pos: Vector2i) -> bool:
 	var s = tile_wasteland_state.get(pos)
 	return s != null and bool(s.get("scarred", false))
+
+## True if `tier` is allowed to be applied to a scarred (wasteland) tile.
+## Only Premium Compost restores wasteland — everything below it is
+## rejected rather than silently wasted (see try_apply_fertilizer).
+##
+## This is the ONE place that rule is written down. try_apply_fertilizer
+## gates on it, and the Fertilizer Applicator's tile picker asks it while
+## choosing a target, so the picker can never nominate a tile the apply
+## would then refuse. Before this predicate existed the picker had no
+## wasteland test at all: a scarred tile sits at soil 0 forever (regen
+## skips it), so it always won the most-depleted sort, the LOW/MID apply
+## bounced, and the applicator re-picked the identical target every tick
+## — permanently BLOCKED with eligible tiles beside it (audit #5).
+func wasteland_accepts_tier(tier: int) -> bool:
+	return tier == Items.Type.COMPOST_HIGH
 
 ## Read grace-period remaining (seconds). Returns 0.0 if not in grace
 ## (either healthy soil OR already scarred). Used by Q-inspect to show

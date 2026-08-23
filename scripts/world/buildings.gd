@@ -60,7 +60,7 @@ enum Type {
 	COMPOSTER,
 	# Soil exhaustion arc (session-soil-exhaustion-3-5): automation tier
 	# for fertilizer chain. 1×1 footprint, 5×5 coverage area, consumes
-	# COMPOST_LOW/MID from belt input or drag-drop, applies to most-
+	# any compost tier from belt input or drag-drop, applies to most-
 	# depleted eligible tile in coverage at rate-limited interval (1 per
 	# 5 sec). Custom tick (NOT Processor.tick — no recipe). Mirrors the
 	# manual-before-automation pattern: hand-apply (Session 3) shipped
