@@ -196,10 +196,12 @@ blender -b -P art/blender/make_template.py
    **RESCUED** line means it was too small to win a centroid and was recovered
    per-texel (§30). `art/tools/remap_audit.py <name>` says which anchor every
    cluster actually inherited, if you need to ask why a region looks wrong.
-7. **The gate.** Judge these two, at 100%, never at 4×:
+7. **The gate.** Judge these two by eye, at 100%, never at 4× — and run the
+   third alongside them, never instead of them:
    ```bash
    python art/tools/eye_sheet.py --asset smelter_idle --shadow
    python art/tools/eye_sheet.py --asset smelter_idle --silhouette
+   python art/tools/hue_agreement.py <every real asset>
    ```
    The eye sheet is the finished sprite at the size a player sees it, beside an
    approved asset. The silhouette is the outline alone. **If the outline does
@@ -212,6 +214,22 @@ blender -b -P art/blender/make_template.py
    affected approval gets re-reviewed.
 
 Useful flags: `-Only <name>`, `-Calibrate`, `-NoMaterialNorm`.
+
+### Two standing rules, and both were bought with a round
+
+**1. `hue_agreement.py` runs alongside the eye sheet, always.** Never instead
+of it, and never a luminance check on its own. A luminance-only verdict passed
+the smelter and chest within 15% while the sheet plainly showed one timber
+salmon and the other mid brown — value differences read as lighting, hue
+differences read as different materials, and only one of those was being
+measured. That has happened once and it cost a round.
+
+**2. Cross-asset SPREAD is the success criterion, not per-asset distance to
+target.** Agreement is the goal; target is only the reference frame. Fitting
+each asset to its own error is precisely what rotated agreeing assets apart in
+the first place, and an optimisation that drives every asset toward target
+independently can still widen the gap between two of them. Report spread before
+and after, per member, and judge on that.
 
 ### The manifest
 
@@ -792,7 +810,7 @@ pipeline.
 |---|---|---|---|
 | `smelter` | **real, APPROVED** | yes | Reference asset. 2×2, idle + smelting, magenta firebox mask, all four declared members matched with zero drops. |
 | `power_pole` | **real, APPROVED** | yes | v5, one-sided. 1×1 footprint, `fit: height` 2.6, cell 1×3. Weakest of the set — see below. |
-| `chest` | **real, APPROVED** | yes | 1×1, `fit: footprint`, fill 0.90, cell 1×2, single state. **First 1×1 textured asset** and **first two-member asset**. Retires the proxy. |
+| `chest` | **real, APPROVED** | yes | 1×1, `fit: footprint`, fill 0.90, cell 1×2, single state. **First 1×1 textured asset** and **first two-member asset**. Retires the proxy. Best oak in the set — inside the dead zone, so the correction leaves it alone. |
 | `_calib_floor` | calibration | n/a | Permanent synthetic HF floor, 1.00%. Committed, gitignore-exempt, **never regenerated** — regenerating moves the floor, which is the failure it exists to prevent. |
 
 ### The chest: what it exercised that nothing else had
@@ -2136,7 +2154,7 @@ value.
 |---|---|
 | A locked Blender template | **done** — `art/template.blend`, regenerable from `make_template.py`, stamp `434c0cf56d8f` |
 | Three test assets | **three of three, all real.** smelter and power_pole approved and pinned; chest rendered and awaiting approval. No proxies remain. |
-| A consistency verdict | **given** (§11), on three real assets. Value: agrees. **Hue: does not** — oak spreads 0.090 in chromaticity and the remap is the cause. Not a clean pass, and recorded as such. |
+| A consistency verdict | **given** (§11), on three real assets, all pinned. Structure and light agree; value agrees; hue agrees within tolerance on two of three. The remaining gap is the pole's oak, documented as a SOURCE problem with a prompt rule attached (§32, PROMPTS.md) rather than papered over. |
 | A prompt template | **done** — [`PROMPTS.md`](PROMPTS.md) |
 | `art/PIPELINE.md` | this file |
 
@@ -2169,14 +2187,20 @@ actually measured.**
 ### Where the ground is soft
 
 - **Three assets is still a thin consistency verdict.** Re-take it at five.
-- **The remap corrects value and degrades hue** (§11). It moves all three
-  assets' oak FURTHER from target in chromaticity and widens smelter-vs-chest
-  disagreement ×2.45. This is the largest known defect in the pipeline.
+- **The pole's oak is the wrong colour at SOURCE** and cannot be corrected
+  downstream (§32). A per-cluster gain is multiplicative, so it cannot un-skew
+  a region. The guard is now a hard reject rule in PROMPTS.md — timber reads
+  brown, never pink or orange — applied at the A/B screen before a generation
+  is spent. This is the largest remaining disagreement in the set.
 - **The pole renders at 0.33× the set's oak luminance** — form, not correction
   (§11). Accepted under §25, but it is the number to watch as tall assets
   accumulate.
 - **Luminance-only checks pass things the eye rejects.** Run
-  `hue_agreement.py` alongside the eye sheet, not instead of it.
+  `hue_agreement.py` alongside the eye sheet, not instead of it — now a
+  standing rule in §3.
+- **Chest-vs-pole oak widened 26%** under the split correction and that is
+  ACCEPTED, not outstanding (§32). It was two errors partly cancelling; losing
+  the cancellation is the price of a principled correction.
 - **`K_MIN = 12` is under-resolved for two-member assets**, by measurement, but
   the error is invisible (max 8/255). Raise it if a future low-member asset
   shows visible material disagreement — and expect to re-approve the pole.
@@ -2188,16 +2212,12 @@ actually measured.**
 
 ### First things to do in session 2
 
-1. **Split the albedo correction into a hue-preserving scalar plus a bounded
-   chroma term** (§11). Today's per-channel gain rotates hue by a different
-   amount per asset, which is why three timbers read as three materials. This
-   changes the pixels of all three approved assets, so it needs its own pass
-   and three re-approvals — which is exactly why it was not done inline.
-2. Re-take the consistency verdict once five real assets exist, and watch both
+1. Re-take the consistency verdict once five real assets exist, and watch both
    the oak-luminance spread (the pole's 0.33×) and the chromaticity spread.
-3. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
+   Judge on spread, not on distance to target.
+2. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
    not from colour or silhouette.
-4. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
+3. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
    the long axis only, and the chest already leaves 10.2 px of gap at 1.549:1.
 
 ## 32. The split correction: value by scalar, hue only when it is wrong
@@ -2268,11 +2288,21 @@ problem.
 against mid brown — drops 34% and lands under 0.030, which is agreement. Every
 iron pair improves and iron's spread falls 26%.
 
-**One pair got worse and it should not be glossed.** Chest-vs-pole oak widens
-26%. The chest is now left alone in the dead zone, where before it received a
-hue rotation that happened to carry it toward the pole. It moved closer to
-target (0.0829 → 0.0673) and further from the pole at the same time, because
-the pole is nowhere near target and cannot be brought there.
+**One pair got worse, and it is ACCEPTED KNOWINGLY — not a defect.**
+Chest-vs-pole oak widens 26%. The chest is now left alone in the dead zone,
+where before it received a hue rotation that happened to carry it toward the
+pole. It moved closer to target (0.0829 → 0.0673) and further from the pole at
+the same time, because the pole is nowhere near target and cannot be brought
+there.
+
+That agreement was **two errors that partly cancelled.** The chest was rotated
+off its correct hue, the pole was left far off its correct hue, and the two
+wrongs happened to land nearer each other than either was to the truth. Losing
+that cancellation is the price of a principled correction, and it is worth
+paying: a coincidence that improves one pair on one pair of assets does not
+survive contact with the next eighteen, whereas "leave a member alone when
+Tripo got it right" does. Recorded here as a deliberate trade so that nobody
+later reads the +26% as a regression to be fixed by re-introducing the rotation.
 
 ### What this exposes: the pole's oak is a SOURCE problem
 

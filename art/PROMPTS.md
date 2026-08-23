@@ -196,6 +196,20 @@ about 2% for flat-shaded geometry. That 14.3% is generation effort that
 provably cannot reach the screen. Cobbles are not a matter of taste; they are
 waste, and now we can say so with a figure.*
 
+**TIMBER READS BROWN. Never pink, never orange, never salmon.** Weathered oak
+is a neutral mid-brown — if it looks like terracotta or raw pine, reject the
+image. *Measured on power_pole v5: raw oak chromaticity (0.623, 0.321, 0.056)
+against a target blue of 0.125. The remap applied its full chromatic
+correction and the rendered region still sat **0.1432 from target** — it alone
+holds the set's oak spread at 0.084 while the other two agree to 0.028.*
+
+This one is different from the other hard rules, and the difference is the
+point: **it is not fixable downstream.** The pipeline can correct value, and it
+can correct hue where the anchor is off, but a per-cluster gain is
+multiplicative — it preserves every texel's ratio to the anchor, so it cannot
+un-skew a distribution. Strongly orange timber that reaches Tripo ships
+strongly orange. It has to be rejected at the A/B screen.
+
 These are **diagnostics, not gates**. They tell you where an asset is spending
 its budget so the prompt can be aimed at the real source. They do not reject
 anything - the finished 32 px sprite, looked at, does that.
@@ -323,8 +337,15 @@ python art/tools/eye_sheet.py --asset <name> --silhouette
 - Struts thinner than 1/16 tile
 - Magenta region shaded, gradient, or absent
 
+- **Timber reading pink, orange, salmon, terracotta or raw pine** — see the
+  hard rule above. Not fixable downstream and the only colour fault on this list
+
 **Fixable downstream — do not reject for these:** arbitrary yaw, arbitrary
 scale, off-centre origin, wrong roughness/metallic, slightly-off saturation.
+
+"Slightly-off saturation" means slightly. It does not extend to hue. The
+correction lands an ANCHOR on target; it does not land a REGION on target, and
+a whole timber that is the wrong colour family is a region.
 
 ---
 
@@ -374,12 +395,25 @@ right, a flat leather wedge bellows lying tight against the left flank inside
 the footprint, four corner timber posts with iron straps. Nothing more.
 ```
 
-### chest — not yet generated
-### power_pole — not yet generated
+### chest — ACCEPTED (`chest.glb`, session 1)
+1×1, `fit: footprint` at 0.90 fill, two members (weathered oak, wrought iron),
+single state. Plan is rectangular at 1.549:1, which is fine — but note
+`footprint_fill` controls the LONG AXIS only, so it leaves 10.2 px of gap along
+Y. Its oak is the best Tripo has returned: raw hue 0.0211 from target, inside
+the dead zone, so the correction leaves it alone entirely.
 
-Both go through the same flow and the same style block. **Only when all three
-are real is the three-way consistency verdict meaningful**; everything before
-that is pipeline validation, and that has passed.
+### power_pole — ACCEPTED with a recorded fault (`power_pole.glb` v5, session 1)
+1×1, `fit: height` 2.6, one-sided design — bracket and transformer both off the
+same side, no crossing member. Two faults recorded against it, neither fatal:
+
+* **Equipment reach.** The transformer box widens the outline from 13 px to
+  19 px and stops, so at 1× it reads as a post with a small cluster near the
+  top. Its value contrast is already 2.08× against the oak and does not need
+  changing — the box needs to project further from the mast.
+* **Orange timber.** The asset that produced the hard rule above.
+
+All three assets are real, approved and pinned, and the three-way consistency
+verdict is in PIPELINE.md §11.
 
 ---
 

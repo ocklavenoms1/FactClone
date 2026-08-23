@@ -176,7 +176,8 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true
     },
     {
       "name": "chest",
@@ -261,7 +262,8 @@
           }
         ],
         "dropped": []
-      }
+      },
+      "albedo_pinned": true
     },
     {
       "name": "power_pole",
@@ -377,7 +379,8 @@
           }
         ],
         "dropped": []
-      }
+      },
+      "albedo_pinned": true
     },
     {
       "name": "smelter_rot",
