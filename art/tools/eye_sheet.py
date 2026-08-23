@@ -27,11 +27,25 @@ GAP = 26
 PAD = 26
 
 
-def load(name):
+def load(name, with_shadow=False):
     p = os.path.join(REPO, "art", "sprites", f"{name}.png")
     if not os.path.exists(p):
         raise SystemExit(f"MISSING {p}")
-    return Image.open(p).convert("RGBA")
+    body = Image.open(p).convert("RGBA")
+    if not with_shadow:
+        return body
+    # the shadow is its own layer and is drawn UNDER the body, same anchor
+    base = name.replace("_idle", "")
+    sp = os.path.join(REPO, "art", "sprites", f"{base}_shadow.png")
+    if not os.path.exists(sp):
+        return body
+    shadow = Image.open(sp).convert("RGBA")
+    if shadow.size != body.size:
+        return body
+    out = Image.new("RGBA", body.size, (0, 0, 0, 0))
+    out.alpha_composite(shadow)
+    out.alpha_composite(body)
+    return out
 
 
 def zoom(im, z):
@@ -45,11 +59,13 @@ def main():
     ap.add_argument("--reference", default="smelter_idle")
     ap.add_argument("--zooms", default="1,2,4")
     ap.add_argument("--out")
+    ap.add_argument("--shadow", action="store_true",
+                    help="composite the contact-shadow layer under each sprite")
     a = ap.parse_args()
 
     zs = [int(z) for z in a.zooms.split(",")]
-    asset = load(a.asset)
-    ref = load(a.reference)
+    asset = load(a.asset, a.shadow)
+    ref = load(a.reference, a.shadow)
 
     panels = [zoom(asset, z) for z in zs] + [ref]
     W = sum(p.width for p in panels) + GAP * (len(panels) - 1) + PAD * 2

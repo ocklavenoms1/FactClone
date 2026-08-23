@@ -1,0 +1,30 @@
+{
+  "name": "power_pole_shadow",
+  "cell_tiles": [
+    2,
+    3
+  ],
+  "sprite_px": [
+    64,
+    96
+  ],
+  "render_px": [
+    256,
+    333
+  ],
+  "anchor_px": [
+    32.0,
+    96.0
+  ],
+  "masters": [
+    {
+      "tag": "power_pole_shadow",
+      "state": null,
+      "yaw": null,
+      "master": "art/renders/power_pole_shadow_4x.png",
+      "sprite": "art/sprites/power_pole_shadow.png"
+    }
+  ],
+  "lock_stamp": "434c0cf56d8f",
+  "blend": "draw UNDER the body sprite, same anchor; alpha is shadow density"
+}

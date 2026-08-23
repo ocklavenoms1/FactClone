@@ -117,6 +117,7 @@ art/
     dump_texture.py        extract basecolour/normal/rm to PNG for measurement
     make_proxies.py        stand-in geometry for testing without Tripo
     render_rigonly.py      flat-albedo render: the rig's shading, alone
+    render_shadow.py       contact shadow as its own transparent layer
     palette_swatch.py      a palette on flat proxies, no Tripo, no correction
     states/                per-state material/light hooks
   tools/                   system Python (needs Pillow + numpy)
@@ -1413,3 +1414,85 @@ Nothing in this session had been judged as a finished sprite at true size until
 now. Everything was 4x masters and spectral ratios - which is how an asset got
 tuned into looking plastic while every number improved. The session's own brief
 said to judge at true size; the tooling made it easy not to.
+
+---
+
+## 23. What the eye sheet found that no metric did
+
+Pole v2 approved by eye, and at 4x the grain is invisible - which settles the
+grain argument from the other direction: that energy was never going to be seen
+either way, so three regenerations chased something that does not exist at final
+size. The HF number was measuring a real physical fact that had no visible
+consequence.
+
+### The shadow: none of the three hypotheses - there is no shadow at all
+
+Not the catcher rendering its own surface, not `film_transparent`, not the eye
+sheet compositing an alpha-less layer. **The template contains a camera, three
+suns and a hidden reference cube. No ground plane. No shadow catcher.**
+
+The hard grey slab is each asset's **own modelled base plate**, and it is fully
+opaque in the sprite alpha - 28% of the bottom band at alpha 1.0, only 2%
+partial. A real soft shadow would be a broad band of PARTIAL alpha; there is
+none, because nothing casts one.
+
+So the observation was right and the cause was the opposite of the assumption:
+the assets look pasted on because **they have no contact shadow whatsoever.**
+
+`render_shadow.py` adds one, as a separate layer on the glow-layer precedent. A
+ground plane marked `is_shadow_catcher` contributes only the shadow that falls
+on it; the asset is hidden from camera rays (`visible_camera = False`) while
+still casting, so the pass contains the shadow and nothing else. It is soft
+because the key already carries an 8-degree angular size - **nothing in the lock
+changes.** Measured on the pole: 22.9% faint alpha, 3.9% mid, 4.2% solid, max
+1.0 - a falloff, not a slab.
+
+Godot draws shadow, then body, same anchor. Keeping it separate means it can be
+tinted per biome, faded, or switched off without re-rendering.
+
+### The bleached smelter: the rig responding to FORM, not a correction misfiring
+
+Measured on the FINAL 32 px sprites, not the albedo, and decomposed exactly by
+dividing the real render by the rig-only render:
+
+| | albedo after correction | rig multiplier | on screen |
+|---|---|---|---|
+| smelter stone | 0.24x target | **8.63x** | **2.07x target** |
+| pole timber | 0.18x target | **2.85x** | **0.53x target** |
+
+**Relative gap on screen: 3.92x.** That is the cross-asset consistency failure,
+and it only appeared when two finished sprites sat side by side.
+
+Ruling the hypotheses out in turn:
+
+- **Not the view transform.** 0.0% of pixels at 255, max 217. Nothing clips.
+- **Not the correction over-brightening.** It is *under*-correcting - both
+  assets land at 0.18-0.24x of their target albedo.
+- **It is the rig, responding to form.** A blocky mass presents large flat faces
+  to the key (8.63x); a thin post is mostly edge-on and self-shadowed (2.85x).
+  That 3x is most of the 3.92x gap.
+
+> **A locked palette hex is an ALBEDO, not a screen colour.** Under this rig
+> every surface is multiplied by roughly 3-9x depending on how it faces the key,
+> so no asset will ever show `#5A5E58` on screen. Consistency means every asset
+> sharing one albedo-to-screen transform, which they do - but form still decides
+> how much of each asset is lit, and at 32 px a 3x spread reads as one building
+> being bleached.
+
+### And a bug of mine underneath it: the gain clamp is the binding constraint
+
+**Every single anchor on every asset is clamped.** 52% of raw gain channels sit
+at or above the 2.5 ceiling; the pole's oak asked for **6.53x** on blue and got
+2.5x.
+
+Tripo returns albedos around 0.2x of target, so the correction needs roughly
+4-5x - and `GAIN_CLAMP` caps it at 2.5. It is not a safety rail here, it is the
+thing limiting every correction, and it truncates by a **different amount per
+asset**, which feeds straight into the cross-asset gap above.
+
+Worse, the clamp was introduced for a reason that turned out not to exist:
+`fired_clay` "wanting 4.4x" was later shown to be a **K=10 artifact**. The rail
+was built for a phantom and has been quietly degrading every asset since.
+
+Raising it is a pipeline change that touches approved pixels, so it is proposed
+rather than shipped - see the session report.
