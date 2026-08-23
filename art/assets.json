@@ -181,7 +181,7 @@
       "states": {},
       "yaws": [],
       "status": "real",
-      "note": "Tripo chest.glb. Retires the last proxy. FIRST 1x1 TEXTURED asset - the 1x1 path had only ever been exercised by an untextured placeholder. Also the first TWO-member asset, so the first test of the K = 6 x members rule at its low end (K=12).",
+      "note": "APPROVED AND PINNED. Tripo chest.glb - retires the last proxy. FIRST 1x1 TEXTURED asset: the 1x1 path had only ever been exercised by an untextured placeholder, so everything downstream of a texture was unproven there. Also the first TWO-member asset and so the first test of K = 6 x members at its low end (K=12) - under-resolved by measurement but invisibly so, see PIPELINE.md section 11. Plan is rectangular at 1.549:1, so it fills X and leaves 10.2px of gap along Y; footprint_fill controls the LONG AXIS ONLY.",
       "palette_era": "natural-5",
       "albedo_correction": "remap",
       "palette_members": [
@@ -250,7 +250,8 @@
           }
         ],
         "dropped": []
-      }
+      },
+      "albedo_pinned": true
     },
     {
       "name": "power_pole",

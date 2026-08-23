@@ -792,7 +792,7 @@ pipeline.
 |---|---|---|---|
 | `smelter` | **real, APPROVED** | yes | Reference asset. 2×2, idle + smelting, magenta firebox mask, all four declared members matched with zero drops. |
 | `power_pole` | **real, APPROVED** | yes | v5, one-sided. 1×1 footprint, `fit: height` 2.6, cell 1×3. Weakest of the set — see below. |
-| `chest` | **real, awaiting approval** | not yet | 1×1, `fit: footprint`, fill 0.90, cell 1×2, single state. **First 1×1 textured asset** and **first two-member asset**. Retires the proxy. |
+| `chest` | **real, APPROVED** | yes | 1×1, `fit: footprint`, fill 0.90, cell 1×2, single state. **First 1×1 textured asset** and **first two-member asset**. Retires the proxy. |
 | `_calib_floor` | calibration | n/a | Permanent synthetic HF floor, 1.00%. Committed, gitignore-exempt, **never regenerated** — regenerating moves the floor, which is the failure it exists to prevent. |
 
 ### The chest: what it exercised that nothing else had
@@ -906,9 +906,88 @@ single number most worth re-checking at five assets. If tall vertical assets
 keep landing near a third of the set's mean, the decision deserves re-litigating
 with better evidence than two probes.
 
+### Hue agreement — and this is where the verdict is NOT clean
+
+The luminance table above passed the smelter and chest within 15% while the
+sheet plainly showed one timber reading salmon and the other mid brown. **A
+luminance-only check is blind to the drift most visible when assets sit side by
+side**: value differences read as lighting, hue differences read as different
+materials. `art/tools/hue_agreement.py` applies the instrument already used
+inside one asset — chromaticity, stable under a value shift — across assets.
+
+Rendered chromaticity, `weathered_oak`, present in all three:
+
+| Asset | rendered chromaticity | px |
+|---|---|---|
+| target | (0.576, 0.299, 0.125) | — |
+| `smelter` | (0.540, 0.281, 0.180) | 836 |
+| `chest` | (0.512, 0.312, 0.176) | 597 |
+| `power_pole` | (0.466, 0.321, 0.214) | 364 |
+
+**Spread 0.090.** `wrought_iron` spreads 0.053 across the same three. Both are
+well past the 0.030 at which two samples stop looking like one material.
+
+First, what the salmon is **not**. The smelter declares `leather` (`#7A4438`),
+a legitimately red-brown member, and the obvious hypothesis was that the corner
+posts are leather rather than drifted oak. They are not: the reddest 20% of the
+smelter's warm pixels sit at chromaticity (0.558, 0.273, 0.170), which is 0.055
+from oak and 0.137 from leather. Leather is 9.2% of the texture and corrects
+almost perfectly (0.017 from target, the best in the set) but contributes **no**
+classified sprite pixels — it is not visible from this camera. The salmon posts
+are oak.
+
+### The answer is (a): the CORRECTION, and it is systematic
+
+Pairwise disagreement between assets, at each stage of the chain:
+
+| Pair | raw texture | after remap | rendered | effect of correction |
+|---|---|---|---|---|
+| smelter vs chest | 0.0242 | 0.0593 | 0.0420 | **widens ×2.45** |
+| smelter vs pole | 0.0616 | 0.1117 | 0.0907 | **widens ×1.81** |
+| chest vs pole | 0.0832 | 0.0601 | 0.0603 | narrows ×0.72 |
+
+And distance from the locked target, per asset:
+
+| Asset | raw → target | corrected → target | gain skew |
+|---|---|---|---|
+| `smelter` | 0.0310 | 0.0326 **further** | 1.46 |
+| `chest` | **0.0094** | 0.0292 **further** | 1.17 |
+| `power_pole` | 0.0863 | 0.0876 **further** | 4.01 |
+
+**The remap moves every asset's oak further from target in hue. Every one.**
+The chest's raw oak was nearly perfect at 0.0094 and the correction pushed it
+to 0.0292 — three times worse. The smelter and chest agree to 0.024 in the raw
+Tripo texture and the remap pushes them apart to 0.059.
+
+Not (b) rig: the rig's effect is common-mode. It lifts B by roughly 0.05 on all
+three alike, so it moves the whole set together and cannot explain a
+disagreement *between* assets. Not (c) source: raw smelter-vs-chest is 0.024,
+which is agreement, not drift.
+
+**The mechanism is in the design of the anchor.** A per-channel multiplicative
+gain is hue-preserving only when its three channel gains are equal. The anchor
+solves `gain = target / observed` per channel, which constrains **value** — the
+anchor's mean lands exactly on target, as intended and as verified repeatedly —
+and constrains hue **not at all**. The `gain skew` column is max/min of each
+anchor's three gains: 1.17 on the chest, 1.46 on the smelter, 4.01 on the pole.
+Every asset is fitted to its own drift, so every asset gets a different hue
+rotation, and assets that agreed beforehand are rotated apart.
+
+This is the cost of the decision in §13/§17 to own colour in the remap rather
+than in prompting. It bought cross-asset **value** agreement, which was the
+problem in front of us, and it silently traded hue to get it.
+
+**Not fixed here.** The fix is to split the correction: a scalar gain for
+luminance, which is hue-preserving by construction, plus a bounded chromaticity
+correction applied only where the raw hue is measurably off target — so a
+member Tripo already got right, like the chest's oak, is left alone. That
+changes the pixels of all three approved assets and needs its own pass and its
+own re-approvals. It is the first item in §31.
+
 Three assets is still a thin basis. It is enough to say the pipeline produces
-agreeing assets across both footprints, both fit modes, and two through four
-palette members. It is not enough to say the style holds across twenty.
+assets that agree in **value** across both footprints, both fit modes, and two
+through four palette members. It does not yet produce assets that agree in
+**hue**, and the verdict should not be recorded as a clean pass.
 
 ### The pole is the weakest of the set, and the reason is EQUIPMENT REACH
 
@@ -2057,7 +2136,7 @@ value.
 |---|---|
 | A locked Blender template | **done** — `art/template.blend`, regenerable from `make_template.py`, stamp `434c0cf56d8f` |
 | Three test assets | **three of three, all real.** smelter and power_pole approved and pinned; chest rendered and awaiting approval. No proxies remain. |
-| A consistency verdict | **given** (§11), on three real assets, with the pole's 0.33× oak as the one measured disagreement |
+| A consistency verdict | **given** (§11), on three real assets. Value: agrees. **Hue: does not** — oak spreads 0.090 in chromaticity and the remap is the cause. Not a clean pass, and recorded as such. |
 | A prompt template | **done** — [`PROMPTS.md`](PROMPTS.md) |
 | `art/PIPELINE.md` | this file |
 
@@ -2090,9 +2169,14 @@ actually measured.**
 ### Where the ground is soft
 
 - **Three assets is still a thin consistency verdict.** Re-take it at five.
+- **The remap corrects value and degrades hue** (§11). It moves all three
+  assets' oak FURTHER from target in chromaticity and widens smelter-vs-chest
+  disagreement ×2.45. This is the largest known defect in the pipeline.
 - **The pole renders at 0.33× the set's oak luminance** — form, not correction
   (§11). Accepted under §25, but it is the number to watch as tall assets
   accumulate.
+- **Luminance-only checks pass things the eye rejects.** Run
+  `hue_agreement.py` alongside the eye sheet, not instead of it.
 - **`K_MIN = 12` is under-resolved for two-member assets**, by measurement, but
   the error is invisible (max 8/255). Raise it if a future low-member asset
   shows visible material disagreement — and expect to re-approve the pole.
@@ -2104,9 +2188,14 @@ actually measured.**
 
 ### First things to do in session 2
 
-1. Re-take the consistency verdict once five real assets exist, and watch the
-   oak-luminance spread — the pole's 0.33× is the open question.
-2. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
+1. **Split the albedo correction into a hue-preserving scalar plus a bounded
+   chroma term** (§11). Today's per-channel gain rotates hue by a different
+   amount per asset, which is why three timbers read as three materials. This
+   changes the pixels of all three approved assets, so it needs its own pass
+   and three re-approvals — which is exactly why it was not done inline.
+2. Re-take the consistency verdict once five real assets exist, and watch both
+   the oak-luminance spread (the pole's 0.33×) and the chromaticity spread.
+3. Pole variants for Pole Tiers — start from the equipment-reach note in §11,
    not from colour or silhouette.
-3. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
+4. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
    the long axis only, and the chest already leaves 10.2 px of gap at 1.549:1.
