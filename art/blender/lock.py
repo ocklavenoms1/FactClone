@@ -175,6 +175,19 @@ MASK_NEUTRAL_LO = 0.13
 MASK_NEUTRAL_HI = 0.22
 
 
+# ------------------------------------------------------------- composite --
+# The contact shadow ships as its own layer, so its strength is decided at
+# composite time - this is Godot's modulate.a on the shadow sprite, not a
+# render setting. Chosen by eye from a 0.3/0.4/0.5/0.6 strip at 1x: 0.5 read
+# heavy at true size, 0.3 vanished.
+#
+# Deliberately NOT in _lock_payload(). It changes no rendered pixel, so it must
+# not invalidate the lock stamp on every sprite already on disk. The stamp
+# answers "was this rendered under the locked camera and rig"; shadow opacity
+# is not part of that question.
+SHADOW_STRENGTH = 0.4
+
+
 def _lock_payload():
     return {
         "tile_px": TILE_PX,

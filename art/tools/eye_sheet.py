@@ -30,14 +30,22 @@ The shadow is a separate layer, so its strength is a composite-time decision -
 exactly what `modulate.a` does in Godot. `--shadow-levels` renders the same
 sprite at several strengths side by side so the level can be chosen by eye
 rather than guessed in the renderer.
+
+SETTLED at lock.SHADOW_STRENGTH = 0.4, chosen off a 0.3/0.4/0.5/0.6 strip at
+1x. It is the default here so every eye sheet shows what ships. Judging shadow
+opacity at 4x is the same mistake as judging a silhouette at 4x: a shadow that
+reads as a soft contact patch magnified reads as an opaque rectangle at 32px.
 """
 
 import argparse
 import os
+import sys
 
 from PIL import Image
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path.insert(0, os.path.join(REPO, "art", "blender"))
+import lock  # noqa: E402
 BG = (128, 128, 128, 255)
 SIL_BG = (255, 255, 255, 255)
 GAP = 26
@@ -110,7 +118,8 @@ def main():
     ap.add_argument("--zooms", default="1,2,4")
     ap.add_argument("--out")
     ap.add_argument("--shadow", action="store_true")
-    ap.add_argument("--shadow-strength", type=float, default=1.0)
+    ap.add_argument("--shadow-strength", type=float, default=lock.SHADOW_STRENGTH,
+                    help=f"composite-time opacity; default {lock.SHADOW_STRENGTH} (approved)")
     ap.add_argument("--shadow-levels",
                     help="comma-separated strengths, rendered side by side at 1x")
     ap.add_argument("--silhouette", action="store_true",

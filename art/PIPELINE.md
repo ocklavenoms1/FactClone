@@ -1683,3 +1683,64 @@ At full strength the shadow competes with the object at 32px - it reads as a
 second dark shape rather than as contact. The layer stays at full density on
 disk; Godot scales it with `modulate.a`, the same mechanism the fire glow uses.
 Whatever level is chosen is a game-side constant, not a re-render.
+
+**SETTLED: 0.4**, as `lock.SHADOW_STRENGTH`, and it is now the default for
+`eye_sheet.py --shadow` so every sheet shows what ships. 0.5 read a touch heavy
+at 1x; 0.3 vanished.
+
+It is deliberately NOT in `_lock_payload()`. The stamp answers one question -
+"was this rendered under the locked camera and rig" - and shadow opacity is not
+part of it. Adding a constant that changes no rendered pixel would invalidate
+the stamp on every sprite on disk and force a re-render for nothing. Verified:
+stamp still `434c0cf56d8f` after adding it.
+
+## 28. `height_tiles` changes SIZE, not aspect ratio
+
+Pole v4 was rejected on silhouette: the outline reads as a Latin cross. Before
+spending a Tripo generation, the cheap thing to try was the manifest, since
+`height_tiles` is a number in `assets.json` and not geometry. The reasoning was
+that a 2.6-tile thin post with a horizontal bar reads as a monument, and
+something stubbier would read as equipment.
+
+It cannot work, and the sweep proves it. `fit: height` is a single scalar
+applied to all three axes:
+
+```python
+s = float(height_tiles) / max(size[2], 1e-9)   # normalize.py:124
+```
+
+Uniform scale preserves every proportion. `height_tiles` sets how many tiles
+tall the asset is; it cannot make it stubbier, only smaller. The same v4 mesh
+at 2.6 / 2.1 / 1.8:
+
+| height_tiles | bbox | H/W | mast above arm | asymmetry | thin spine | CoM low |
+|---|---|---|---|---|---|---|
+| 2.6 | 36x56 | 1.56 | 36% | 26% | 67% | 5.4% |
+| 2.1 | 30x45 | 1.50 | 36% | 25% | 70% | 5.2% |
+| 1.8 | 26x39 | 1.50 | 36% | 25% | 69% | 4.8% |
+
+Every cross metric is flat to within rasterisation noise. Mast-above - the one
+that moved when the crossarm was lowered, and so the one that had to move back
+- does not budge: 35.7% / 35.6% / 35.9%. The three silhouettes are the same
+shape at three sizes, and all three read as a cross.
+
+Aspect ratio is a property of the MESH. The only knob that could change it is
+non-uniform scale, which is forbidden here for a good reason: it would make
+this asset's proportions disagree with every other asset in the game, and a
+squashed pole would sit next to an unsquashed smelter under one camera.
+
+The general rule, worth more than the pole: **a manifest value can only change
+what it parameterises.** Before reaching for a free fix, check that the knob is
+attached to the thing you want to move. This one was attached to scale, and the
+defect was in proportion.
+
+One thing the sweep did surface: at 2.6 the cell unions to 2x3 tiles because
+the crossarm overhangs a full tile; at 2.1 and 1.8 it fits in 1x2. That is a
+real packing difference, but it is a consequence of the crossarm's span and not
+a fix for the silhouette.
+
+**Verdict: no height kills the cross read. Regeneration required**, to the
+ordering already agreed - crossarm hard at the TOP of the mast so the outline
+is a T with no mast above it, then the transformer box moved high and made much
+bigger, then unequal crossarm arms. `art/tools/cross_read.py` measures the four
+numbers so the next version can be checked before it is approved.

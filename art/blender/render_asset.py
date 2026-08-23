@@ -76,7 +76,7 @@ def main():
         roots,
         footprint=float(cfg["footprint"]),
         fit=cfg.get("fit", "footprint"),
-        height_tiles=cfg.get("height_tiles"),
+        height_tiles=float(a["height-tiles"]) if "height-tiles" in a else cfg.get("height_tiles"),
         yaw_correction_deg=float(cfg.get("yaw_correction", 0.0)),
         footprint_fill=cfg.get("footprint_fill"),
     )
