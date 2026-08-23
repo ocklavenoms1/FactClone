@@ -9,11 +9,27 @@
 > were all invisible to it. Line numbers, file shapes, and several findings
 > describe code that had already changed.
 >
-> **Status: all ten HIGH findings are resolved.** Eight were fixed directly;
-> #8/#9 (shared-buffer slot addressing) and #10/#16 (placement terrain guards)
-> were re-diagnosed against current code and fixed on the real trunk. Mediums
-> and lows are largely untriaged against current code and should not be trusted
-> as-written.
+> ## ⚠⚠ THE STATUS RULE — read before writing any status into this document
+>
+> **A status claim in this document describes what shipped on `main`, verified
+> by commit. Work on an unmerged branch does not count as closed.**
+>
+> This document violated that rule for a month and it cost real money. The
+> remediation block below used to credit six "session-hardening-N" commits that
+> live only on `audit-hardening-stale-base` and were never merged. Anyone reading
+> the doc at HEAD would have believed **77 live findings were fixed** — including
+> four HIGHs and a non-atomic save write that can destroy the player's only save
+> slot. Finding #1 sat live for a month behind exactly this wording before
+> anyone noticed.
+>
+> When you close a finding, cite the commit that closed it **on main**, and say
+> which test covers it. "Fixed at session-X" is not a status; `git merge-base
+> --is-ancestor <sha> main` is.
+>
+> **Status: verified finding-by-finding against `24d4114` on 2026-08-22.
+> 7 CLOSED, 77 LIVE.** Nothing was found MOVED, DISPROVED or UNVERIFIABLE — the
+> audit's *content* held up; what rotted was the claim that it had been acted on.
+> Full table below. Every citation in that table is a **current** line number.
 >
 > **The lesson, which is the reason this document is kept:** a static-read audit
 > produces *confident* findings. Confidence is not reproduction. Every finding
@@ -40,17 +56,166 @@ Stats: 106 raw findings -> 86 after dedup -> **84 confirmed**, 2 refuted, 0 unre
 
 Severity is post-verification (verifiers could downgrade/upgrade). Line numbers reference the audited commit.
 
-**Remediation status:**
-- Findings **#2/#6, #3, #8, #9, #19** (item-destruction cluster) fixed at `session-hardening-1` (2026-07-19), regression coverage in `test_item_conservation.gd`.
-- Findings **#1, #11, #12, #13, #21** (load-correctness cluster) fixed at `session-hardening-2` (2026-07-19), regression coverage in `test_load_correctness.gd`. Note #12/#21 also partially address #37/#46-adjacent save-file risks; #37/#38/#46 themselves remain open.
-  - **THAT COMMIT NEVER REACHED MAIN.** `session-hardening-2` (`497b5ce`) lives only on the unmerged `audit-hardening-stale-base` branch, and `test_load_correctness.gd` does not exist on trunk — see the entry at the top of `NOTES.md`. Read the line above as "fixed on that branch", not "fixed in the shipped game". **#11, #12, #13 and #21 are still live on main.**
-  - **#1 is closed on main**, independently of that branch: `SaveSystem.load_game` now calls `mark_power_network_dirty()` and `mark_fluid_network_dirty()` at the end of its world-mutation section, with regression coverage in `scripts/tests/test_load_network_invalidation.gd` (Electricity Session 3, Task 5b — that session added a second cache, `world._pole_cells`, on the same invalidation lifecycle). The finding body below still describes the pre-fix code, as every entry in this document describes the audited commit.
-- Findings **#4, #5, #7, #47, #51** (soil cluster) fixed at `session-hardening-3` (2026-07-19), regression coverage in `test_soil_arc_fixes.gd`. #7's fix is a user-approved design change: instant tier-scaled soil bump on fertilizer apply (LOW +3 / MID +8 / HIGH +20; no bonus on wasteland restore).
-- Findings **#10, #16** (placement) fixed at `session-hardening-4` (2026-07-19), regression coverage in `test_placement_guards.gd`. **#45 deliberately deferred** — its 2-line fix changes worldgen output and requires a worldgen v4→v5 bump (hard-fails every existing save); ship it deliberately, batched with other worldgen changes.
-- Findings **#34, #35, #36, #41/#44, #43, #67, #68, #76, #77, #78, #79, #80, #81, #82, #83, #84** (doc-drift cluster) fixed at the 2026-07-19 doc sweep (comment/markdown-only; SESSION_E_PLAN.md + INVENTORY_UI_PLAN.md deleted). Two follow-ups queued in NOTES.md rather than done here: the console.gd split (trigger breached, #34) and pruning NOTES' lingering SHIPPED sections (#35).
-- Findings **#25, #26, #28, #63, #69** (test-debt cluster) fixed at `session-hardening-5` (2026-07-19): `test_recipe_execution.gd` (9 recipes, exact counts, fluid gating both ways), `test_belt_two_pass.gd` (pacing/handoff/conservation/ping-pong, failability-proven), smelter phase 6b (real BLOCKED_OUTPUT entry + drain recovery), runner-level save_path/tick_rate restoration, ui_2 disconnect leak. #27 and #64-66 remain open (need a main.gd consume-logic extraction and a UI harness respectively).
-- Findings **#29, #32, #72, #73, #74** (perf, structural) fixed at `session-hardening-6` (2026-07-19): per-type anchor indices (belts/planters, lazy rebuild + dirty-mark incl. load path, guarded by `test_building_indices.gd`), regrowth iterates `resource_state_modifications` not all deposits, panels array cached. **#30, #33, #70, #71 deferred pending profiling / architectural work** — analyses in their entries stand ready.
-- All other findings still open.
+## STATUS TABLE — verified against `24d4114`, 2026-08-22
+
+Five independent verifiers took disjoint slices, read-only, forbidden from trusting
+either the audit's line numbers or any prior status claim. Every row required a
+citation in **today's** code. Result: **7 CLOSED, 77 LIVE, 0 MOVED, 0 DISPROVED,
+0 UNVERIFIABLE.**
+
+Every original line number in this document has drifted — `NOTES.md` content moved
+~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
+ones in the finding bodies below.
+
+### What the previous version of this block claimed, and why it was wrong
+
+It credited six `session-hardening-N` commits. **Only one of them is an ancestor of
+`main`.** The rest live on `audit-hardening-stale-base`, unmerged. The artifacts it
+named as coverage — `test_item_conservation.gd`, `test_load_correctness.gd`,
+`test_soil_arc_fixes.gd`, `test_placement_guards.gd`, `test_recipe_execution.gd`,
+`test_belt_two_pass.gd`, `test_building_indices.gd` — **none exist on trunk.**
+
+Six findings were nevertheless closed on main, independently, by later feature
+sessions that re-derived the defect from scratch. That is the only reason any HIGH
+is closed at all.
+
+### CLOSED (7)
+
+| # | Finding | Closed by | Coverage on main |
+|---|---|---|---|
+| 1 | load_game leaves both network caches stale | `b0fc362` | `test_load_network_invalidation.gd` |
+| 2 | fuel outage destroys held item | `37ff498` | `test_inserter_fuel_conservation.gd` |
+| 6 | (duplicate of #2) | `37ff498`, extended to NO_POWER at `0e9e49a` | same |
+| 8 | slot take clears whole shared buffer | `6478690` | `test_shared_buffer_slots.gd` |
+| 9 | shared-field slots all render `buf[0]` | `6478690` | same |
+| 10 | Overlay.NONE buildings placeable on water/ore | `6478690` | `test_placement_terrain_guards.gd` |
+| 56 | duplicated slot handlers diverge on empty-cursor | `83a72cc` + `fa4b5ca` — **accidental**, a side effect of deduplicating into `SlotClickHandler` | shared handler |
+
+Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
+all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
+for every type with the drill exemption scoped to the resource-node check only.
+
+### LIVE — HIGH (4)
+
+| # | Finding | Today's citation |
+|---|---|---|
+| 3 | aggregate `in_buffer` cap deadlocks mixed-input processors (Oven, Mixer) | `scripts/world/inserter.gd:669-676` |
+| 4 | applicator never pulls or applies COMPOST_HIGH | `scripts/world/fertilizer_applicator.gd:155-178` |
+| 5 | one scarred tile permanently wedges LOW/MID application | `scripts/world/fertilizer_applicator.gd:196-223` |
+| 7 | grace timer runs on actively-farmed soil-0 tiles | `scripts/world/grid_world.gd:1169` |
+
+**#4 and #5 interlock and must be fixed as one unit.** #5's wedge currently only
+fires for LOW/MID because that is all the applicator can hold — which is #4's pull
+filter. Fixing #4 alone changes which tier hits the scarred tile; fixing #5 alone
+leaves automated wasteland recovery impossible. The combined guard is prescribed in
+#4's own fix text: skip wasteland unless `selected_tier == COMPOST_HIGH`.
+
+### LIVE — MEDIUM (26)
+
+| # | Finding | Today's citation |
+|---|---|---|
+| 11 | load_game indexes save arrays without shape validation | `save_system.gd:383-384`, loops at `:400,:440,:450,:462,:473,:476` |
+| 12 | **non-atomic save write — a crash mid-write destroys the only slot** | `save_system.gd:304-310` (zero `.tmp`/`rename_absolute` hits repo-wide) |
+| 13 | F9 quick-load never refreshes vision or map | `main.gd:750-756` vs `:359-360` |
+| 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
+| 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
+| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1598-1606` (bad check `:1602`) |
+| 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
+| 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `smelter.gd:117-125` |
+| 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
+| 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
+| 21 | load-failure fallthrough overwrites a recoverable newer save | `save_system.gd:355-368` |
+| 22 | one Esc press performs two actions | `map_panel.gd:243-245`, `console.gd:180-182`, `main.gd:611-622` |
+| 23 | console `place` paves anchor only; leaves stray STONE on failure | `console.gd:625-639` |
+| 24 | unbounded radius in `deplete_area` / `tile` | `console.gd:550-562, 743-744, 782-812` |
+| 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
+| 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
+| 27 | bag-cap phases assert an in-test mirror of production logic | `test_bag_cap.gd:20-21, 108-115` |
+| 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `test_smelter.gd:153-171` |
+| 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1330-1356` (early-out at `:1337` never fires) |
+| 30 | `_draw` walks every tile and building per frame | `grid_world.gd:1103, 1464-1469, 1554-1563` |
+| 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1094-1102` vs `tick_system.gd:7` |
+| 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | `grid_world.gd:1128-1149, 1183-1186` |
+| 33 | per-tick transient allocations in processor pull/push | `processor.gd:101-102, 119, 126`; `buildings.gd:936-956` |
+| 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is 812 lines |
+| 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
+| 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
+
+### LIVE — LOW (47)
+
+| # | Finding | Today's citation |
+|---|---|---|
+| 37 | `tile_regen_progress` not cleared on load | `save_system.gd:439-472` |
+| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:404-405` |
+| 39 | Harvester reassigns `b.state["buffer"]` instead of mutating | `harvester.gd:123, 163` |
+| 40 | drill pulls fuel from all 4 edges | `mining_drill.gd:119` |
+| 41 | composter recipes comment claims non-rotatable | `recipes.gd:207-208` |
+| 42 | unbounded tick catch-up loop | `tick_system.gd:42-46` |
+| 43 | `try_pull_fuel` docstring says inserters pass -1 | `burner.gd:56` |
+| 44 | composter header claims non-rotatable (dup #41) | `composter.gd:15, 69` |
+| 45 | fallback-lake exclusion tests only the anchor | `world_generator.gd:448` |
+| 46 | regen accumulators bleed on load (dup #37) | `save_system.gd:439-472` |
+| 47 | `set_soil` doesn't clear wasteland | `console.gd:527-531` |
+| 48 | `deplete_planter_area` writes out-of-world tiles | `grid_world.gd:703-710, 734-741` |
+| 49 | `_neighbor_falloff_cost` floors at 1 | `grid_world.gd:719-720` |
+| 50 | spawn sort lacks a tie-break | `main.gd:460-462` |
+| 51 | `try_apply_fertilizer` accepts water / OOB / paved tiles | `grid_world.gd:769-795` |
+| 52 | panel keeps a stale ref after console destroy | `building_panel.gd:78-83` |
+| 53 | chest swap capacity ignores the outgoing stack | `chest_panel.gd:235-253` |
+| 54 | hotbar keys not gated by modals | `hotbar.gd:266` |
+| 55 | drill panel overflows its 280px top area | `drill_panel.gd:54, 57, 180` |
+| 57 | chest capacity label hardcodes 2400 | `chest_panel.gd:56` |
+| 58 | duplicate unconditional `close_info_panel` handler | `main.gd:721-722` |
+| 59 | backtick cannot close the console | `main.gd:802-805`; `console.gd:162-180` |
+| 60 | F11 demo writes tiles bypassing `tile_modifications` | `main.gd:1463-1464` |
+| 61 | `on_impassable` escape valve permits free water walking | `player.gd:82` |
+| 62 | `tick_speed` reads "was" after assignment | `console.gd:707-708` |
+| 63 | runner restores neither `save_path` nor tick rate | `test_runner.gd:80-83` |
+| 64 | hotbar cycling / disabled-slot / map / minimap have zero coverage | `hotbar.gd:277, 374` |
+| 65 | cursor backward-compat test is a tautology | `test_building_ui.gd:278-283` |
+| 66 | seed-uniqueness tests fabricate seeds | `test_random_seed_save_roundtrip.gd:25` |
+| 67 | round-trip suite labelled v14; save is v18 | `test_save_load_roundtrip.gd:3, 31, 241` |
+| 68 | determinism spot-check pinned to worldgen VERSION 3 (now 4) | `test_worldgen_determinism.gd:77, 82` |
+| 69 | ui_2 frees a world without `_disconnect` | `test_building_ui_2.gd:145` |
+| 70 | ambient trees sample noise for all 262k tiles — **deferred pending profiling** | `world_generator.gd:423-429` |
+| 71 | port indicators re-resolve recipes per frame — **deferred pending profiling** | `buildings.gd:1228-1277` |
+| 72 | `_is_tile_actively_farmed` scans all buildings per frame | `grid_world.gd:1261-1271` |
+| 73 | `_all_building_panels` allocates a fresh 22-array per call | `main.gd:1095-1103` |
+| 74 | post-tick pass iterates all buildings for belt-only logic | `grid_world.gd:654` |
+| 75 | `class_name DevConsole` lives in `console.gd` | `console.gd:1` |
+| 76 | soil arc says "migration framework still queued" | `NOTES.md:841` vs `:793` |
+| 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `INVENTORY_UI_PLAN.md:7` |
+| 78 | CONVENTIONS layout lists `assets/`, omits `tools/` + `addons/` | `CONVENTIONS.md:65` |
+| 79 | console.gd header says 12 commands; registry has 13 | `console.gd:19-20` vs `:344-407` |
+| 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | `NOTES.md:767, 769, 773` |
+| 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:998, 1000, 1039` |
+| 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1007` vs `:834` |
+| 83 | "31 sub-suites total" but components sum to 35 | `NOTES.md:842` |
+| 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
+
+### Severity note — #19 is arguably mis-rated
+
+`_drop_to_chest` survived the entire Inserter Arc rework **byte-shape-identical** and
+remains the only path in the game that bypasses `Chest.TOTAL_CAPACITY` — every other
+producer goes through `Chest.try_insert` (`chest.gd:77-81`), which enforces it. That
+now includes the electric tier.
+
+It is rated MEDIUM, but the outcome is item duplication or destruction depending on
+which side of the bypass you land on, and `BLOCKED_AT_DEST` never fires for chests as
+a result. That is HIGH-shaped. Re-rate when fixing rather than inheriting the
+severity from a document that also claimed it was fixed.
+
+### Current baselines for count-type findings
+
+`SAVE_VERSION` 18 · worldgen `VERSION` 4 · 48 test suites · console 13 commands /
+812 lines · 21 specialized panels · 12 ProcessorPanel consumers.
+
+### Deferred by prior decision, still valid
+
+**#45** — its 2-line fix changes worldgen output and needs a v4→v5 bump that
+hard-fails every existing save; ship it batched with other worldgen changes.
+**#30, #33, #70, #71** — deferred pending profiling; the analyses in their entries
+stand ready.
 
 ## HIGH -- player-visible breakage or item loss  (10 findings)
 
