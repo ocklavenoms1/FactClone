@@ -760,8 +760,18 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 ##
 ## **Grace rescue (test 14i):** applying any tier during the grace
 ## period interacts with `_tick_soil_regen` cleanly — fertilizer
-## doesn't directly clear grace state, but the boost adds soil → regen
-## tick lifts soil > 0 → grace entry erased on the next regen pass.
+## doesn't directly clear grace state, but the boost multiplies regen →
+## regen tick lifts soil > 0 → grace entry erased on the next regen pass.
+## This function itself NEVER adds soil to an unscarred tile; it only
+## writes boost state. The soil comes from `_tick_soil_regen`.
+##
+## That indirection used to make the rescue a no-op under active farming,
+## which is where scarring actually happens (audit #7): the active-tiles
+## early-out skipped the boost read entirely, so the compost was consumed
+## and the tile scarred anyway. `_tick_soil_regen` now carries a soil-0-
+## with-boost exception to that early-out, so the rescue reaches the tiles
+## it was always advertised for. It buys the player out of scarring only —
+## regen stops again at soil 1, and the planter takes it back to 0.
 ##
 ## Returns true if the boost was applied (caller should consume 1 from
 ## inventory). Returns false if rejected (caller should toast and NOT
@@ -1143,8 +1153,10 @@ func _process(delta: float) -> void:
 ##
 ## When a tile transitions ACTIVE→REGENERATING (or vice versa), partial
 ## tile_regen_progress is reset to 0. Conceptual simplicity: "active
-## farming = no regen, period." Player loses up to SECONDS_PER_SOIL_POINT
-## of pending progress on activation.
+## farming = no regen" — with exactly ONE exception, a soil-0 tile carrying
+## a fertilizer boost (audit #7; see the active-tiles check below for why
+## the countdown must keep running and what the exception costs). Player
+## loses up to SECONDS_PER_SOIL_POINT of pending progress on activation.
 func _tick_soil_regen(delta: float) -> void:
 	if tile_soil_modifications.is_empty():
 		return
@@ -1205,9 +1217,39 @@ func _tick_soil_regen(delta: float) -> void:
 		if is_wasteland_at(pos):
 			continue
 
-		if active_tiles.has(pos):
-			# Active farming this frame — clear partial regen so a brief
-			# active period doesn't leave stale progress accumulated.
+		# Active farming this frame — clear partial regen so a brief active
+		# period doesn't leave stale progress accumulated.
+		#
+		# ONE exception (audit #7): a tile at soil 0 carrying a fertilizer
+		# boost regenerates even while actively farmed. Without it the grace
+		# timer above counts a soil-0 tile down to scarring while its soil can
+		# never rise, so the rescue try_apply_fertilizer advertises is a
+		# silent no-op exactly where scarring actually happens — the player
+		# spends Premium Compost, main.gd consumes it, and the tile scars
+		# anyway. (try_apply_fertilizer writes boost state only; it never adds
+		# soil to an unscarred tile, so the boost is the sole route back.)
+		#
+		# Scoped deliberately to soil == 0 AND a live boost. A boosted tile
+		# above soil 0 still gets nothing: "active farming = no regen" holds
+		# everywhere the rescue promise does not reach. _fertilizer_boost_
+		# multiplier returns exactly 1.0 with no boost, so `> 1.0` is the
+		# has-a-boost test; `and` short-circuits, so the lookup only happens
+		# for active tiles already at 0. Scarred tiles continue above, so the
+		# exception can never apply to one.
+		#
+		# Downstream, and intended: the moment soil reaches 1 the tile is no
+		# longer soil-0, the exception lapses, regen stops there, and the
+		# planter's next harvest takes it back to 0. Fertilizer buys the
+		# player out of SCARRING, not out of depletion.
+		#
+		# The audit's own prescribed fix — pausing the grace countdown while
+		# a tile is actively farmed — was rejected: PROJECT_LOG.md:775 records
+		# active planters pinning soil at 0 as THE organic scarring path, and
+		# an inactive soil-0 tile always self-rescues (SECONDS_PER_SOIL_POINT
+		# 30 < WASTELAND_GRACE_SEC 60), so pausing would leave no organic
+		# route to wasteland at all. test_wasteland.gd sub-suite 10b is the
+		# regression guard for that.
+		if active_tiles.has(pos) and not (soil_now == 0 and _fertilizer_boost_multiplier(pos) > 1.0):
 			tile_regen_progress.erase(pos)
 			continue
 

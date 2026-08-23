@@ -17,6 +17,11 @@ extends RefCounted
 ##      state path — though strictly the test exercises any-tier rescue
 ##      (the grace-clear happens via _tick_soil_regen on next tick when
 ##      soil rises above 0).
+##  10. Grace rescue under ACTIVE farming (audit #7): the same rescue, but
+##      with an active planter's 3×3 covering the tile. Three parts —
+##      the rescue works (a), an UNfertilized tile still scars (b, which
+##      is the design decision, not an incidental), and the exception
+##      does not leak to boosted tiles above soil 0 (c).
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_wasteland.json"
@@ -262,11 +267,131 @@ static func run(parent: Node) -> Dictionary:
 		"tile should NOT be scarred (rescued during grace)")
 	_disconnect(world); world.queue_free()
 
+	# ---------- 10. Grace rescue under ACTIVE farming (audit #7) ----------
+	# Sub-suite 9 places no planter, so `active_tiles` is empty there. The
+	# whole of audit #7 lives in the case it skips: a soil-0 tile inside an
+	# ACTIVE planter's 3×3. Regen is blocked for active tiles, so the grace
+	# timer ran to expiry on a tile whose soil could never rise — and
+	# try_apply_fertilizer, which only writes boost state and never adds
+	# soil, could not rescue it. main.gd consumed the Premium Compost and
+	# the tile scarred anyway.
+	#
+	# The tile under test is a NEIGHBOUR of the anchor, not the anchor
+	# itself. Both sit inside the 3×3 and both are marked active by the same
+	# pass, but the anchor is also the tile the planter depletes at full
+	# center_cost on every harvest (deplete_planter_area) — asserting "soil
+	# climbed above 0" there would couple the assertion to the depletion
+	# machinery. The neighbour isolates the regen rule, and is the shape the
+	# audit itself describes.
+
+	# --- 10a. The finding: HIGH during grace rescues an actively-farmed tile.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var farmed_planter: Building = _place_active_planter(world, Vector2i(60, 60))
+	if farmed_planter == null:
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "10a planter placement failed: %s" % world.last_building_place_error }
+	_check(failures, Planter.is_active(farmed_planter), "10a setup: planter reads as ACTIVE")
+	var farmed: Vector2i = Vector2i(61, 60)
+	world.tile_soil_modifications[farmed] = 0
+	world._tick_soil_regen(1.0)   # start grace
+	_check(failures, world.tile_wasteland_state.has(farmed) and not world.is_wasteland_at(farmed),
+		"10a setup: farmed neighbour is in grace, not yet scarred")
+	_check(failures, world.try_apply_fertilizer(farmed, Items.Type.COMPOST_HIGH),
+		"10a: HIGH applies during grace (grace ≠ wasteland)")
+	# 70 further seconds, in 1-sec ticks — comfortably past
+	# WASTELAND_GRACE_SEC (60). Small deltas on purpose: one oversized delta
+	# would drive decay_remaining below 0 in the same tick regen would have
+	# run, and the scar check comes first, so the rescue could not land. Real
+	# frame deltas are small; this is the honest granularity.
+	for _i in 70:
+		world._tick_soil_regen(1.0)
+	_check(failures, not world.is_wasteland_at(farmed),
+		"10a: fertilized soil-0 tile under an ACTIVE planter must NOT scar (audit #7)")
+	_check(failures, world.tile_soil_health(farmed) > 0,
+		"10a: boosted regen must lift soil above 0 while actively farmed, got %d" % world.tile_soil_health(farmed))
+	_disconnect(world); world.queue_free()
+
+	# --- 10b. The control: no fertilizer → the tile still scars.
+	# This pins a design decision, and it is why the audit's own prescribed
+	# fix (pause the grace countdown while a tile is actively farmed) was
+	# REJECTED. PROJECT_LOG.md:775 records that active planters pinning soil
+	# at 0 IS the organic scarring path — the `wasteland` console command
+	# exists precisely to reach scarring "without setting up active planters
+	# to keep soil pinned at 0". An inactive soil-0 tile always self-rescues
+	# (SECONDS_PER_SOIL_POINT=30 < WASTELAND_GRACE_SEC=60), so pausing grace
+	# on active tiles would leave NO organic route to wasteland at all and
+	# make the whole Session 4 arc console-only dead content. If a later
+	# session "simplifies" 10a into that pause fix, this sub-case is what
+	# reddens.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var control_planter: Building = _place_active_planter(world, Vector2i(65, 65))
+	if control_planter == null:
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "10b planter placement failed: %s" % world.last_building_place_error }
+	_check(failures, Planter.is_active(control_planter), "10b setup: planter reads as ACTIVE")
+	var control: Vector2i = Vector2i(66, 65)
+	world.tile_soil_modifications[control] = 0
+	world._tick_soil_regen(1.0)   # start grace
+	_check(failures, not world.is_wasteland_at(control), "10b setup: in grace, not yet scarred")
+	for _i in 70:
+		world._tick_soil_regen(1.0)
+	_check(failures, world.is_wasteland_at(control),
+		"10b: an UNfertilized soil-0 tile under an active planter MUST still scar — organic wasteland path (PROJECT_LOG.md:775)")
+	_check(failures, world.tile_soil_health(control) == 0,
+		"10b: scarred tile stays at soil 0, got %d" % world.tile_soil_health(control))
+	_disconnect(world); world.queue_free()
+
+	# --- 10c. Narrowness: the exception is soil-0-only.
+	# A boosted tile ABOVE soil 0 under an active planter still gets zero
+	# regen. "Active farming = no regen" survives everywhere the rescue
+	# promise does not reach; without the soil == 0 clause the rule would
+	# read "a boost overrides active farming", which is a far larger change
+	# than audit #7 asked for.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var narrow_planter: Building = _place_active_planter(world, Vector2i(70, 70))
+	if narrow_planter == null:
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "10c planter placement failed: %s" % world.last_building_place_error }
+	_check(failures, Planter.is_active(narrow_planter), "10c setup: planter reads as ACTIVE")
+	var narrow: Vector2i = Vector2i(71, 70)
+	world.tile_soil_modifications[narrow] = 50
+	_check(failures, world.try_apply_fertilizer(narrow, Items.Type.COMPOST_HIGH),
+		"10c setup: HIGH applies to the depleted-but-alive tile")
+	# Load-bearing: had the apply silently failed, the boost would read 1.0
+	# and this sub-case would pass for the wrong reason — a widened exception
+	# would then go unnoticed.
+	_check(failures, world.tile_fertilizer_tier(narrow) == Items.Type.COMPOST_HIGH,
+		"10c setup: boost is live (tier = HIGH)")
+	for _i in 30:
+		world._tick_soil_regen(1.0)
+	_check(failures, world.tile_soil_health(narrow) == 50,
+		"10c: a boosted tile above soil 0 under an active planter gets NO regen, got %d" % world.tile_soil_health(narrow))
+	_check(failures, not world.tile_regen_progress.has(narrow),
+		"10c: active farming still clears partial regen progress")
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
-		return { "ok": true, "message": "all 9 sub-suites passed (trigger + grace + blocks regen + planter + recovery + save v18 + recipes + stacking + grace-rescue)" }
+		return { "ok": true, "message": "all 10 sub-suites passed (trigger + grace + blocks regen + planter + recovery + save v18 + recipes + stacking + grace-rescue + grace-rescue-under-active-farming)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------
+
+## Tills `anchor` and places a wheat planter there, then forces it ACTIVE by
+## writing `growth` directly — Planter.is_active is `growth > 0 or output > 0`
+## (planter.gd:146). Writing the field rather than running Planter.tick keeps
+## sub-suite 10 free of crop-cycle timing AND of the planter's own soil
+## depletion, so the planter's only contribution is its 3×3 active-tile mark.
+## Returns null if placement failed (caller reports last_building_place_error).
+static func _place_active_planter(world, anchor: Vector2i) -> Building:
+	world.set_overlay(anchor, Terrain.Overlay.SOIL_TILLED)
+	if not world.place_building(Buildings.Type.PLANTER, anchor, 0, Items.Type.WHEAT):
+		return null
+	var b: Building = world.building_at(anchor)
+	b.state["growth"] = 1
+	return b
 
 static func _check(failures: Array, condition: bool, label: String) -> void:
 	if not condition:
