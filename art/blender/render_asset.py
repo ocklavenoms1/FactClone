@@ -67,7 +67,7 @@ def main():
     no_matnorm = "no-material-norm" in a
     suffix_extra = a.get("out-suffix", "")
 
-    glb = os.path.join(REPO, "art", "source", cfg.get("source", f"{name}.glb"))
+    glb = os.path.join(REPO, "art", "source", a.get("source", cfg.get("source", f"{name}.glb")))
     if not os.path.exists(glb):
         raise SystemExit(f"MISSING_SOURCE {glb}")
 
