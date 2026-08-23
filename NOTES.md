@@ -303,10 +303,12 @@ Measured at Electricity Session 3 Tasks 7 and 8, headless console build. `wire_e
 | 50 | 2.3–3.2 ms — 14–19% | 2.5 ms | — |
 | 100 | **9.6–12.5 ms — 58–75%** | **12.5 ms** | **8.3 ms — 50%** |
 
-The Gabriel column is the spread across **seven** consecutive suite runs; the MST and mesh
-columns are **single** Task 7 readings. Read them as the *same order at every size* — the
+The Gabriel column is the spread across **seven** consecutive **warm** suite runs; the MST and
+mesh columns are **single** Task 7 readings. Read them as the *same order at every size* — the
 data does not support calling either faster, and quoting a speedup from this table would be
-reading noise.
+reading noise. **These are not upper bounds:** an independent reviewer measured a cold-run
+100-pole outlier at **15.4 ms**. That creates no flake risk (100 poles is printed to be read,
+not gated) but it is the honest ceiling.
 
 **The quadratic pair scan is INHERITED, not introduced by any of the three.** All of them
 have to ask `poles_connected` about every pair to know what the graph *is*; what differs is
@@ -314,7 +316,9 @@ what they do afterwards. MST also weighed each accepted pair and rescanned for t
 edge (~1.5× the mesh). Gabriel's blocker filter is `O(E·D)` **only because of the both-reach
 guard** — a blocker must be a common neighbour, so the search is one adjacency list rather
 than the whole component. Measured on sub-case (12)'s own grids with only the guard neutered,
-the unguarded `O(N³)` filter costs **0.23 / 4.0 / 17.1 ms**: past a whole frame at 100 poles,
+the unguarded `O(N³)` filter costs **0.23 / 4.0 / 17.1 ms** (the 50-pole figure reached 7.1 ms
+on a reviewer's machine, still under sub-case (12)'s 8000 µs gate — the guard is caught on
+**correctness** by (11c) and (11d), not on time): past a whole frame at 100 poles,
 and the only reading in this table that is unambiguously worse than the MST. So 100 poles on
 one network was already unaffordable before Task 7, and still is. Nothing in the suite would
 catch a regression here except sub-case (12) — it is a rendering path.

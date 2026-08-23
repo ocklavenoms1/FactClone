@@ -147,7 +147,7 @@ static func supply_radius(t: int) -> int:
 ## and the guard could not fire under any predicate — and Task 7 deleted that
 ## guard along with the pairwise loop it sat in. There is no backstop of any
 ## kind. wire_edges is the one place the rule could quietly get re-derived: it
-## sits three lines from a SECOND, different metric — the Euclidean-squared
+## holds a SECOND, different metric in the same function — the Euclidean-squared
 ## blocker test on doubled footprint centres — and writing
 ## `_pole_distance(a, b) <= max(pole_range(...), pole_range(...))` inline would
 ## look like tidying. It calls this function instead. Keep it that way.
@@ -351,7 +351,8 @@ static func rebuild_topology(world) -> void:
 ## lighter spanning tree, contradicting minimality. No MST edge is ever
 ## suppressed, so the emitted set contains a spanning tree of every component.
 ##
-## TWO DIFFERENT METRICS LIVE THREE LINES APART. Do not conflate them.
+## TWO DIFFERENT METRICS LIVE IN THIS ONE FUNCTION, one on each side of the
+## adjacency build. Do not conflate them.
 ##   * REACHABILITY is Chebyshev, footprint-to-footprint, per-tier ranges,
 ##     either-reaches — and it is NOT computed here. poles_connected is asked,
 ##     exactly as rebuild_topology's BFS asks it. See its docstring for what
@@ -485,8 +486,21 @@ static func wire_edges(world) -> Array:
 						continue
 					# EUCLIDEAN SQUARED on doubled centres. NOT _pole_distance,
 					# which is the Chebyshev metric poles_connected uses above
-					# — two different distances, three lines apart, deciding two
-					# different questions.
+					# — two different distances in one function, deciding two
+					# different questions. Reachability was settled in the
+					# adjacency build above and is not revisited here.
+					#
+					# AND `<=` IS LOAD-BEARING. It is the OTHER HALF of the
+					# package the both-reach guard just above opens, not a
+					# normalisable inequality. The K4 of four basic poles 3
+					# apart is EXACTLY degenerate: for a diagonal both sides are
+					# 72 in doubled units, so the blocker sits precisely ON the
+					# circle and the comparison decides the whole picture.
+					# MUTATION RUN with `<`: the K4 goes to 6 wires and sub-case
+					# (12)'s three grids go to 29 / 158 / 342 — the full mesh,
+					# every time. Gabriel does not degrade gracefully here, it
+					# collapses into the shape Foundation PAUSE 1 rejected.
+					# Sub-case (11a) is what stops you.
 					if _centre_dist_sq(centres[k], centres[i]) + _centre_dist_sq(centres[k], centres[j]) <= ab2:
 						blocked = true
 						break

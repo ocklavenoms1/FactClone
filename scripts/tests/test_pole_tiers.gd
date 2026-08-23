@@ -388,10 +388,24 @@ static func _case_order_independence(parent: Node, failures: Array) -> void:
 # exists, and PowerNetwork.wire_edges — the only thing
 # grid_world._draw_power_wires walks — asks that same function to build the
 # adjacency its Gabriel filter runs over. So the edges the renderer draws are a
-# SUBSET of the edges the BFS walked, never a pair the BFS rejected, and the
-# failure the user cares about — a
-# renderer STRICTER than the BFS, leaving poles on one network with no wire
-# between them and no signal anywhere — is unreachable rather than untested.
+# SUBSET of the edges the BFS walked, and never a pair the BFS rejected.
+#
+# WHAT THAT BUYS AND WHAT IT DOES NOT, and the line moved when Task 8 replaced
+# the spanning tree with the Gabriel graph. It rules out a renderer working
+# from a DIFFERENT RANGE RULE — the drift per-tier ranges made likely, whose
+# strict direction fails silently. It does NOT mean every pole gets a wire.
+#
+# "Two poles on one network with no wire between them" is no longer a failure
+# at all: it is the shipped, gate-approved picture. The K4's suppressed
+# diagonals are exactly that, and DRAWING them is the mesh regression (11a)
+# exists to catch. The failure that still matters is narrower — a pole with NO
+# WIRE AT ALL — and this structure does not prevent it. Plain Gabriel can
+# delete the only reachable bridge and strand a pole while every edge it emits
+# is still a subset of the BFS's: the same invisible-connection failure,
+# arriving through the back door. What prevents THAT is wire_edges' both-reach
+# guard, and what tests it is (11c) plus (11d)'s negative control, which
+# reproduce it 5 / 8 / 22 times across the sweep bands when the guard is
+# removed. Tested, then — not unreachable.
 #
 # THIS CASE DELIBERATELY DOES NOT REDERIVE THE ARITHMETIC. A test that
 # computed max(abs(dx), abs(dy)) <= max(range_a, range_b) for itself and
@@ -1516,7 +1530,10 @@ static func _poles_by_component(world) -> Dictionary:
 
 ## Component sizes to time. Square grids so every size is one component: poles
 ## spaced at the basic tier's own range, so each has up to eight in-range
-## neighbours and the relaxation body actually runs rather than being skipped.
+## neighbours and the BLOCKER PROBE actually runs — a pole whose only in-range
+## neighbour is its own partner has an empty common-neighbour list, and the
+## inner loop would be skipped entirely. ("Relaxation" was Prim's word for this
+## line and did not survive Task 8.)
 ##
 ## 12 is roughly the shipped rigs (pole_tiers places 10 poles, electric_rig
 ## 12). 50 and 100 are a player's endgame bus, and they are here to be READ,
@@ -1534,7 +1551,10 @@ const WIRE_SIZES: Array = [12, 50, 100]
 ##     100       9611 - 12487 us          12474 us                 339720 us
 ##
 ## READ THE COLUMNS DIFFERENTLY. The Gabriel column is the min-of-passes from
-## SEVEN consecutive suite runs on one machine, i.e. an honest spread. The MST
+## SEVEN consecutive WARM suite runs on one machine, i.e. an honest spread for
+## a settled machine and NOT an upper bound: an independent reviewer measured a
+## COLD-run 100-pole outlier at 15374 us, half again the top of that range.
+## Treat the 100-pole row as "most of a frame, sometimes more". The MST
 ## columns are SINGLE Task 7 readings with no spread behind them. The two
 ## formulations are therefore the SAME ORDER at every size and the data does
 ## not support calling either one faster — the Gabriel range at 100 poles
@@ -1562,9 +1582,11 @@ const WIRE_GATE_SIZE: int = 50
 ## still dominates and the shipped cost at 50 landed on 2310-3160 us across
 ## seven runs, straddling the MST's single 2470 us reading. A budget that moved
 ## for a visual change would have been measuring the wrong thing. 8000 still
-## catches the cubic Prim's form by 5x. It does NOT catch the unguarded blocker
-## search, which measured 3999 us here and is caught by sub-cases (11c) and
-## (11d) on correctness instead.
+## catches the cubic Prim's form by 5x. It does NOT reliably catch the
+## unguarded blocker search: that measured 3999 us here on this machine and up
+## to 7125 us on a reviewer's, which is inside 8000 but no longer comfortably.
+## Do not start treating this budget as the guard's tripwire — sub-cases (11c)
+## and (11d) catch the guard on CORRECTNESS, which is where it belongs.
 const WIRE_BUDGET_US: float = 8000.0
 const WIRE_WARM_PASSES: int = 2
 const WIRE_RUNS: int = 3
