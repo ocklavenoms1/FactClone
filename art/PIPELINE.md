@@ -1312,3 +1312,50 @@ sharper.** Low contrast should constrain **value**, not **hue**. A thin iron
 band should be a *dark, desaturated wrought iron* - close to the timber in
 lightness, unmistakably iron in hue. What produces ambiguity is drifting the hue
 halfway to the neighbour, not keeping the value close. `PROMPTS.md` now says so.
+
+---
+
+## 21. HF cap DECIDED: 3x the synthetic floor, locked
+
+The cap stays at **3x**, measured against the permanent synthetic floor
+(`_calib_floor`, 1.00%), giving an absolute budget of **3.0%**. Closed; not
+revisited when an asset finds it tight. *"If it feels tight, that is a signal
+about the asset, not the cap."*
+
+### One correction to the number that decision cited
+
+The decision cited the smelter passing "comfortably at 1.67x". **That figure was
+against the retired proxy floor of 2.10%, not the synthetic floor.** Re-measured
+against the locked floor:
+
+| smelter correction | HF | vs 1.00% floor | 3x cap |
+|---|---|---|---|
+| approved (current) | 3.5% | **3.50x** | fail, marginal |
+| refined (unpinned candidate) | 6.4% | **6.40x** | fail, not marginal |
+
+**The reference asset does not currently pass its own gate**, under either
+correction. That does not change the decision - the pole fails at 13.60x under
+any definition, so moving the cap was never the answer - but it does mean the
+cap now flags the reference asset too, and that should be a deliberate state
+rather than a surprise.
+
+The smelter's HF is isotropic (50% vertical / 50% horizontal), so unlike the
+pole it has no single dominant source to remove; getting it under 3.0% means
+less texture generally, not one rule.
+
+### The refinement's HF cost, which the re-approval decision now has to weigh
+
+Re-emitting the smelter with the refined gain **doubles its HF**: 3.5% -> 6.4%.
+That was invisible while the floor was 2.35% and both readings passed. Under the
+locked cap it is the difference between marginal and clearly over.
+
+So the re-approval is no longer only "better colour fit vs different pixels":
+
+| | approved | refined |
+|---|---|---|
+| variance explained | 90% | **92%** |
+| HF vs 3x cap | 3.50x | 6.40x |
+| pixels moved >8/255 | - | 28.6% |
+
+The asset is **pinned to the approved correction** until that is decided, so the
+lower-HF, already-approved pixels are what sits in the tree meanwhile.

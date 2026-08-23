@@ -48,9 +48,9 @@
       "albedo_correction": "remap",
       "palette_era": "natural-5",
       "albedo_gain": [
-        0.4841,
-        0.4421,
-        0.3694
+        0.4452,
+        0.5259,
+        0.4316
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -58,9 +58,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.043738,
-              0.045872,
-              0.034997
+              0.04621,
+              0.048513,
+              0.037233
             ],
             "target": [
               0.102242,
@@ -68,25 +68,25 @@
               0.097587
             ],
             "gain": [
-              2.3376,
-              2.4401,
+              2.2125,
+              2.3073,
               2.5
             ],
             "gain_raw": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.2125,
+              2.3073,
+              2.621
             ],
             "clamped": true,
-            "chroma_dist": 0.0406,
-            "match_ratio": 0.285
+            "chroma_dist": 0.039,
+            "match_ratio": 0.441
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.032673,
-              0.03619,
-              0.027631
+              0.035472,
+              0.038457,
+              0.029194
             ],
             "target": [
               0.061246,
@@ -94,25 +94,25 @@
               0.076185
             ],
             "gain": [
-              1.8745,
-              2.2166,
+              1.7266,
+              2.086,
               2.5
             ],
             "gain_raw": [
-              1.8745,
-              2.2166,
-              2.7572
+              1.7266,
+              2.086,
+              2.6096
             ],
             "clamped": true,
-            "chroma_dist": 0.0858,
-            "match_ratio": 0.128
+            "chroma_dist": 0.0917,
+            "match_ratio": 0.417
           },
           {
             "member": "weathered_oak",
             "observed": [
-              0.063376,
-              0.035316,
-              0.010107
+              0.067952,
+              0.037511,
+              0.010214
             ],
             "target": [
               0.147027,
@@ -120,25 +120,25 @@
               0.031896
             ],
             "gain": [
-              2.3199,
-              2.1572,
+              2.1637,
+              2.031,
               2.5
             ],
             "gain_raw": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.1637,
+              2.031,
+              3.1227
             ],
             "clamped": true,
-            "chroma_dist": 0.0418,
-            "match_ratio": 0.332
+            "chroma_dist": 0.0461,
+            "match_ratio": 0.215
           },
           {
             "member": "leather",
             "observed": [
-              0.092157,
-              0.034696,
-              0.016668
+              0.076743,
+              0.026631,
+              0.011258
             ],
             "target": [
               0.194618,
@@ -146,18 +146,18 @@
               0.039546
             ],
             "gain": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.5,
+              2.1706,
+              2.5
             ],
             "gain_raw": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.536,
+              2.1706,
+              3.5128
             ],
-            "clamped": false,
-            "chroma_dist": 0.0537,
-            "match_ratio": 0.423
+            "clamped": true,
+            "chroma_dist": 0.0507,
+            "match_ratio": 0.523
           }
         ],
         "dropped": []
@@ -167,7 +167,9 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true,
+      "_albedo_pinned_note": "Holding the APPROVED correction pending your re-approval decision. The refined gain fits better (92% vs 90%) but DOUBLES this asset's HF cost (6.4% vs 3.5%), which now matters because the cap is locked at 3x the synthetic floor. Approved = 3.50x, refined = 6.40x; both over, but the approved one is marginal and the refined one is not. Unpin when you decide."
     },
     {
       "name": "chest",
@@ -306,9 +308,9 @@
       "albedo_correction": "remap",
       "palette_era": "natural-5",
       "albedo_gain": [
-        0.4841,
-        0.4421,
-        0.3694
+        0.4452,
+        0.5259,
+        0.4316
       ],
       "albedo_remap": {
         "sigma": 0.02,
@@ -316,9 +318,9 @@
           {
             "member": "fieldstone",
             "observed": [
-              0.043738,
-              0.045872,
-              0.034997
+              0.04621,
+              0.048513,
+              0.037233
             ],
             "target": [
               0.102242,
@@ -326,25 +328,25 @@
               0.097587
             ],
             "gain": [
-              2.3376,
-              2.4401,
+              2.2125,
+              2.3073,
               2.5
             ],
             "gain_raw": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.2125,
+              2.3073,
+              2.621
             ],
             "clamped": true,
-            "chroma_dist": 0.0406,
-            "match_ratio": 0.285
+            "chroma_dist": 0.039,
+            "match_ratio": 0.441
           },
           {
             "member": "wrought_iron",
             "observed": [
-              0.032673,
-              0.03619,
-              0.027631
+              0.035472,
+              0.038457,
+              0.029194
             ],
             "target": [
               0.061246,
@@ -352,25 +354,25 @@
               0.076185
             ],
             "gain": [
-              1.8745,
-              2.2166,
+              1.7266,
+              2.086,
               2.5
             ],
             "gain_raw": [
-              1.8745,
-              2.2166,
-              2.7572
+              1.7266,
+              2.086,
+              2.6096
             ],
             "clamped": true,
-            "chroma_dist": 0.0858,
-            "match_ratio": 0.128
+            "chroma_dist": 0.0917,
+            "match_ratio": 0.417
           },
           {
             "member": "weathered_oak",
             "observed": [
-              0.063376,
-              0.035316,
-              0.010107
+              0.067952,
+              0.037511,
+              0.010214
             ],
             "target": [
               0.147027,
@@ -378,25 +380,25 @@
               0.031896
             ],
             "gain": [
-              2.3199,
-              2.1572,
+              2.1637,
+              2.031,
               2.5
             ],
             "gain_raw": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.1637,
+              2.031,
+              3.1227
             ],
             "clamped": true,
-            "chroma_dist": 0.0418,
-            "match_ratio": 0.332
+            "chroma_dist": 0.0461,
+            "match_ratio": 0.215
           },
           {
             "member": "leather",
             "observed": [
-              0.092157,
-              0.034696,
-              0.016668
+              0.076743,
+              0.026631,
+              0.011258
             ],
             "target": [
               0.194618,
@@ -404,18 +406,18 @@
               0.039546
             ],
             "gain": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.5,
+              2.1706,
+              2.5
             ],
             "gain_raw": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.536,
+              2.1706,
+              3.5128
             ],
-            "clamped": false,
-            "chroma_dist": 0.0537,
-            "match_ratio": 0.423
+            "clamped": true,
+            "chroma_dist": 0.0507,
+            "match_ratio": 0.523
           }
         ],
         "dropped": []
@@ -425,7 +427,9 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ]
+      ],
+      "albedo_pinned": true,
+      "_albedo_pinned_note": "Holding the APPROVED correction pending your re-approval decision. The refined gain fits better (92% vs 90%) but DOUBLES this asset's HF cost (6.4% vs 3.5%), which now matters because the cap is locked at 3x the synthetic floor. Approved = 3.50x, refined = 6.40x; both over, but the approved one is marginal and the refined one is not. Unpin when you decide."
     }
   ]
 }
