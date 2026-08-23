@@ -58,6 +58,10 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_pole_tier_rig.gd"),
 	preload("res://scripts/tests/test_load_network_invalidation.gd"),
 	preload("res://scripts/tests/test_mixed_tier_save_roundtrip.gd"),
+	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
+	# a dropped registration reddens nothing — see the file's header for the
+	# incident that motivated it.
+	preload("res://scripts/tests/test_registration_completeness.gd"),
 ]
 
 func _ready() -> void:
