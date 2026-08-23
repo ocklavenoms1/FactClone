@@ -32,12 +32,21 @@ extends RefCounted
 ##   3. A scarred tile does not wedge a LOW/MID-loaded applicator (#5).
 ##   4. A HIGH-loaded applicator DOES target the scarred tile and restores
 ##      it (the combined rule — and the automation the slot advertises).
-##   5. Drift guard: every tier the input slot accepts is belt-pullable
-##      AND applicable. This is the assertion that would have caught #4.
+##   5. Drift guard, both directions: every tier the input slot accepts is
+##      belt-pullable AND applicable, and every tier in TIER_PREFERENCE is
+##      on the slot's accepts list. This is the assertion that would have
+##      caught #4.
 ##   6. The aggregate INPUT_BUFFER_CAPACITY bound still holds with HIGH
 ##      counted in the mix.
+##   7. The panel's coverage grid paints a rejected scar as CELL_WASTELAND,
+##      not as CELL_PRISTINE — and still paints it CELL_ELIGIBLE when HIGH
+##      is loaded. Follow-up to the #4/#5 fix: _cell_color was routed
+##      through _tile_eligible but had no wasteland branch, so a scar the
+##      machine had just refused rendered in the "healthy, nothing to do"
+##      colour, and nothing in the suite ever constructed a panel.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
+const ApplicatorPanelScript = preload("res://scripts/ui/fertilizer_applicator_panel.gd")
 
 static func test_name() -> String:
 	return "applicator wasteland recovery (HIGH intake + scarred-tile targeting)"
@@ -179,7 +188,7 @@ static func run(parent: Node) -> Dictionary:
 		"HIGH restore: machine should be SCANNING after the restore, got state %d" % int(app.state.get("state", -1)))
 	_disconnect(world); world.queue_free()
 
-	# ---------- 5. Drift guard: every accepted tier is usable ----------
+	# ---------- 5. Drift guard: accepts and TIER_PREFERENCE are set-equal ----------
 	# #4 was a drift between the input slot's accepts list in buildings.gd
 	# and the two hardcoded tier lists in fertilizer_applicator.gd. This
 	# walks the slot's own accepts list and proves each entry survives the
@@ -190,12 +199,22 @@ static func run(parent: Node) -> Dictionary:
 	for tier in accepts:
 		var res: Dictionary = _tier_round_trip(parent, int(tier))
 		if not bool(res.get("placed", false)):
-			_disconnect(world)
+			# No world to tear down here: the previous sub-suite's world was
+			# already disconnected and freed, and _tier_round_trip frees its
+			# own on every failure path.
 			return { "ok": false, "message": "drift guard: setup failed for tier %s -- %s" % [Items.name_of(int(tier)), str(res.get("error", ""))] }
 		_check(failures, bool(res["pulled"]),
 			"drift guard: %s is in the slot's accepts list but is never pulled from a belt" % Items.name_of(int(tier)))
 		_check(failures, bool(res["applied"]),
 			"drift guard: %s is in the slot's accepts list but never lands on a tile" % Items.name_of(int(tier)))
+	# The reverse direction. The walk above only proves accepts ⊆ usable; the
+	# comment on TIER_PREFERENCE claims the two are SET-EQUAL. A tier added to
+	# TIER_PREFERENCE but not to the slot is belt-pullable and appliable, yet
+	# drag-drop and the inserter both refuse it — the same drift mirrored, and
+	# invisible to every assertion above it.
+	for tier in FertilizerApplicator.TIER_PREFERENCE:
+		_check(failures, int(tier) in accepts,
+			"drift guard: %s is in TIER_PREFERENCE (belt-pullable) but missing from the input slot's accepts list" % Items.name_of(int(tier)))
 
 	# ---------- 6. Aggregate buffer bound still holds with HIGH ----------
 	# INPUT_BUFFER_CAPACITY is an AGGREGATE bound across every tier the one
@@ -225,8 +244,67 @@ static func run(parent: Node) -> Dictionary:
 		"aggregate cap: exactly 1 HIGH should have fit in the last free slot, got %d" % _buffer_count(app.state.get("in_buffer", []), Items.Type.COMPOST_HIGH))
 	_disconnect(world); world.queue_free()
 
+	# ---------- 7. Panel coverage grid paints the scar (_cell_color) ----------
+	# The grid is the only place the eligibility rule is SHOWN. The #4/#5 fix
+	# routed _cell_color through _tile_eligible — correct — but added no
+	# wasteland branch, so a scar the machine had just refused fell through to
+	# CELL_PRISTINE, the "healthy, nothing to do" dim sage. A BLOCKED applicator
+	# holding Rich Compost therefore rendered 25 identical cells with no hint of
+	# which tile needed Premium. Nothing in the suite constructed a panel, so a
+	# revert of _cell_color to its own soil-and-tier test would have stayed green.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	if not world.place_building(Buildings.Type.FERTILIZER_APPLICATOR, Vector2i(30, 30), Belt.DIR_E):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "applicator placement failed (cell colour): %s" % world.last_building_place_error }
+	app = world.building_at(Vector2i(30, 30))
+	var scar_px: Vector2i = Vector2i(31, 30)      # scarred, soil 0
+	var ordinary_px: Vector2i = Vector2i(32, 30)  # ordinary depleted, soil 40
+	var boosted_px: Vector2i = Vector2i(29, 30)   # already carrying a HIGH boost
+	_scar(world, scar_px)
+	world.tile_soil_modifications[ordinary_px] = 40
+	world.tile_soil_modifications[boosted_px] = 50
+	if not world.try_apply_fertilizer(boosted_px, Items.Type.COMPOST_HIGH):
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "cell colour: setup failed -- HIGH boost would not apply to (29,30)" }
+	var panel = ApplicatorPanelScript.new()
+	parent.add_child(panel)
+	panel.open(app, world)
+
+	# 7a. MID loaded: the scar is refused, so it must read as dead ground —
+	# explicitly NOT mustard (the machine will not act on it) and NOT sage
+	# (which is what "nothing to do here" means everywhere else in the grid).
+	app.state["in_buffer"] = [[Items.Type.COMPOST_MID, 2]]
+	var scar_mid: Color = panel._cell_color(scar_px)
+	_check(failures, scar_mid == ApplicatorPanelScript.CELL_WASTELAND,
+		"cell colour (MID): scarred tile should paint CELL_WASTELAND, got %s" % str(scar_mid))
+	_check(failures, scar_mid != ApplicatorPanelScript.CELL_ELIGIBLE,
+		"cell colour (MID): scarred tile must not paint CELL_ELIGIBLE — MID cannot restore it")
+	_check(failures, scar_mid != ApplicatorPanelScript.CELL_PRISTINE,
+		"cell colour (MID): scarred tile must not paint CELL_PRISTINE — that is the untouched-grass colour")
+	# 7b. Control: an ordinary depleted tile in the same grid, same buffer, IS
+	# actionable and must still read mustard.
+	var ord_mid: Color = panel._cell_color(ordinary_px)
+	_check(failures, ord_mid == ApplicatorPanelScript.CELL_ELIGIBLE,
+		"cell colour (MID): ordinary soil-40 tile should paint CELL_ELIGIBLE, got %s" % str(ord_mid))
+
+	# 7c. HIGH loaded: the scar is now the machine's next move, so the
+	# actionable signal wins over the dead-ground signal.
+	app.state["in_buffer"] = [[Items.Type.COMPOST_HIGH, 2]]
+	var scar_high: Color = panel._cell_color(scar_px)
+	_check(failures, scar_high == ApplicatorPanelScript.CELL_ELIGIBLE,
+		"cell colour (HIGH): scarred tile should paint CELL_ELIGIBLE — HIGH restores it, got %s" % str(scar_high))
+
+	# 7d. A tile already carrying a HIGH boost outranks every eligibility
+	# question — it is fertilized, whatever the buffer holds.
+	var boosted_col: Color = panel._cell_color(boosted_px)
+	_check(failures, boosted_col == ApplicatorPanelScript.CELL_FERT_HIGH,
+		"cell colour: tile carrying a HIGH boost should paint CELL_FERT_HIGH, got %s" % str(boosted_col))
+	panel.queue_free()
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
-		return { "ok": true, "message": "all 6 sub-suites passed (belt-fed HIGH + HIGH selection + scarred wedge + HIGH restore + drift guard + aggregate cap)" }
+		return { "ok": true, "message": "all 7 sub-suites passed (belt-fed HIGH + HIGH selection + scarred wedge + HIGH restore + drift guard + aggregate cap + panel cell colours)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), " | ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------

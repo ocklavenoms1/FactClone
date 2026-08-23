@@ -15,8 +15,8 @@ extends BuildingPanel
 ##   ║  │● │▲ │▲ │  │  │   · pristine      ║
 ##   ║  ├──┼──┼──┼──┼──┤   ▓ impassable    ║
 ##   ║  │  │▲ │A │▲ │  │   A applicator    ║
-##   ║  ├──┼──┼──┼──┼──┤                   ║
-##   ║  │  │  │▲ │● │  │                   ║
+##   ║  ├──┼──┼──┼──┼──┤   ✕ wasteland     ║
+##   ║  │  │✕ │▲ │● │  │     (Premium only)║
 ##   ║  ├──┼──┼──┼──┼──┤                   ║
 ##   ║  │  │  │  │  │  │                   ║
 ##   ║  └──┴──┴──┴──┴──┘                   ║
@@ -40,6 +40,13 @@ const CELL_FERT_LOW: Color = Color(0.45, 0.75, 0.35, 0.95)         # light green
 const CELL_FERT_MID: Color = Color(0.20, 0.55, 0.25, 0.95)         # saturated green
 const CELL_FERT_HIGH: Color = Color(0.10, 0.38, 0.18, 0.95)        # deep green — Premium Compost
 const CELL_IMPASSABLE: Color = Color(0.10, 0.12, 0.15, 0.85)       # near-black
+# Scarred wasteland the selected tier cannot restore. Rust brown, deliberately
+# red-dominant: CELL_IMPASSABLE is blue-dominant near-black and CELL_PRISTINE is
+# green-dominant sage, so this is the only warm cell on the grid and cannot be
+# read as either "water/building" or "healthy, nothing to do". Same hue family
+# as GridWorld.WASTELAND_TINT (0.18, 0.13, 0.10), lifted for legibility as a
+# flat 46px fill rather than a tint over grass.
+const CELL_WASTELAND: Color = Color(0.32, 0.15, 0.10, 0.95)        # rust brown — dead ground
 const CELL_BORDER: Color = Color(0.05, 0.05, 0.05)
 const CELL_BORDER_ANCHOR: Color = Color(1.0, 0.92, 0.40)           # bright yellow on the applicator's own cell
 
@@ -160,7 +167,15 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 ##      "Eligible" is FertilizerApplicator._tile_eligible, the same test the
 ##      picker and the header count use — so a mustard cell always means
 ##      "this machine will fertilize that tile", wasteland rules included.
-##   4. Pristine (or nothing the current tier can improve) → dim sage.
+##   4. Scarred wasteland this tier cannot restore → rust brown.
+##      Ordered AFTER the eligibility test on purpose: with HIGH in the buffer
+##      a scar IS actionable and must read mustard. Only when the machine
+##      cannot act on it does the scar become a "you need Premium Compost"
+##      signal. Before this branch existed a rejected scar fell through to
+##      dim sage — pixel-identical to untouched grass — so a BLOCKED
+##      applicator gave the player 25 identical cells and no way to see which
+##      tile was the problem.
+##   5. Pristine (or nothing the current tier can improve) → dim sage.
 func _cell_color(pos: Vector2i) -> Color:
 	# Out-of-world: render as impassable.
 	if pos.x < WorldGenerator.WORLD_MIN or pos.x >= WorldGenerator.WORLD_MAX:
@@ -191,4 +206,9 @@ func _cell_color(pos: Vector2i) -> Color:
 	var available_tier: int = FertilizerApplicator._select_fertilizer_from_buffer(building)
 	if available_tier >= 0 and FertilizerApplicator._tile_eligible(world, pos, available_tier):
 		return CELL_ELIGIBLE
+	# Not actionable with what's loaded. A scar is the one ineligible case that
+	# is not "nothing to do" — it needs Premium Compost — so it gets its own
+	# colour instead of the pristine fall-through.
+	if world.is_wasteland_at(pos):
+		return CELL_WASTELAND
 	return CELL_PRISTINE

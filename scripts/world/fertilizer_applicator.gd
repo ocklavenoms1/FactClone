@@ -55,9 +55,12 @@ const INPUT_BUFFER_CAPACITY: int = 16
 # Premium Compost for wasteland-recovery automation", but the tick logic
 # kept two hardcoded [MID, LOW] lists, so HIGH could enter the buffer by
 # hand and then sit there inert forever while the machine reported IDLE
-# (audit #4). test_applicator_wasteland_recovery.gd sub-suite 5 walks the
-# slot's own accepts list and drives each entry through belt → buffer →
-# tile, which is the assertion that closes that gap.
+# (audit #4). test_applicator_wasteland_recovery.gd sub-suite 5 pins the
+# set-equality in both directions: it walks the slot's own accepts list and
+# drives each entry through belt → buffer → tile, then walks this list and
+# requires every entry to appear on the slot. One direction alone is not
+# enough — a tier here but not on the slot is belt-pullable while drag-drop
+# and the inserter both reject it, which is the same drift mirrored.
 const TIER_PREFERENCE: Array = [
 	Items.Type.COMPOST_HIGH,
 	Items.Type.COMPOST_MID,
