@@ -98,6 +98,33 @@ need repeating).
 **Rule is permanent, not session-scoped.** Verify after every commit with
 `git show --name-only --format="" HEAD`.
 
+### The other half: NEVER LEAVE THE INDEX DIRTY
+
+The pathspec rule above only protects *your own* commits. It does nothing about the reverse
+direction — **a bare `git commit` from the OTHER session absorbs whatever you have staged.**
+
+**Triggered by:** Electricity Session 3 Task 9 review (2026-08-22), the third incident of this
+class. A reviewer ran `git checkout b1a8c4c^ -- scripts/tests/test_runner.gd` to simulate a
+pre-commit tree. That command **stages**. While it sat in the index, the art session's bare
+commit `e3b0bb4` swept it up and deleted
+
+```gdscript
+	preload("res://scripts/tests/test_mixed_tier_save_roundtrip.gd"),
+```
+
+from `test_runner.gd`. **HEAD silently stopped registering a test file.** A clean checkout
+would have run 45 tests and reported green while the save-round-trip coverage did not execute
+at all — the worst possible failure shape, since a missing test looks exactly like a passing one.
+
+**Rule: no session may leave the index dirty, even briefly.** For reading a file at another
+revision use `git show <ref>:<path> > /tmp/scratch`, or a `git worktree`. **Never** use an
+index-touching command — `git checkout <ref> -- <path>`, `git restore --staged`, `git add` —
+without committing in the same breath.
+
+**Detection:** after any task that adds a test file, confirm the registration survived:
+`git show HEAD:scripts/tests/test_runner.gd | grep -c <new_test>`. A dropped registration
+does not redden anything.
+
 ---
 
 ## Working protocol: worktree absolute paths
