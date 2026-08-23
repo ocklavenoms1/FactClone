@@ -89,17 +89,17 @@ is closed at all.
 | 8 | slot take clears whole shared buffer | `6478690` | `test_shared_buffer_slots.gd` |
 | 9 | shared-field slots all render `buf[0]` | `6478690` | same |
 | 10 | Overlay.NONE buildings placeable on water/ore | `6478690` | `test_placement_terrain_guards.gd` |
+| 3 | aggregate `in_buffer` cap deadlocks mixed-input processors | `08e052c` + `6d0f5e9` | `test_inserter_shared_input_cap.gd` |
 | 56 | duplicated slot handlers diverge on empty-cursor | `83a72cc` + `fa4b5ca` — **accidental**, a side effect of deduplicating into `SlotClickHandler` | shared handler |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
 for every type with the drill exemption scoped to the resource-node check only.
 
-### LIVE — HIGH (4)
+### LIVE — HIGH (3)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 3 | aggregate `in_buffer` cap deadlocks mixed-input processors (Oven, Mixer) | `scripts/world/inserter.gd:669-676` |
 | 4 | applicator never pulls or applies COMPOST_HIGH | `scripts/world/fertilizer_applicator.gd:155-178` |
 | 5 | one scarred tile permanently wedges LOW/MID application | `scripts/world/fertilizer_applicator.gd:196-223` |
 | 7 | grace timer runs on actively-farmed soil-0 tiles | `scripts/world/grid_world.gd:1169` |
