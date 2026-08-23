@@ -1,38 +1,30 @@
 """Detail-density conformance.
 
-THE GATE IS ONE NUMBER: high-frequency destruction, as a ratio to the
-flat-geometry floor. Cap 3x.
+DIAGNOSTIC, NOT A GATE. High-frequency destruction as a ratio to the synthetic
+floor. Reported every run; it does not block anything.
 
-It works on both block-form and thin assets with no special-casing (smelter
-2.21x pass, first kiln 6.1x fail, flat proxies near the floor) and it measures
-the thing actually cared about - whether the detail reaches the screen - rather
-than a proxy for it.
+It earned its keep on the first kiln, where cobbles genuinely turned to mud at
+32px and this number caught it. Then it rejected a power pole that looked good,
+and an asset was over-tuned to satisfy it into looking plastic. A gate that
+fails good work is worse than no gate, so it went back to being a diagnostic.
 
-Feature count per occupied tile is kept as a DIAGNOSTIC only. It is not a gate:
-a thin object is nearly all edge, so no denominator rescues it, and
-"judge thin assets on absolute count" is a rule that would rot.
-
-Minimum feature size in FINAL pixels is the candidate second gate if one is
-ever wanted. Anything under ~2 px at 32 px output is dead regardless of the
-object's shape, which makes it shape-independent in the way a per-tile count
-is not. It is reported here but not enforced.
+THE GATE IS THE 32PX SPRITE, JUDGED BY EYE - see art/tools/eye_sheet.py. If a
+high number ever coincides with a sprite that genuinely reads as mud, the number
+was right. It does not get to reject on its own.
 
     python art/tools/detail_density.py smelter_idle chest power_pole
 
-THE GATE - HIGH-FREQUENCY SURVIVAL, the cobble problem as a number.
+HOW THE HF NUMBER IS COMPUTED
    Rendering at 4x and downsampling to 1x cannot carry any spatial frequency
-   above one quarter of the master's Nyquist limit. So: take the 4x master,
-   measure its power spectrum, and report what fraction of the AC energy sits
-   above that cutoff. That fraction is destroyed by the downsample no matter
-   how good the filter is - it is generation effort that provably cannot reach
-   the screen.
+   above one quarter of the master's Nyquist limit. Take the 4x master, measure
+   its power spectrum, and report the fraction of AC energy above that cutoff:
+   that fraction is destroyed by the downsample however good the filter is.
 
-   The pass mark is a RATIO against the flat-geometry floor, not an absolute
-   percentage. Flat untextured proxies measure ~2%, so the budget is "under 3x
-   the floor" - about 7% today - and it recalibrates itself as the reference
-   assets change. The rejected kiln was 14.3%, i.e. 6.1x the floor.
+   Reported as a RATIO against the permanent synthetic floor, so it is a
+   multiple of "what a compliant untextured building costs" rather than a bare
+   percentage. 3x is a useful reference band, not a pass mark.
 
-DIAGNOSTICS (reported, never enforced)
+EVERYTHING HERE IS REPORTED, NOTHING HERE ENFORCES
    Feature count is divided by OCCUPIED SILHOUETTE AREA rather than footprint
    tiles. That is the right denominator, but be clear about what it does NOT
    fix: the flat pole proxy scores WORSE under it (11.0 -> 17.8), because it
@@ -55,7 +47,8 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CAP_PER_TILE = 4                          # tightened from 6: 87% of features were under 2px
 SUPERSAMPLE = 4
 TILE_PX = 32
-HF_RATIO_CAP = 3.0                        # pass mark: under 3x the flat floor
+HF_RATIO_CAP = 3.0                        # reference band, NOT a pass mark - see the
+                                          # module docstring. The eye is the gate.
 CONTRAST_COSTLY = 0.12                    # luminance range above which thin detail costs
 # THE FLOOR IS A FIXED SYNTHETIC OBJECT, never a real asset.
 # It used to be whichever proxies were lying around, and it moved: when
@@ -306,11 +299,10 @@ def main():
             print(f"  4x master {hf['master_px'][0]}x{hf['master_px'][1]}")
             if floor:
                 ratio = lost / floor
-                verdict = "PASS" if ratio <= HF_RATIO_CAP else "FAIL"
-                print(f"  GATE  HF energy destroyed: {lost}%   = {ratio:.2f}x the {floor:.2f}% floor"
-                      f"   (cap {HF_RATIO_CAP:g}x)   ** {verdict} **")
+                note = "" if ratio <= HF_RATIO_CAP else "  (above the 3x reference band)"
+                print(f"  [diagnostic] HF energy destroyed: {lost}%   "
+                      f"= {ratio:.2f}x the {floor:.2f}% floor{note}")
                 report[n]["hf_ratio"] = round(ratio, 2)
-                report[n]["hf_verdict"] = verdict
             else:
                 print(f"  HF energy destroyed: {lost}%")
             print(f"  energy by normalised frequency band (1.0 = master Nyquist):")

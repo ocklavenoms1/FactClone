@@ -196,11 +196,19 @@ about 2% for flat-shaded geometry. That 14.3% is generation effort that
 provably cannot reach the screen. Cobbles are not a matter of taste; they are
 waste, and now we can say so with a figure.*
 
-Re-measure any asset with:
+These are **diagnostics, not gates**. They tell you where an asset is spending
+its budget so the prompt can be aimed at the real source. They do not reject
+anything - the finished 32 px sprite, looked at, does that.
 
 ```bash
-python art/tools/detail_density.py <sprite_name>
+python art/tools/detail_density.py <sprite_name>      # what it costs
+python art/tools/hf_regions.py <sprite_name>          # where it costs it
+python art/tools/eye_sheet.py --asset <name>          # THE GATE
 ```
+
+*The HF number rejected a pole that looked good, and chasing it produced a
+plastic asset. It caught real mud once, on the first kiln, and that is what it
+is for - not for deciding on its own.*
 
 **Minimum strut or wall thickness 1/16 tile**, or it vanishes on downsample.
 

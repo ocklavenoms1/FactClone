@@ -133,6 +133,7 @@ art/
     assert_rig_correlation.py  gate: baked light must not oppose the rig
     baked_shading.py       albedo variance by spatial scale (see section 15)
     hf_regions.py          WHERE an asset spends its HF: by region and by stripe orientation
+    eye_sheet.py           THE GATE: sprite at true size beside a reference, no metrics
     make_calibration.py    builds the permanent synthetic HF floor (blender/)
     palette_board.py       renders a palette on flat proxies, no correction
 ```
@@ -1359,3 +1360,56 @@ So the re-approval is no longer only "better colour fit vs different pixels":
 
 The asset is **pinned to the approved correction** until that is decided, so the
 lower-HF, already-approved pixels are what sits in the tree meanwhile.
+
+---
+
+## 22. The gate is the sprite, judged by eye
+
+**HF destruction is demoted to a diagnostic.** It is still measured and still
+reported on every run. It no longer rejects anything.
+
+It earned its keep once: on the first kiln the cobbles genuinely turned to mud
+at 32 px and this number caught it before anyone looked closely. Then it
+rejected a power pole that looked good, and the asset was re-generated to
+satisfy it into looking plastic. **A gate that fails good work is worse than no
+gate.**
+
+> Worth stating plainly rather than implying a bigger change than happened:
+> `detail_density.py` was never wired into `build.ps1`. **No build was ever
+> blocked by the HF number** - the `GATE ... FAIL` wording was presentational.
+> The demotion is real as policy and as language; it changed no build behaviour.
+
+**The gate is a finished sprite at true in-game size, looked at.**
+`art/tools/eye_sheet.py` puts the asset at 1x, 2x and 4x beside an approved
+reference at 1x, on neutral mid-grey, with **nothing written on the image** - no
+labels, no numbers, no grid. A metric printed beside a picture tells you what to
+think about the picture.
+
+```bash
+python art/tools/eye_sheet.py --asset power_pole --reference smelter_idle
+```
+
+If a high HF number ever coincides with a sprite that genuinely reads as mud,
+the number was right and should be said so. It does not get to reject on its own.
+
+### What still gates a build
+
+| gate | what it catches |
+|---|---|
+| `assert_palette_era` | an asset from a superseded palette entering the verdict |
+| `assert_states` | a state that renders identical to another - a transform that silently did nothing |
+| `assert_rig_correlation` | baked light that OPPOSES the locked rig |
+| camera calibration | the anamorphic correction breaking |
+
+All four catch things a human cannot see by looking at one sprite: a wrong
+palette era looks fine in isolation, identical states look fine unless compared,
+opposing light looks fine until placed next to a neighbour. That is the right
+division - **automation for what the eye cannot check, the eye for everything
+else.**
+
+### And it should have happened sooner
+
+Nothing in this session had been judged as a finished sprite at true size until
+now. Everything was 4x masters and spectral ratios - which is how an asset got
+tuned into looking plastic while every number improved. The session's own brief
+said to judge at true size; the tooling made it easy not to.
