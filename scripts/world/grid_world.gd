@@ -1678,13 +1678,19 @@ const MAST_WIRE_Y: float = 0.16
 ## current figures rather than quoting numbers here, where they go stale
 ## silently.
 func _draw_power_wires() -> void:
-	if _power_network_dirty:
-		PowerNetwork.rebuild_topology(self)
+	# NO LOCAL rebuild_topology GUARD. There was one here, an MST-era leftover,
+	# and it guarded nothing: wire_edges opens with the identical check and is
+	# the only thing called below, so the rebuild happened either way. It did
+	# not protect the _component_satisfaction read either — rebuild_topology
+	# CLEARS that dict, so a dirty network reads satisfaction 0.0 and draws
+	# every wire dead whichever path does the rebuilding.
+	#
 	# Colors named for the network state they represent, not for the hue
-	# (live = any power, dead = zero supply).
+	# (live = any power, dead = zero supply). const, not var: these are
+	# compile-time Colors and this function runs once per frame.
 	const WIRE_THICKNESS: float = 2.0
-	var WIRE_COLOR_LIVE: Color = Color(0.85, 0.70, 0.40)    # golden — network has power
-	var WIRE_COLOR_DEAD: Color = Color(0.30, 0.22, 0.15)    # dark brown — no supply
+	const WIRE_COLOR_LIVE: Color = Color(0.85, 0.70, 0.40)  # golden — network has power
+	const WIRE_COLOR_DEAD: Color = Color(0.30, 0.22, 0.15)  # dark brown — no supply
 	for edge in PowerNetwork.wire_edges(self):
 		var pa: Vector2i = edge[0]
 		var pb: Vector2i = edge[1]

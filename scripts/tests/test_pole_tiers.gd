@@ -44,6 +44,39 @@ extends RefCounted
 ##  12. Wire-edge cost tripwire — times wire_edges at three component sizes.
 ##      It runs once per FRAME, so this is the harsher of the two timing
 ##      budgets in this file (Task 7).
+##
+## ---------------------------------------------------------------------------
+## THIS FILE SHOULD SPLIT, AND HERE IS THE SEAM. At 1800-odd lines across 12
+## sub-cases from six tasks it is past comfortable. Cut AFTER (10): sub-cases
+## (11) and (12) move TOGETHER into test_wire_edges.gd, roughly 700 lines, and
+## nothing dangles. NOTES.md carries the same seam under "Queued: split
+## test_pole_tiers.gd" — the two must not drift.
+##
+## MEASURED, not eyeballed — every one of these has its FIRST reference at or
+## after the start of (11), so none has a caller on the other side of the cut:
+##
+##   helpers    _plain_gabriel_edges _edge_key _same_edge_set _edge_list_str
+##              _layout_str _check_edges_reachable _check_spans
+##              _edges_span_component _mesh_pair_count _poles_by_component
+##              _edges_by_component
+##   constants  K4_POLES K4_FAR_PAIR K4_SIDES TRIPLE_SUB TRIPLE_NEAR
+##              TRIPLE_FAR SWEEP_SEED SWEEP_TIERS SWEEP_BANDS SWEEP_TRIALS
+##              WIRE_SIZES WIRE_GATE_SIZE WIRE_BUDGET_US WIRE_WARM_PASSES
+##              WIRE_RUNS FRAME_US
+##
+## Only the generic scaffolding is shared — _check, _make_world, _teardown,
+## _place_all, _component_count, GridWorldScript — about 40 lines.
+##
+## CUT AT (10)/(11), NOT (11)/(12). Sub-case (10) times power_satisfaction_at
+## and belongs with the supply cases, not with the wire ones. Cutting between
+## (11) and (12) instead would strand (12)'s WIRE_* / FRAME_US away from the
+## helpers above that it shares with (11) — the list is the check.
+##
+## NOT DONE HERE ON PURPOSE: this was identified at the Task 8 review, with a
+## visual re-gate pending. Moving 700 lines of the session's main safety net
+## immediately before a gate is the wrong trade for a pure refactor. The note
+## is here so the split is cheap whenever someone takes it.
+## ---------------------------------------------------------------------------
 
 # Used from Task 2 on: the world-building sub-cases instantiate GridWorld
 # through _make_world(parent).
@@ -1161,6 +1194,10 @@ static func _case_gabriel_mixed_tier(parent: Node, failures: Array) -> void:
 	# The bus is the component holding the substation. Found by TYPE rather
 	# than by coordinate so moving the rig does not silently pick the control
 	# block, which is basic-only and would make the subset claim weaker.
+	# `found` rather than a bare `break`: the break only ever left the INNER
+	# loop, so a second substation in another component would overwrite bus_id
+	# and the search would silently mean "last wins". Harmless with the rig's
+	# single substation, but it read as "stop searching" and did not.
 	var bus_id: int = -1
 	for cid in by_comp:
 		for anchor in by_comp[cid]:
@@ -1168,6 +1205,8 @@ static func _case_gabriel_mixed_tier(parent: Node, failures: Array) -> void:
 			if b != null and b.type == Buildings.Type.SUBSTATION:
 				bus_id = int(cid)
 				break
+		if bus_id >= 0:
+			break
 	_check(failures, bus_id >= 0,
 		"(11b) PREMISE: no component in the rig contains a SUBSTATION, so there is no mixed-tier bus here to test")
 	if bus_id < 0:
@@ -1331,12 +1370,7 @@ static func _sweep_band(parent: Node, failures: Array, n: int, span: int) -> voi
 		var by_comp: Dictionary = _poles_by_component(world)
 		comp_total += by_comp.size()
 		var edges: Array = PowerNetwork.wire_edges(world)
-		var edges_by_comp: Dictionary = {}
-		for e in edges:
-			var cid: int = int(world._pole_component.get(e[0], -1))
-			if not edges_by_comp.has(cid):
-				edges_by_comp[cid] = []
-			edges_by_comp[cid].append(e)
+		var edges_by_comp: Dictionary = _edges_by_component(world, edges)
 		for cid in by_comp:
 			var poles: Array = by_comp[cid]
 			max_comp = max(max_comp, poles.size())
@@ -1450,19 +1484,19 @@ static func _layout_str(world, poles: Array) -> String:
 ## Components of one pole contribute no edge and span trivially.
 static func _check_spans(world, edges: Array, failures: Array, prefix: String) -> void:
 	var by_comp: Dictionary = _poles_by_component(world)
-	var edges_by_comp: Dictionary = {}
 	for e in edges:
 		var cid: int = int(world._pole_component.get(e[0], -1))
 		var cid_b: int = int(world._pole_component.get(e[1], -1))
 		_check(failures, cid >= 0 and cid == cid_b,
 			"%s the edge %s -> %s joins components %d and %d. A wire between two networks is a wire the BFS never walked" % [prefix, str(e[0]), str(e[1]), cid, cid_b])
-		if not edges_by_comp.has(cid):
-			edges_by_comp[cid] = []
-		edges_by_comp[cid].append(e)
+	var edges_by_comp: Dictionary = _edges_by_component(world, edges)
 	for cid in by_comp:
 		var poles: Array = by_comp[cid]
 		var comp_edges: Array = edges_by_comp.get(cid, [])
-		_check(failures, comp_edges.size() >= max(0, poles.size() - 1),
+		# No max(0, ...) clamp: by_comp is built from _pole_component, so every
+		# component it names holds at least one pole and size() - 1 is never
+		# negative. A clamp that cannot fire hides that guarantee.
+		_check(failures, comp_edges.size() >= poles.size() - 1,
 			"%s component %d holds %d poles but was drawn with only %d wires, which cannot reach them all" % [prefix, int(cid), poles.size(), comp_edges.size()])
 		_check(failures, _edges_span_component(poles, comp_edges),
 			"%s component %d has enough wires to reach all %d of its poles but they do not: some are in a separate piece. On screen that is a pole with no wire at all, on a network the BFS calls powered" % [prefix, int(cid), poles.size()])
@@ -1501,6 +1535,18 @@ static func _mesh_pair_count(world, anchors: Array) -> int:
 			if PowerNetwork.poles_connected(world, anchors[i], anchors[j]):
 				n += 1
 	return n
+
+## comp_id -> Array of the emitted edges belonging to it, keyed off the FIRST
+## endpoint's component. Safe to key off one end because _check_spans asserts
+## separately that no edge crosses components — do not read this as assuming it.
+static func _edges_by_component(world, edges: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for e in edges:
+		var cid: int = int(world._pole_component.get(e[0], -1))
+		if not out.has(cid):
+			out[cid] = []
+		out[cid].append(e)
+	return out
 
 ## comp_id -> Array of pole anchors, read straight off world._pole_component.
 static func _poles_by_component(world) -> Dictionary:
@@ -1546,15 +1592,19 @@ const WIRE_SIZES: Array = [12, 50, 100]
 ## this renderer, on the identical grids:
 ##
 ##   poles    Gabriel (shipped)   MST, dense Prim   MST, remaining x in_tree
-##      12         165 -  269 us            159 us                    732 us
-##      50        2310 - 3160 us           2470 us                  40343 us
-##     100       9611 - 12487 us          12474 us                 339720 us
+##      12          ~0.2 ms               0.16 ms                   0.73 ms
+##      50          ~2.5 ms               2.47 ms                  40.3  ms
+##     100         ~10   ms              12.5  ms                 340    ms
 ##
-## READ THE COLUMNS DIFFERENTLY. The Gabriel column is the min-of-passes from
-## SEVEN consecutive WARM suite runs on one machine, i.e. an honest spread for
-## a settled machine and NOT an upper bound: an independent reviewer measured a
-## COLD-run 100-pole outlier at 15374 us, half again the top of that range.
-## Treat the 100-pole row as "most of a frame, sometimes more". The MST
+## THE GABRIEL COLUMN IS DELIBERATELY ROUNDED TO ONE FIGURE. Eleven consecutive
+## warm suite runs on one machine spanned 165-286 us, 2273-3347 us and
+## 9482-12487 us — about +-20% at every size — and a cold run reached 15374 us
+## at 100 poles while a second reviewer's machine read 13177 us. Quoting
+## anything tighter is quoting noise, and this table has already been rewritten
+## three times, once per review, chasing digits that were never stable. DO NOT
+## RE-TIGHTEN IT against one lucky run. The live figure prints on every suite
+## run and is the one to read. Treat the 100-pole row as "most of a frame,
+## sometimes more". The MST
 ## columns are SINGLE Task 7 readings with no spread behind them. The two
 ## formulations are therefore the SAME ORDER at every size and the data does
 ## not support calling either one faster — the Gabriel range at 100 poles
@@ -1579,8 +1629,8 @@ const WIRE_GATE_SIZE: int = 50
 ## Microseconds per wire_edges call this sub-case refuses to pass at
 ## WIRE_GATE_SIZE. UNCHANGED across the Gabriel rewrite, which is the point:
 ## the both-reach guard makes the filter O(E*D), so the O(N^2) adjacency build
-## still dominates and the shipped cost at 50 landed on 2310-3160 us across
-## seven runs, straddling the MST's single 2470 us reading. A budget that moved
+## still dominates and the shipped cost at 50 came in around 2.5 ms, straddling
+## the MST's single 2470 us reading. A budget that moved
 ## for a visual change would have been measuring the wrong thing. 8000 still
 ## catches the cubic Prim's form by 5x. It does NOT reliably catch the
 ## unguarded blocker search: that measured 3999 us here on this machine and up

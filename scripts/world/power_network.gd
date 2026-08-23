@@ -247,7 +247,10 @@ static func rebuild_topology(world) -> void:
 	for anchor in world.buildings:
 		if Buildings.POLE_TYPES.has(world.buildings[anchor].type):
 			pole_anchors.append(anchor)
-	pole_anchors.sort_custom(func(a, b): return _lex_less(a, b))
+	# The static function itself, not a lambda wrapping it — a lambda allocates
+	# a fresh Callable on every call, and wire_edges does this per component per
+	# FRAME. Same signature either way.
+	pole_anchors.sort_custom(_lex_less)
 
 	var next_id: int = 0
 	for start in pole_anchors:
@@ -336,11 +339,16 @@ static func rebuild_topology(world) -> void:
 ##     so the search space is one adjacency list rather than the whole
 ##     component: O(N^2) adjacency build + O(E*D) filter instead of O(N^3).
 ##     MEASURED on sub-case (12)'s 100-pole grid, this code with only the guard
-##     neutered: 17.1 ms unguarded against 9.6-12.5 ms guarded over seven runs,
-##     with the Task 7 MST at 12.5 ms. So the guarded form is the same order as
-##     the tree it replaces and the unguarded form is not. That margin is this
-##     fixture's, not a general one — the grid has about eight neighbours per
-##     pole, and the guard buys less as the graph gets denser.
+##     neutered: ~17 ms unguarded against ~10 ms guarded, with the Task 7 MST
+##     at 12.5 ms. So the guarded form is the same order as the tree it
+##     replaces and the unguarded form is not.
+##
+##     ONE FIGURE ONLY, ON PURPOSE. Run-to-run spread on this path is about
+##     +-20% and a cold run reached 15.4 ms, so a tighter number would be
+##     noise — see sub-case (12)'s own note, which was rewritten three times
+##     before that sank in. And the margin is this FIXTURE's: that grid has
+##     about eight neighbours per pole, and the guard buys less as the graph
+##     gets denser. Sub-case (12) prints the live figures every run. Read those.
 ##
 ## WHY IT STILL SPANS EVERY COMPONENT. Weight the reachable graph by Euclidean
 ## distance and take any MST T. If C suppressed an edge A-B of T then
@@ -401,35 +409,69 @@ static func wire_edges(world) -> Array:
 
 	var edges: Array = []
 	for cid in comp_ids:
-		var poles: Array = by_comp[cid]
-		# A lone pole has no pair to test. Nothing to draw.
+		# STALE ANCHORS ARE DROPPED BEFORE ANYTHING INDEXES THEM. _pole_component
+		# can name an anchor that world.buildings no longer holds — that is not
+		# hypothetical, it is audit finding #1 (world.buildings cleared and
+		# rewritten with no dirty flag), and it is the same assumption
+		# _covering_component_id spends ten lines defending. The filter is
+		# exactly what poles_connected would accept, so no surviving pole can
+		# turn out edge-less for a reason this loop failed to anticipate.
+		#
+		# THE MST THIS REPLACED DID NOT NEED THIS and that is why the hole is
+		# new. It resolved Buildings too, but only ever touched one AFTER
+		# poles_connected had accepted the pair, and poles_connected returns
+		# false when either Building is null — so a stale anchor simply
+		# contributed no edges. The Gabriel form computes every centre UP FRONT,
+		# before any filtering, so an unguarded pre-pass dereferences null on
+		# the RENDER PATH: one error per stale pole per frame at 60 fps.
+		#
+		# KEEP THIS AHEAD OF THE DEFERRED EDGE-LIST CACHE. A cache lengthens the
+		# window in which the drawn list and world.buildings disagree, so it
+		# makes this failure more likely to be reached, not less.
+		var poles: Array = []
+		for anchor in by_comp[cid]:
+			var pole_b: Building = world.buildings.get(anchor, null)
+			if pole_b == null or not Buildings.POLE_TYPES.has(pole_b.type):
+				continue
+			poles.append(anchor)
+		# Fewer than two live poles leaves no pair to test. Nothing to draw.
 		if poles.size() < 2:
 			continue
-		poles.sort_custom(func(a, b): return _lex_less(a, b))
+		poles.sort_custom(_lex_less)
 		var n: int = poles.size()
 
 		# Footprint centres, doubled, computed ONCE per pole. Resolving the
 		# Building through world.buildings inside the pair loop would add a
 		# dictionary lookup to every blocker probe, and the blocker probes are
-		# the inner loop.
+		# the inner loop. Indexed directly rather than with a `, null` default:
+		# the filter above already guarantees a Building, and a default that
+		# feeds straight into a dereference only reads as defensive.
 		var centres: Array = []
 		for i in range(n):
-			centres.append(_pole_centre_doubled(world.buildings.get(poles[i], null)))
+			centres.append(_pole_centre_doubled(world.buildings[poles[i]]))
 
 		# THE ADJACENCY, BUILT ONCE, FROM THE SHARED PREDICATE. This is the
 		# only place reachability is decided, and it is decided by asking
 		# poles_connected — never by re-deriving it from _pole_distance and the
 		# range table, which is right there and looks like the same thing.
 		#
-		# Two parallel structures because two different accesses are needed and
-		# each is O(1) at what it does: `nbrs` is WALKED (candidate blockers
-		# for an edge out of pole i), `nbr_set` is QUERIED (is this candidate
-		# also reachable from pole j). Building only the Array would make the
-		# both-reach test a linear scan and put the O(N^3) back.
+		# Two parallel structures, and the Array is NOT redundant with the
+		# Dictionary even though its contents are exactly nbr_set[i].keys().
 		#
-		# nbrs[k] comes out ASCENDING: the build appends every j < k during
-		# outer passes 0..k-1 in order, then every j > k during pass k in
-		# order. The pair walk below relies on that for its emission order.
+		# `nbr_set` earns its place on cost: it is QUERIED (is this candidate
+		# also reachable from pole j), and doing that against an Array would be
+		# a linear scan and would put the O(N^3) back.
+		#
+		# `nbrs` earns its place on DETERMINISM, which is house law here. It is
+		# WALKED, and the walk order IS the emission order of the returned edge
+		# list. nbrs[k] comes out ASCENDING by construction — the build appends
+		# every j < k during outer passes 0..k-1 in order, then every j > k
+		# during pass k in order — and that is a property of code visible on
+		# this screen. Deriving the walk from nbr_set.keys() instead would make
+		# the render order depend on Dictionary insertion-order semantics, i.e.
+		# on an engine guarantee rather than on this loop. A renderer whose edge
+		# list reshuffled between frames would shimmer, so the ordering wants to
+		# be local and obvious, not inherited.
 		var nbrs: Array = []
 		var nbr_set: Array = []
 		for i in range(n):
@@ -489,6 +531,17 @@ static func wire_edges(world) -> Array:
 					# — two different distances in one function, deciding two
 					# different questions. Reachability was settled in the
 					# adjacency build above and is not revisited here.
+					#
+					# THE FIRST TERM IS DELIBERATELY NOT HOISTED, though it does
+					# not depend on j and could be precomputed once per i.
+					# BUILT AND MEASURED: at the 100-pole fixture the hoist saves
+					# roughly 2600 _centre_dist_sq calls a frame, and moved the
+					# median -5.6% at 50 poles and -0.9% at 100 — both inside a
+					# run-to-run spread of +-20%, i.e. no measurable effect. It
+					# costs a per-pole Array allocation and it replaces the
+					# `for k in nbrs[i]` that the guard note above names
+					# verbatim as one of its two halves. Same call the memo on
+					# max_supply_radius() got: it would have paid for nothing.
 					#
 					# AND `<=` IS LOAD-BEARING. It is the OTHER HALF of the
 					# package the both-reach guard just above opens, not a

@@ -294,20 +294,27 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ## Queued: split `test_pole_tiers.gd` — the seam is measured and clean
 
-1758 lines, ~12 sub-cases across six tasks. Coherent only under "everything Session 3
+1800-odd lines, 12 sub-cases across six tasks. Coherent only under "everything Session 3
 touched". **Deferred at Session 3's PAUSE 1 re-gate** — moving 700 lines of the session's own
 safety net immediately before a visual gate is the wrong trade for a pure refactor. It is one
 task away from being a junk drawer, so take it early in whatever session next opens the file.
 
-**Cut between sub-cases (11) and (12) — NOT (10)/(11).** (10) times `power_satisfaction_at`
-and belongs with the supply-area cases; (12) times `wire_edges` and shares helpers with (11).
+**Cut AFTER sub-case (10) — i.e. at the (10)/(11) boundary. Sub-cases (11) and (12) move
+TOGETHER.** (10) times `power_satisfaction_at` and belongs with the supply-area cases, so it
+stays; (12) times `wire_edges` and shares helpers with (11), so it goes.
+
+*(This paragraph first read "cut between (11) and (12) — NOT (10)/(11)", which contradicted
+both its own justification and the list below: that list moves `_plain_gabriel_edges`, which
+is (11)'s, and `WIRE_*`/`FRAME_US`, which are (12)'s, so both sub-cases move and the boundary
+is the one before (11). Corrected at the Task 8 quality review, where the seam was re-verified
+by checking that every name below first appears at or after the start of (11).)*
 
 Everything below moves to `test_wire_edges.gd`. Verified to have **zero callers** elsewhere in
 the file:
 
 - helpers: `_plain_gabriel_edges`, `_edge_key`, `_same_edge_set`, `_edge_list_str`,
   `_layout_str`, `_check_edges_reachable`, `_check_spans`, `_edges_span_component`,
-  `_mesh_pair_count`, `_poles_by_component`
+  `_mesh_pair_count`, `_poles_by_component`, `_edges_by_component`
 - constants: `K4_POLES`, `K4_FAR_PAIR`, `K4_SIDES`, `TRIPLE_*`, `SWEEP_*`, `WIRE_*`, `FRAME_US`
 
 Only generic scaffolding is shared — `_check`, `_make_world`, `_teardown`, `_place_all`,
@@ -325,16 +332,17 @@ Measured at Electricity Session 3 Tasks 7 and 8, headless console build. `wire_e
 
 | poles in one component | Gabriel (shipped, Task 8) | MST (Task 7) | the mesh before it |
 |---|---|---|---|
-| 12 (the rigs) | 0.17–0.27 ms — ~1–2% of a 60 fps frame | 0.16 ms | — |
-| 50 | 2.3–3.2 ms — 14–19% | 2.5 ms | — |
-| 100 | **9.6–12.5 ms — 58–75%** | **12.5 ms** | **8.3 ms — 50%** |
+| 12 (the rigs) | ~0.2 ms — ~1% of a 60 fps frame | 0.16 ms | — |
+| 50 | ~2.5 ms — ~15% | 2.5 ms | — |
+| 100 | **~10 ms — ~60%** | **12.5 ms** | **8.3 ms — 50%** |
 
-The Gabriel column is the spread across **seven** consecutive **warm** suite runs; the MST and
-mesh columns are **single** Task 7 readings. Read them as the *same order at every size* — the
-data does not support calling either faster, and quoting a speedup from this table would be
-reading noise. **These are not upper bounds:** an independent reviewer measured a cold-run
-100-pole outlier at **15.4 ms**. That creates no flake risk (100 poles is printed to be read,
-not gated) but it is the honest ceiling.
+**The Gabriel column is rounded to one figure on purpose.** Eleven consecutive warm runs
+spanned ±20% at every size (165–286 µs, 2273–3347 µs, 9482–12487 µs), a cold run reached
+**15.4 ms** at 100 poles, and a second reviewer's machine read 13.2 ms. The MST and mesh
+columns are **single** Task 7 readings. Read them as the *same order at every size* — the data
+does not support calling either faster, and any tighter number here is noise. This table was
+rewritten three times, once per review, chasing digits that were never stable; sub-case (12)
+prints the live figure on every run and that is the one to read.
 
 **The quadratic pair scan is INHERITED, not introduced by any of the three.** All of them
 have to ask `poles_connected` about every pair to know what the graph *is*; what differs is
@@ -409,7 +417,7 @@ graph**, tested in exact integers on doubled footprint centres as
    swapping gives a strictly lighter tree — contradiction. No MST edge is ever suppressed.
    (c) It is the performance fix: a blocker must be a common neighbour, so the filter is
    `O(E·D)` rather than `O(N³)`. Measured at 100 poles, same code, guard neutered: 17.1 ms
-   unguarded against 9.6–12.5 ms guarded over seven runs, with the MST it replaced at 12.5 ms.
+   unguarded against ~10 ms guarded, with the MST it replaced at 12.5 ms.
    The guarded form is the same order as the tree; the unguarded form is past a whole frame.
 
 **`<=` and the both-reach guard are a package.** Neither ships without the other. This is
