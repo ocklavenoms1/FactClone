@@ -22,6 +22,13 @@ extends RefCounted
 ##      the rescue works (a), an UNfertilized tile still scars (b, which
 ##      is the design decision, not an incidental), and the exception
 ##      does not leak to boosted tiles above soil 0 (c).
+##  11. Late compost is REFUSED, not consumed (audit #7 follow-up): a boost
+##      needs SECONDS_PER_SOIL_POINT / fertilizer_multiplier(tier) seconds
+##      to lift soil by 1, so an apply made with less grace than that
+##      cannot rescue anything. Four parts — the per-tier boundary (a),
+##      the honest outcome through real ticks (b), the scarred-tile
+##      restore path staying immune (c), and the applicator's picker
+##      agreeing with the apply (d).
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_wasteland.json"
@@ -318,12 +325,22 @@ static func run(parent: Node) -> Dictionary:
 	# REJECTED. PROJECT_LOG.md:775 records that active planters pinning soil
 	# at 0 IS the organic scarring path — the `wasteland` console command
 	# exists precisely to reach scarring "without setting up active planters
-	# to keep soil pinned at 0". An inactive soil-0 tile always self-rescues
-	# (SECONDS_PER_SOIL_POINT=30 < WASTELAND_GRACE_SEC=60), so pausing grace
-	# on active tiles would leave NO organic route to wasteland at all and
-	# make the whole Session 4 arc console-only dead content. If a later
+	# to keep soil pinned at 0". Pausing grace on active tiles holds a
+	# continuously-active planter's neighbours at grace = 60.00 forever, so it
+	# removes the one scarring path the player can find and understand and
+	# makes the whole Session 4 arc console-only dead content. If a later
 	# session "simplifies" 10a into that pause fix, this sub-case is what
 	# reddens.
+	#
+	# The argument is deliberately NOT "an inactive soil-0 tile always
+	# self-rescues" — that claim is false, and b92a769's commit message
+	# carries it. Only a tile inactive for the WHOLE grace window is
+	# guaranteed to rescue: burn grace to 15.0s under an active planter, then
+	# idle the planter, and the tile scars while fully inactive because
+	# tile_regen_progress was erased on the last active frame and +1 soil
+	# needs 30s. An oscillating planter could still scar a tile with grace
+	# paused; a continuously-active one could not, and that is the case
+	# PROJECT_LOG.md:775 describes.
 	world = GridWorldScript.new()
 	parent.add_child(world)
 	var control_planter: Building = _place_active_planter(world, Vector2i(65, 65))
@@ -373,11 +390,164 @@ static func run(parent: Node) -> Dictionary:
 		"10c: active farming still clears partial regen progress")
 	_disconnect(world); world.queue_free()
 
+	# ---------- 11. Late compost is refused, not consumed (audit #7 follow-up) ----------
+	# Sub-suite 10 proved the rescue LANDS when there is time for it. This one
+	# covers the window where there is not. The boost lifts soil by 1 only
+	# after SECONDS_PER_SOIL_POINT / fertilizer_multiplier(tier) seconds —
+	# 3.75s (HIGH), 7.5s (MID), 15s (LOW). Applied with less grace left than
+	# that, the old code returned true, main.gd consumed the compost, and the
+	# tile scarred regardless. The Q-inspect "will scar in Xs" countdown
+	# actively invites exactly that late application.
+	#
+	# try_apply_fertilizer now refuses those applies, on the same reasoning
+	# the LOW/MID-on-scar rejection already uses: don't let the player
+	# silently waste compost on an application that cannot do anything.
+
+	# --- 11a. The per-tier boundary, straddled tightly.
+	# Grace is written directly so the threshold is exercised exactly, with no
+	# tick-accumulation drift on either side of it. 11b drives the same rule
+	# through real ticks to prove the gate reads state the tick loop produces.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var boundary: Array = [
+		[Items.Type.COMPOST_HIGH, 3.75, "HIGH"],
+		[Items.Type.COMPOST_MID, 7.5, "MID"],
+		[Items.Type.COMPOST_LOW, 15.0, "LOW"],
+	]
+	var row_y: int = 0
+	for row in boundary:
+		var tier: int = int(row[0])
+		var need: float = float(row[1])
+		var label: String = str(row[2])
+		# Derived, not transcribed — if the constants move, so does the test.
+		_check(failures, abs(GridWorldScript.SECONDS_PER_SOIL_POINT / GridWorldScript.fertilizer_multiplier(tier) - need) < 0.0001,
+			"11a: %s needs %.2fs per soil point, constants say %.2f" % [label, need, GridWorldScript.SECONDS_PER_SOIL_POINT / GridWorldScript.fertilizer_multiplier(tier)])
+		var too_late: Vector2i = Vector2i(100, row_y)
+		_put_in_grace(world, too_late, need - 0.05)
+		_check(failures, not world.try_apply_fertilizer(too_late, tier),
+			"11a: %s at %.2fs grace (needs %.2fs) must be REFUSED" % [label, need - 0.05, need])
+		_check(failures, world.tile_fertilizer_tier(too_late) == -1,
+			"11a: a refused %s apply must write no boost state" % label)
+		var in_time: Vector2i = Vector2i(102, row_y)
+		_put_in_grace(world, in_time, need + 0.05)
+		_check(failures, world.try_apply_fertilizer(in_time, tier),
+			"11a: %s at %.2fs grace (needs %.2fs) must be ACCEPTED" % [label, need + 0.05, need])
+		_check(failures, world.tile_fertilizer_tier(in_time) == tier,
+			"11a: an accepted %s apply writes the boost" % label)
+		row_y += 1
+	_disconnect(world); world.queue_free()
+
+	# --- 11b. The honest outcome, driven by real ticks under an active planter.
+	# An active planter is what holds a soil-0 tile in grace long enough to
+	# reach the late window at all (regen is blocked, so grace burns down
+	# without the tile rescuing itself).
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var late_planter: Building = _place_active_planter(world, Vector2i(40, 40))
+	if late_planter == null:
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "11b planter placement failed: %s" % world.last_building_place_error }
+	var late: Vector2i = Vector2i(41, 40)
+	world.tile_soil_modifications[late] = 0
+	world._tick_soil_regen(1.0)             # start grace: 59.0 left
+	for _i in 55:
+		world._tick_soil_regen(1.0)         # 4.0 left
+	world._tick_soil_regen(0.9)             # 3.1 left — under HIGH's 3.75
+	_check(failures, abs(world.tile_wasteland_grace_remaining(late) - 3.1) < 0.01,
+		"11b setup: grace ≈ 3.1s, got %f" % world.tile_wasteland_grace_remaining(late))
+	_check(failures, not world.try_apply_fertilizer(late, Items.Type.COMPOST_HIGH),
+		"11b: HIGH with 3.1s grace (needs 3.75s) must be refused — main.gd then keeps the compost")
+	for _i in 40:
+		world._tick_soil_regen(0.1)
+	_check(failures, world.is_wasteland_at(late),
+		"11b: the tile scars anyway — that is the honest outcome, and the player still has the compost")
+	_check(failures, world.tile_fertilizer_tier(late) == -1,
+		"11b: no boost was written on the refused apply")
+	_disconnect(world); world.queue_free()
+
+	# The same rig with enough grace left: the apply is accepted and lands.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var timely_planter: Building = _place_active_planter(world, Vector2i(45, 45))
+	if timely_planter == null:
+		_disconnect(world); world.queue_free()
+		return { "ok": false, "message": "11b(2) planter placement failed: %s" % world.last_building_place_error }
+	var timely: Vector2i = Vector2i(46, 45)
+	world.tile_soil_modifications[timely] = 0
+	world._tick_soil_regen(1.0)             # 59.0 left
+	for _i in 53:
+		world._tick_soil_regen(1.0)         # 6.0 left
+	world._tick_soil_regen(0.9)             # 5.1 left — over HIGH's 3.75
+	_check(failures, abs(world.tile_wasteland_grace_remaining(timely) - 5.1) < 0.01,
+		"11b setup: grace ≈ 5.1s, got %f" % world.tile_wasteland_grace_remaining(timely))
+	_check(failures, world.try_apply_fertilizer(timely, Items.Type.COMPOST_HIGH),
+		"11b: HIGH with 5.1s grace (needs 3.75s) must be accepted")
+	for _i in 60:
+		world._tick_soil_regen(0.1)
+	_check(failures, not world.is_wasteland_at(timely),
+		"11b: the accepted apply rescues the tile")
+	_check(failures, world.tile_soil_health(timely) > 0,
+		"11b: boosted regen lifted soil above 0, got %d" % world.tile_soil_health(timely))
+	_disconnect(world); world.queue_free()
+
+	# --- 11c. The restore path is untouched: HIGH on a scar always succeeds.
+	# _restore_wasteland snaps soil to 30 outright — it does not wait on regen
+	# — so grace has no say over it. The second tile carries a stale non-zero
+	# decay_remaining alongside scarred=true (the dict keeps the field for
+	# save-shape stability) to prove the gate reads the scarred flag and not
+	# the raw number.
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var scar_a: Vector2i = Vector2i(110, 110)
+	world.tile_soil_modifications[scar_a] = 0
+	world.tile_wasteland_state[scar_a] = {"scarred": true, "decay_remaining": 0.0}
+	_check(failures, world.try_apply_fertilizer(scar_a, Items.Type.COMPOST_HIGH),
+		"11c: HIGH on a scar still restores")
+	_check(failures, not world.is_wasteland_at(scar_a) and world.tile_soil_health(scar_a) == GridWorldScript.WASTELAND_RESTORE_SOIL,
+		"11c: restored to soil %d, got %d" % [GridWorldScript.WASTELAND_RESTORE_SOIL, world.tile_soil_health(scar_a)])
+	var scar_b: Vector2i = Vector2i(111, 110)
+	world.tile_soil_modifications[scar_b] = 0
+	world.tile_wasteland_state[scar_b] = {"scarred": true, "decay_remaining": 0.5}
+	_check(failures, world.try_apply_fertilizer(scar_b, Items.Type.COMPOST_HIGH),
+		"11c: a scar with a stale sub-threshold decay_remaining still restores")
+	_check(failures, not world.is_wasteland_at(scar_b) and world.tile_soil_health(scar_b) == GridWorldScript.WASTELAND_RESTORE_SOIL,
+		"11c: stale-timer scar restored to soil %d, got %d" % [GridWorldScript.WASTELAND_RESTORE_SOIL, world.tile_soil_health(scar_b)])
+	_disconnect(world); world.queue_free()
+
+	# --- 11d. The applicator's picker must agree with the apply.
+	# Audit #5's shape: when _tile_eligible nominates a tile try_apply_fertilizer
+	# then refuses, the machine goes BLOCKED and re-nominates the identical tile
+	# next tick. A soil-0 tile in grace wins the most-depleted sort every time,
+	# so a new apply-side rejection the picker doesn't know about reintroduces
+	# that wedge (bounded by the remaining grace rather than permanent, but the
+	# "false branch is defensive" comment in the applicator would be false).
+	world = GridWorldScript.new()
+	parent.add_child(world)
+	var picker_late: Vector2i = Vector2i(120, 120)
+	_put_in_grace(world, picker_late, 2.0)
+	_check(failures, not FertilizerApplicator._tile_eligible(world, picker_late, Items.Type.COMPOST_HIGH),
+		"11d: the picker must not nominate a tile whose grace is too short for the tier")
+	_check(failures, not world.try_apply_fertilizer(picker_late, Items.Type.COMPOST_HIGH),
+		"11d: and the apply refuses it — picker and apply agree")
+	var picker_ok: Vector2i = Vector2i(122, 120)
+	_put_in_grace(world, picker_ok, 40.0)
+	_check(failures, FertilizerApplicator._tile_eligible(world, picker_ok, Items.Type.COMPOST_HIGH),
+		"11d: a tile with room to spare stays eligible")
+	_disconnect(world); world.queue_free()
+
 	if failures.is_empty():
-		return { "ok": true, "message": "all 10 sub-suites passed (trigger + grace + blocks regen + planter + recovery + save v18 + recipes + stacking + grace-rescue + grace-rescue-under-active-farming)" }
+		return { "ok": true, "message": "all 11 sub-suites passed (trigger + grace + blocks regen + planter + recovery + save v18 + recipes + stacking + grace-rescue + grace-rescue-under-active-farming + late-compost-refused)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------
+
+## Put `pos` at soil 0 with exactly `remaining` seconds of unscarred grace,
+## without ticking. _tick_soil_regen builds this same entry one delta at a
+## time; writing it directly lets sub-suite 11 sit a hair either side of a
+## threshold with no accumulation drift deciding the result.
+static func _put_in_grace(world, pos: Vector2i, remaining: float) -> void:
+	world.tile_soil_modifications[pos] = 0
+	world.tile_wasteland_state[pos] = {"scarred": false, "decay_remaining": remaining}
 
 ## Tills `anchor` and places a wheat planter there, then forces it ACTIVE by
 ## writing `growth` directly — Planter.is_active is `growth > 0 or output > 0`

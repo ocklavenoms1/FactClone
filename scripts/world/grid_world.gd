@@ -773,6 +773,12 @@ func deplete_planter_area(anchor: Vector2i, center_cost: int) -> void:
 ## it was always advertised for. It buys the player out of scarring only —
 ## regen stops again at soil 1, and the planter takes it back to 0.
 ##
+## **Late applies are refused (audit #7 follow-up):** the boost needs
+## SECONDS_PER_SOIL_POINT / multiplier seconds to deliver that first soil
+## point, so applying with less grace left than that still ends in a scar
+## with the compost spent. `grace_admits_tier()` gates those out — see it
+## for the reasoning and for who else asks it.
+##
 ## Returns true if the boost was applied (caller should consume 1 from
 ## inventory). Returns false if rejected (caller should toast and NOT
 ## consume).
@@ -799,15 +805,52 @@ func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
 		_restore_wasteland(pos)
 		# Fall through to apply HIGH boost on the now-restored tile.
 	var current = tile_fertilizer_state.get(pos)
-	if current == null:
-		tile_fertilizer_state[pos] = {"tier": tier, "remaining": fertilizer_duration(tier)}
-		return true
-	var current_tier: int = int(current["tier"])
-	if tier < current_tier:
+	if current != null and tier < int(current["tier"]):
 		return false   # lower-tier rejected; caller surfaces toast
-	# Same tier (refresh) or higher tier (upgrade): both write fresh state.
+	# The stacking rule is settled by here, so this gate only ever refuses an
+	# apply that would otherwise have been accepted AND consumed. Ordered this
+	# way on purpose: a lower-tier-on-higher apply keeps its own, more precise
+	# toast rather than being relabelled a timing problem.
+	if not grace_admits_tier(pos, tier):
+		return false   # too late for the boost to land; caller surfaces toast
+	# No boost (fresh), same tier (refresh) or higher tier (upgrade): one write.
 	tile_fertilizer_state[pos] = {"tier": tier, "remaining": fertilizer_duration(tier)}
 	return true
+
+## Can `tier`'s boost still lift this tile's soil by one point before the
+## tile's wasteland grace runs out? Applying a boost is the ONLY way an
+## unscarred soil-0 tile gets out of grace (this function never adds soil
+## itself), and the boost takes SECONDS_PER_SOIL_POINT / multiplier seconds
+## to deliver that point: 3.75s (HIGH), 7.5s (MID), 15s (LOW). Applied with
+## less grace left than that, the compost is spent and the tile scars anyway
+## — which is exactly what audit #7's repro measured, and what the
+## "will scar in Xs" countdown (info_panel.gd, console.gd) invites.
+##
+## So we refuse, on the same reasoning as the LOW/MID-on-scar rejection
+## above: don't let the player silently waste compost on an application that
+## cannot do anything. The player keeps the item; the tile scars either way.
+##
+## Public for the same reason wasteland_accepts_tier() is: the Fertilizer
+## Applicator picks a target a tick before it applies to it, and a soil-0
+## tile in grace wins its most-depleted sort every time. A picker that
+## nominated tiles this gate then refused would re-nominate the same tile
+## every tick and sit BLOCKED — audit #5's shape, bounded by the remaining
+## grace instead of permanent. main.gd also asks it, to pick its toast.
+##
+## Deliberately ignores accumulated tile_regen_progress, which would make the
+## threshold tighter but is not serialized (design Q5) — an accept/reject
+## decision must not flip across a save/load. Ignoring it can only produce a
+## conservative refusal on a tile that then rescues itself from the boost it
+## already has, which costs the player nothing.
+##
+## Returns true when the tile is not in unscarred grace at all: healthy soil
+## has no grace entry, and a scarred tile is the _restore_wasteland branch's
+## business (that snaps soil to 30 outright and never waits on regen).
+func grace_admits_tier(pos: Vector2i, tier: int) -> bool:
+	var grace: float = tile_wasteland_grace_remaining(pos)
+	if grace <= 0.0:
+		return true   # not in grace (healthy soil, or scarred → 0.0)
+	return grace >= SECONDS_PER_SOIL_POINT / fertilizer_multiplier(tier)
 
 ## Read the active fertilizer tier on a tile. Returns -1 if no active boost.
 func tile_fertilizer_tier(pos: Vector2i) -> int:
@@ -1245,10 +1288,24 @@ func _tick_soil_regen(delta: float) -> void:
 		# The audit's own prescribed fix — pausing the grace countdown while
 		# a tile is actively farmed — was rejected: PROJECT_LOG.md:775 records
 		# active planters pinning soil at 0 as THE organic scarring path, and
-		# an inactive soil-0 tile always self-rescues (SECONDS_PER_SOIL_POINT
-		# 30 < WASTELAND_GRACE_SEC 60), so pausing would leave no organic
-		# route to wasteland at all. test_wasteland.gd sub-suite 10b is the
-		# regression guard for that.
+		# pausing grace on active tiles pins a continuously-active planter's
+		# neighbours at grace = 60.00 forever, killing the one scarring route
+		# the player can find and understand. test_wasteland.gd sub-suite 10b
+		# is the regression guard for that.
+		#
+		# Note what the rejection does NOT rest on: "an inactive soil-0 tile
+		# always self-rescues" is false as stated, and b92a769's commit message
+		# carries that false premise (see the tracker entry for #7, which is the
+		# correcting record — the commit is on a shared index and cannot be
+		# amended). Self-rescue is only guaranteed for a tile inactive across
+		# the WHOLE grace window from soil-0 onset: SECONDS_PER_SOIL_POINT (30)
+		# beats WASTELAND_GRACE_SEC (60) only from a full 60. Measured
+		# counter-example — burn a soil-0 tile's grace to 15.0s under an active
+		# planter, then let the planter go idle; tile_regen_progress was erased
+		# on the last active frame, so the tile needs 30s for +1 soil and has
+		# 15s, and it scars while fully inactive. An oscillating planter can
+		# therefore still scar a tile even with grace paused. The conclusion
+		# holds anyway on the documented-path argument above.
 		if active_tiles.has(pos) and not (soil_now == 0 and _fertilizer_boost_multiplier(pos) > 1.0):
 			tile_regen_progress.erase(pos)
 			continue

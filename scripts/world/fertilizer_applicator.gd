@@ -149,12 +149,13 @@ static func tick(b: Building, world) -> void:
 		b.state["state"] = STATE_BLOCKED
 		return
 
-	# Apply. try_apply_fertilizer rejects on two grounds — an equal-or-better
-	# boost already on the tile, and a non-restoring tier on scarred
-	# wasteland — and _tile_eligible pre-filters both, so the `false` branch
-	# is defensive (treat as BLOCKED if it ever fires). It used to filter
-	# only the first, which is what let one scarred tile wedge the machine
-	# here permanently (audit #5).
+	# Apply. try_apply_fertilizer rejects on three grounds — an equal-or-better
+	# boost already on the tile, a non-restoring tier on scarred wasteland, and
+	# too little wasteland grace left for the boost to lift soil in time — and
+	# _tile_eligible pre-filters all three, so the `false` branch is defensive
+	# (treat as BLOCKED if it ever fires). It used to filter only the first,
+	# which is what let one scarred tile wedge the machine here permanently
+	# (audit #5).
 	if world.try_apply_fertilizer(target, selected_tier):
 		_buffer_remove(b.state["in_buffer"], selected_tier, 1)
 		b.state["scan_progress"] = 0
@@ -213,8 +214,15 @@ static func _select_fertilizer_from_buffer(b: Building) -> int:
 ##   - an equal-or-better boost already active — same rule as hand-apply Q5
 ##     stacking, which try_apply_fertilizer enforces upstream
 ##   - a scarred wasteland tile the selected tier cannot restore
+##   - a tile in wasteland grace with less time left than the selected tier
+##     needs to lift soil by one point (audit #7 follow-up) — delegated to
+##     GridWorld.grace_admits_tier, the predicate try_apply_fertilizer gates
+##     on. Same drift argument as the wasteland line below, and the same
+##     wedge shape if it were missing: a soil-0 tile in grace wins the
+##     most-depleted sort every time, so the machine would nominate it, be
+##     refused, go BLOCKED, and re-nominate it until the tile scarred.
 ##
-## That last one is audit #5. A scarred tile holds soil 0 permanently
+## That scarred-tile rejection is audit #5. A scarred tile holds soil 0 permanently
 ## (regen skips wasteland), so it wins the most-depleted sort every time,
 ## while try_apply_fertilizer refuses every tier below HIGH on scarred
 ## ground. Without this rejection the applicator nominated the scar, was
@@ -237,6 +245,8 @@ static func _tile_eligible(world, pos: Vector2i, selected_tier: int) -> bool:
 	if world.tile_fertilizer_tier(pos) >= selected_tier:
 		return false
 	if world.is_wasteland_at(pos) and not world.wasteland_accepts_tier(selected_tier):
+		return false
+	if not world.grace_admits_tier(pos, selected_tier):
 		return false
 	return true
 

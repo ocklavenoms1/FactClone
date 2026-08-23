@@ -961,11 +961,19 @@ func _try_apply_item(pos: Vector2i, item_type: int) -> void:
 		var was_wasteland: bool = grid_world.is_wasteland_at(pos)
 		var applied: bool = grid_world.try_apply_fertilizer(pos, item_type)
 		if not applied:
-			# Two reject reasons: lower-tier-on-higher OR non-HIGH on wasteland.
+			# Three reject reasons, tested in the order try_apply_fertilizer
+			# itself checks them so the toast names the reason that actually
+			# fired: non-HIGH on wasteland, lower-tier-on-higher, then too
+			# little grace left for the boost to lift soil in time.
 			if grid_world.is_wasteland_at(pos):
 				_rate_limited_fail_toast("Tile is wasteland — only Premium Compost restores it.")
-			else:
+			elif grid_world.tile_fertilizer_tier(pos) > item_type:
 				_rate_limited_fail_toast("Tile already has higher-tier compost.")
+			else:
+				# Distinct from the wasteland line above: the tile is NOT
+				# scarred yet, and the compost is not consumed — the point is
+				# that spending it here would change nothing.
+				_rate_limited_fail_toast("Too late — %s can't restore this tile before it scars." % Items.name_of(item_type))
 			return
 		player_inventory.remove(item_type, 1)
 		if was_wasteland:
