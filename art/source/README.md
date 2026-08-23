@@ -72,17 +72,15 @@ only the prompt fixes style, form, and detail density.
 
 | File | Status |
 |---|---|
-| `smelter.glb` | **REAL — reference asset, approved and pinned.** Tripo `SMELTER.glb`. Its albedo correction is frozen (`albedo_pinned`); `palette_drift.py --emit` refuses to overwrite it. |
-| `power_pole.glb` | **REAL.** Tripo `power_pole.glb`. Tall-thin case, `fit: height`, three palette members including the first working verdigris. **Currently fails the HF detail gate** — see `PIPELINE.md`. |
-| `chest.glb` | **Proxy.** Crude stand-in from `make_proxies.py`. Now the *only* flat-geometry reference, so it alone defines the HF floor until a real chest lands. |
+| `_calib_floor.glb` | **PERMANENT HF FLOOR.** Synthetic, committed, never regenerated. Not an asset. |
+| `smelter.glb` | **REAL — reference asset.** Tripo `SMELTER.glb`. Currently unpinned and re-emitted under the raised clamp, awaiting re-approval by eye. |
+| `power_pole.glb` | **REAL — approved by eye.** Tall-thin case, `fit: height`, three palette members including the first working verdigris. |
+| `chest.glb` | **Proxy.** Crude stand-in from `make_proxies.py`, still awaiting a real chest. |
 
 Overwrite each proxy as you generate the real model, then flip `status` to
 `real` in `assets.json` and declare its `palette_members`.
 
-**Note on the HF floor:** `detail_density.py` measures high-frequency
-destruction as a ratio against flat untextured geometry. `power_pole` used to
-be part of that floor and no longer can be, now that it is a real textured
-asset - a floor cannot include the thing it measures. The floor is currently
-`chest` alone, i.e. **n = 1**, which is fragile. When the real chest lands,
-either keep a dedicated flat proxy purely as the floor reference or re-base the
-budget on the approved reference asset instead.
+**The HF floor is settled:** a permanent synthetic object, `_calib_floor.glb`,
+committed and never regenerated. No real asset is ever the floor - a floor
+cannot include the thing it measures. And HF is a **diagnostic, not a gate**:
+the gate is the finished 32px sprite, looked at (`art/tools/eye_sheet.py`).

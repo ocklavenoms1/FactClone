@@ -1574,3 +1574,63 @@ range from below, which is the mechanism to expect.
 > So raising fill would narrow the gap by *less* than this table suggests, at
 > the readability cost the table shows in full. If the rig is unlocked, it
 > should be on probes that include occlusion, not these.
+
+---
+
+## 25. DECISION: the rig stays locked, and form-driven lightness is accepted
+
+Not a defect. A decision, taken on measurement.
+
+### The rule
+
+**A locked palette hex is an ALBEDO, never a screen colour.**
+
+Under this rig every surface is multiplied by roughly 3-9x depending on how it
+faces the key. `#5A5E58` will never appear on screen and is not supposed to. It
+is the target the albedo correction aims the *material* at, before any light
+touches it.
+
+**Consistency means a shared transform, not a shared appearance.** Every asset
+goes through the same locked camera, the same three-point rig, the same
+correction to the same palette. That is what makes them one set.
+
+**Form still decides how much light a surface catches, and that is correct.** A
+squat blocky smelter presents broad faces to the key and reads light. A thin
+post is edge-on and self-shadowed and reads dark. Two buildings of the same
+material *should* differ in final lightness if their shapes differ - that is
+what makes them read as objects standing in a world rather than decals pasted
+onto it.
+
+### Why it was not "fixed"
+
+The bleaching had exactly one cause once the other two were ruled out: not the
+view transform (0.0% of pixels clip), not the albedo correction (every anchor
+lands 1.00x on target). The rig, on form, measured at 8.63x versus 2.85x
+between the smelter's stone and the pole's timber.
+
+The fill knob was measured rather than turned:
+
+| variant | key:fill | top/post spread | form readability |
+|---|---|---|---|
+| **locked** | 3.76:1 | **2.20x** | **54.6%** |
+| fill x2 | 1.88:1 | 1.90x | 48.4% |
+| fill x3 + ambient x1.5 | 1.25:1 | 1.63x | 38.8% |
+
+**A one-for-one trade** - 26% less form spread for 29% less contrast between a
+lit face and a turned-away one. And the probes *overstate* the benefit, because
+they isolate orientation and cannot reproduce self-shadowing or inter-part
+occlusion: they read 2.20x where the real assets read 3.03x. Raising fill would
+buy less than the table promises at the full price it shows.
+
+So the trade was refused. Flattening the rig to make two buildings agree would
+cost the thing that makes every building read as solid.
+
+### What this means going forward
+
+- Do not compare a rendered sprite's lightness against a palette hex. They are
+  different quantities. Compare a rendered sprite against **another rendered
+  sprite** - which is what `eye_sheet.py` is for.
+- A big pale building next to a small dark one is the rig working, not drifting.
+- The rig is the last locked thing and stays locked. `rig_study.py` remains for
+  measuring it; occlusion-aware probes were considered and **deliberately not
+  built**, because that is work to justify a change nobody is making.
