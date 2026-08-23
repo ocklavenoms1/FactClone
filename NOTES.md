@@ -285,6 +285,68 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 ---
 
+## Wire-edge cost: cache the edge list, invalidate from `mark_dirty`
+
+Measured at Electricity Session 3 Task 7, headless console build. `wire_edges` runs
+**every frame** from `_draw_power_wires`.
+
+| poles in one component | MST (shipped) | the mesh it replaced |
+|---|---|---|
+| 12 (the rigs) | 0.16 ms — ~1% of a 60 fps frame | — |
+| 50 | 2.5 ms — 15% | — |
+| 100 | **12.5 ms — 75%** | **8.3 ms — 50%** |
+
+**The quadratic pair scan is INHERITED, not introduced.** MST is ~1.5× the mesh (it also
+weighs each accepted pair and rescans for the cheapest edge), so 100 poles on one network was
+already unaffordable before Task 7. Nothing in the suite would catch this — it is a rendering
+path.
+
+**The fix, when it becomes real: cache `wire_edges`' return on the world and invalidate it
+from `mark_power_network_dirty`.** Topology only changes on placement or removal, so a cached
+edge list is correct for every frame in between, and it collapses per-frame cost to zero.
+Small, well-scoped, no correctness property spent. Reported and deliberately NOT implemented
+at Task 7 — measurement precedes optimisation, and the number was not yet worth acting on.
+
+`test_pole_tiers.gd` sub-case (12) gates the **50-pole** figure at 8000 µs and prints all
+three on every run. 12 poles would not catch a regression to a cubic formulation (the plan's
+original `remaining × in_tree` Prim's measured 0.73 ms at 12 — inside any noise-tolerant
+budget — but **340 ms at 100**, twenty frames per frame). 100 would require writing down that
+three quarters of a frame is acceptable.
+
+---
+
+## Wire rendering: MST was REJECTED once before, at Foundation PAUSE 1
+
+**Read this before changing wire rendering again.** `session-electricity-foundation` PAUSE 1
+took five iterations (full list in "UX iteration trap" below). Iteration **4 was MST
+(Kruskal)** and the user rejected it:
+
+> **"these 2 should connect directly"** — MST routed through other poles.
+
+Iteration 5, mesh-within-network at `POLE_RANGE = 3` with supply radius 1, is what PASSED —
+and is what Electricity Session 3 Task 7 replaced with MST.
+
+**Why the reversal is not a contradiction.** At Foundation there was one tier and every pole
+was interchangeable, so mesh at range 3 was affordable. Per-tier ranges changed the
+arithmetic: a substation at range 11 in a mesh fans out to nearly every pole around it,
+because either-reaches forms the link regardless of the small pole's reach. That is
+iteration 1's "too tangled" complaint at several times the scale. Reverting to mesh means
+capping ranges, which costs the substation its reason to exist.
+
+**The objection is inherent, not tunable.** MST routes through intermediates. In a square of
+four equidistant poles every tie resolves to the lex-first pole, so the tree is a star and the
+far corner reaches across the diagonal rather than to either adjacent neighbour.
+
+### The third option, if the K4 ever reads wrong
+
+Nobody has costed it: **mesh-within-network for basic and medium poles, MST (or a single
+nearest-neighbour link per cluster) for substations.** Local clusters keep the look that
+passed at Foundation; the backbone stops fanning out. More complex than either pure rule.
+The rule it implements is *"clusters should mesh, backbones shouldn't"* — so if a future gate
+rejects MST and that is the articulated rule, this is the shape it takes.
+
+---
+
 ## Supply-scan cost: the memo is the lever, NOT the early return
 
 Measured at Electricity Session 3 Task 6, headless console build (debug checks on, so
