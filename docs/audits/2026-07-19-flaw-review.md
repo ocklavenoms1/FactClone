@@ -230,8 +230,29 @@ severity from a document that also claimed it was fixed.
 
 ### Current baselines for count-type findings
 
-`SAVE_VERSION` 18 · worldgen `VERSION` 4 · 48 test suites · console 13 commands /
-812 lines · 21 specialized panels · 12 ProcessorPanel consumers.
+**Re-derive these before citing one. A bare number here is exactly the drift that
+findings #79-#83 are about, and this block went stale itself** — it read "48 test
+suites" until 2026-08-23, two suites behind, inside the document tracking that
+class of defect. Each entry below carries the command that produces it, so a
+reader can check in one line instead of trusting the number.
+
+Verified 2026-08-23 at `09ab238`:
+
+| Value | Command |
+|---|---|
+| `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
+| worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
+| **50** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
+| `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
+| **13** ProcessorPanel subclasses | `grep -rc 'extends ProcessorPanel' scripts/ui/*.gd \| grep -v ':0'` |
+
+Two notes on the numbers this replaces. **ProcessorPanel consumers read 12 and are
+now 13**, so finding #82 (`NOTES.md` says 11) is understated by two, not one — fix
+the count when closing it rather than copying the audit's figure. **"21 specialized
+panels" is dropped**: `scripts/ui/*_panel.gd` is 26 files and the document never
+said which five it excluded, so the number was never checkable. Any finding that
+cited it needs its own derivation.
 
 ### Deferred by prior decision, still valid
 
