@@ -22,12 +22,26 @@ body sprite.
 
 STORAGE
 RGB holds the fire's colour normalized to its brightest channel; A holds the
-intensity. Additive compositing then reconstructs the original exactly:
+intensity. Additive compositing reconstructs the lit render:
 
     dst += rgb * a
 
 and scaling `a` dims the fire without shifting its hue - which is what a
 flicker pulse needs.
+
+NOT exactly, though - this file used to claim "exactly" and that was wrong.
+Measured on the smelter: body+glow at full strength differs from the direct lit
+render by up to 47/255 on the 513 lit pixels, mean 5.7/255. It is not clipping;
+the pixels that clip are actually the ACCURATE ones (mean error 3.5 vs 5.9 for
+the rest). The cause is that the chain is not linear end to end - the
+difference is clamped at zero before the downsample, and LANCZOS has negative
+lobes, so clamp-then-resample and resample-then-clamp disagree at the fire's
+soft edge, and the normalize/8-bit round-trip adds a little more.
+
+The error is invisible at 32px and does not need fixing. It does need to be
+stated, because the composite is what SHIPS and the lit render is only a
+staging artifact - so eye sheets must be built from body+glow, never from the
+lit render, or an approval is judging pixels no player will see.
 """
 
 import argparse

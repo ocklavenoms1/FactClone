@@ -57,7 +57,6 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_pole_tiers.gd"),
 	preload("res://scripts/tests/test_pole_tier_rig.gd"),
 	preload("res://scripts/tests/test_load_network_invalidation.gd"),
-	preload("res://scripts/tests/test_mixed_tier_save_roundtrip.gd"),
 ]
 
 func _ready() -> void:

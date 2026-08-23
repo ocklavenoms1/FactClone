@@ -1744,3 +1744,41 @@ ordering already agreed - crossarm hard at the TOP of the mast so the outline
 is a T with no mast above it, then the transformer box moved high and made much
 bigger, then unequal crossarm arms. `art/tools/cross_read.py` measures the four
 numbers so the next version can be checked before it is approved.
+
+## 29. The eye sheet must be built from what SHIPS, not from the lit render
+
+Adding `--glow` to `eye_sheet.py` for the smelter's re-approval turned up two
+things, one a bug in the new flag and one older.
+
+**The flag lit the wrong panel.** `glow = lit - body`, so the layer may only be
+composited onto the body sprite. The first version took the caller's word for
+it, lit the idle panel as well, and produced a states strip where idle and
+smelting looked identical. `glow_of()` now reads `assets.json`, finds the state
+whose hook is null, and refuses anything else out loud:
+
+```
+SKIP glow on smelter_smelting: not the body sprite (smelter_idle). glow = lit - body.
+```
+
+Compositing the glow onto the LIT render double-counts the fire, which is the
+more dangerous of the two mistakes: it looks plausible, just hotter.
+
+**`body + glow` does not reconstruct the lit render exactly**, and glow_layer.py
+claimed it did. Measured on the smelter: max 47/255, mean 5.7/255 over the 513
+lit pixels. Not clipping - the 35 pixels that clip have LOWER error (3.5) than
+the ones that don't (5.9). The cause is that the chain is not linear end to
+end: the difference is clamped at zero before the downsample, LANCZOS has
+negative lobes, and clamp-then-resample disagrees with resample-then-clamp at
+the fire's soft edge.
+
+The error is invisible at 32px and is not worth fixing. What matters is the
+consequence: **the composite is what ships and the lit render is a staging
+artifact**, so a states sheet built from `smelter_smelting.png` is judging
+pixels no player will ever see. The strip is now idle | idle+glow.
+
+Same shape as the silhouette lesson and the shadow lesson: judge the thing in
+the state and at the size it will actually be seen in. Three times now the
+defect has been in what the review LOOKED at rather than in the asset.
+
+`--glow-strength` renders the flicker range (0.35 / 0.7 / 1.0) so the pulse
+bounds are chosen by eye rather than guessed.

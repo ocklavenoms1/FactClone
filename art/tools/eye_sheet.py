@@ -38,6 +38,7 @@ reads as a soft contact patch magnified reads as an opaque rectangle at 32px.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -67,8 +68,65 @@ def shadow_of(name):
     return Image.open(sp).convert("RGBA")
 
 
-def load(name, with_shadow=False, strength=1.0):
+def body_sprite_of(asset):
+    """The unlit state - the one whose hook is null. That is the sprite Godot
+    actually draws; every other state is reconstructed on top of it."""
+    with open(os.path.join(REPO, "art", "assets.json")) as f:
+        for a in json.load(f)["assets"]:
+            if a["name"] == asset:
+                for state, hook in (a.get("states") or {}).items():
+                    if hook is None:
+                        return f"{asset}_{state}" if state else asset
+    return None
+
+
+def glow_of(name):
+    """The glow layer, but ONLY for the body sprite it was subtracted from.
+
+    glow = lit - body. Compositing it onto the lit render double-counts the
+    fire; compositing it onto a different asset's sprite is meaningless. The
+    first version of this took the caller's word for it and lit the idle panel,
+    which is how the two states came back looking identical.
+    """
+    for base in [n for n in (name, name.rsplit("_", 1)[0]) if n]:
+        gp = os.path.join(REPO, "art", "sprites", f"{base}_glow.png")
+        if os.path.exists(gp):
+            if body_sprite_of(base) != name:
+                print(f"  SKIP glow on {name}: not the body sprite "
+                      f"({body_sprite_of(base)}). glow = lit - body.")
+                return None
+            return Image.open(gp).convert("RGBA")
+    return None
+
+
+def add_glow(body, glow, strength):
+    """dst += rgb * a, the same additive rule Godot uses on the glow layer.
+
+    Alpha is left alone: the layer only lights pixels the body already covers,
+    so compositing it must not grow the silhouette.
+    """
+    bp, gp = body.load(), glow.load()
+    out = body.copy()
+    op = out.load()
+    for y in range(body.height):
+        for x in range(body.width):
+            ga = gp[x, y][3] / 255.0 * strength
+            if ga <= 0.0:
+                continue
+            r, g, b, a = bp[x, y]
+            gr, gg, gb, _ = gp[x, y]
+            op[x, y] = (min(255, int(r + gr * ga)),
+                        min(255, int(g + gg * ga)),
+                        min(255, int(b + gb * ga)), a)
+    return out
+
+
+def load(name, with_shadow=False, strength=1.0, with_glow=False, glow_strength=1.0):
     body = body_of(name)
+    if with_glow:
+        glow = glow_of(name)
+        if glow is not None and glow.size == body.size:
+            body = add_glow(body, glow, glow_strength)
     if not with_shadow:
         return body
     shadow = shadow_of(name)
@@ -113,7 +171,7 @@ def compose(panels, bg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--asset", required=True)
+    ap.add_argument("--asset")
     ap.add_argument("--reference", default="smelter_idle")
     ap.add_argument("--zooms", default="1,2,4")
     ap.add_argument("--out")
@@ -124,7 +182,25 @@ def main():
                     help="comma-separated strengths, rendered side by side at 1x")
     ap.add_argument("--silhouette", action="store_true",
                     help="solid black mask on white - does the outline alone read?")
+    ap.add_argument("--glow", action="store_true",
+                    help="composite the additive glow layer, as Godot does")
+    ap.add_argument("--glow-strength", type=float, default=1.0)
+    ap.add_argument("--states",
+                    help="comma-separated sprite names, shown at 1x and 2x on one row")
     a = ap.parse_args()
+    if not a.asset and not a.states:
+        ap.error("need --asset (or --states)")
+
+    if a.states:
+        names = [s.strip() for s in a.states.split(",")]
+        panels = []
+        for n in names:
+            im = load(n, a.shadow, a.shadow_strength, a.glow, a.glow_strength)
+            panels += [zoom(im, 1), zoom(im, 2)]
+        out = a.out or os.path.join(REPO, "art", "renders", f"states_{names[0]}.png")
+        compose(panels, BG).convert("RGB").save(out)
+        print(f"STATES {out}   {names} at 1x and 2x")
+        return
 
     if a.shadow_levels:
         levels = [float(v) for v in a.shadow_levels.split(",")]
@@ -144,8 +220,8 @@ def main():
         return
 
     zs = [int(z) for z in a.zooms.split(",")]
-    asset = load(a.asset, a.shadow, a.shadow_strength)
-    ref = load(a.reference, a.shadow, a.shadow_strength)
+    asset = load(a.asset, a.shadow, a.shadow_strength, a.glow, a.glow_strength)
+    ref = load(a.reference, a.shadow, a.shadow_strength, a.glow, a.glow_strength)
     panels = [zoom(asset, z) for z in zs] + [ref]
     out = a.out or os.path.join(REPO, "art", "renders", f"eye_{a.asset}.png")
     compose(panels, BG).convert("RGB").save(out)
