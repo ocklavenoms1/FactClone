@@ -57,9 +57,13 @@ CONTRAST BY AREA:
 LARGE regions - walls, roof, base, posts - are strongly DIFFERENT in value from
 each other. A stone wall against a timber post should read as light against
 dark at a glance.
-THIN features - bands, straps, bolts, rivets, edging, trim - are CLOSE in value
-to whatever surrounds them. A thin iron band on a timber post is barely darker
-than the post, never a hard dark line.
+THIN features - bands, straps, bolts, rivets, edging, trim - are CLOSE in VALUE
+to whatever surrounds them, but keep their own HUE. A thin iron band on a timber
+post is barely darker than the post, never a hard dark line - and it is still
+unmistakably iron-coloured, never a blend halfway between iron and timber.
+
+NO VISIBLE WOOD GRAIN. Timber is a flat block of colour. No striping, no
+lengthwise fibres, no plank lines.
 
 Colours only: fieldstone grey #5A5E58, wrought iron #46504E, weathered oak
 #6B4E32, leather #7A4438, verdigris green #4E7A66 (accents only).
@@ -220,6 +224,19 @@ a band.* Both halves are measured:
 
 A thin high-contrast edge is the single most expensive thing you can ask for at
 this resolution. A thin low-contrast one is free.
+
+**Low contrast means VALUE, not HUE.** The pole's bands were asked to be "only
+slightly darker than the timber" and came back a warm olive sitting between
+weathered oak and wrought iron - a cluster **equidistant from three palette
+members at once (d1/d2 = 0.97)**, which the matcher cannot assign, so those
+pixels go uncorrected. Keep a thin feature close in lightness to its
+surroundings and firmly in its own hue.
+
+**NO VISIBLE WOOD GRAIN - measured.** On the pole, **64% of all destroyed
+high-frequency energy is vertical striping, rising to 74% inside the mast**;
+the two iron bands account for only 26% there. Grain is the single largest HF
+cost in the set, roughly 3:1 over the thing it was assumed to be. Timber is a
+flat block of colour.
 
 ---
 

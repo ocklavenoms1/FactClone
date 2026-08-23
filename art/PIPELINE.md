@@ -132,6 +132,8 @@ art/
     assert_palette_era.py  gate: every real asset on the locked palette era
     assert_rig_correlation.py  gate: baked light must not oppose the rig
     baked_shading.py       albedo variance by spatial scale (see section 15)
+    hf_regions.py          WHERE an asset spends its HF: by region and by stripe orientation
+    make_calibration.py    builds the permanent synthetic HF floor (blender/)
     palette_board.py       renders a palette on flat proxies, no correction
 ```
 
@@ -1238,3 +1240,75 @@ pixels moved by >8/255, 7.6% by >32/255**. Side by side in
 `art/renders/smelter_reapproval.png`. Its rig correlation moved +0.296 ->
 +0.492, which is expected: same asset, different correction, and the magnitude
 is not comparable across pipeline versions.
+
+---
+
+## 20. Pole v2: the band fix was right and insufficient - GRAIN dominates
+
+Five high-contrast bands became two low-contrast bands. The result, plainly:
+
+| | HF destroyed | vs synthetic floor |
+|---|---|---|
+| pole v1 (five bands) | 15.6% | 15.60x |
+| **pole v2 (two bands)** | **13.6%** | **13.60x** |
+
+**A 13% drop, not a large one.** The contrast-by-area theory is not falsified -
+it moved the number in the right direction - but it is clearly not the dominant
+cost on this asset. Saying so plainly rather than explaining it away was the
+instruction, and this is that answer.
+
+### Where the cost actually is
+
+`hf_regions.py` decomposes it two ways. The one that matters here is by
+ORIENTATION, because grain and bands overlap in the same pixels and no spatial
+mask could separate them: vertical stripes (grain running up the mast) put their
+energy in the horizontal-frequency axis, horizontal stripes (bands crossing it)
+in the vertical axis.
+
+| | share of destroyed energy |
+|---|---|
+| whole sprite - vertical stripes (grain) | **64%** |
+| whole sprite - horizontal stripes (bands) | 36% |
+| **inside the mast** - vertical (grain) | **74%** |
+| inside the mast - horizontal (bands) | 26% |
+
+**Grain dominates, roughly 3:1 inside the mast.** Corroborated independently in
+the albedo: the pole carries about **1.7x the smelter's total fine-detail
+energy**.
+
+> **A flaw in my own metric, stated rather than buried:** the by-region
+> "contribution" number came out **negative** for the crossarm (-5.90%). That is
+> the measure failing, not a finding - HF is a RATIO of high-band to total AC
+> energy, so flattening a large region strips low-frequency energy too and can
+> RAISE the ratio. Region contributions are only readable by sign, and only for
+> the largest region. The orientation split has no such problem: fixed region,
+> fixed total, so it is the number to trust.
+
+**The fix is "no visible wood grain", and it belongs in the style core** - where
+it was, before the fine-detail rule was relaxed. That is a prompt error, not a
+model failure. `PROMPTS.md` now carries it with this measurement attached.
+
+### The bands landed exactly on the ambiguity the d1/d2 rule exists to catch
+
+They do form their own cluster, and it is a dead heat:
+
+| cluster | colour | pop | d to oak | d to iron | d to verdigris | d1/d2 |
+|---|---|---|---|---|---|---|
+| 15 | `#4F4229` | 2.5% | 0.0909 | 0.0983 | 0.0933 | **0.97** |
+
+Equidistant from three members at once. It did not cause a *drop*, because it is
+not the chosen cluster for any member - oak took `#4C300F`, iron took `#282B23`
+(the dark base plate). So the band cluster is simply **unmatched and ignored**:
+the bands are corrected only by whatever gaussian blend of the other anchors
+happens to reach them, and drift uncorrected.
+
+**The tension is real and worth naming: low contrast helps the downsample and
+hurts the matcher.** Asking for a band "only slightly darker than the timber"
+produced a warm olive sitting between oak and iron, which is exactly what an
+ambiguous cluster looks like.
+
+**It resolves rather than trades off, though - the instruction just needs to be
+sharper.** Low contrast should constrain **value**, not **hue**. A thin iron
+band should be a *dark, desaturated wrought iron* - close to the timber in
+lightness, unmistakably iron in hue. What produces ambiguity is drifting the hue
+halfway to the neighbour, not keeping the value close. `PROMPTS.md` now says so.
