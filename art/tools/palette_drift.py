@@ -126,6 +126,62 @@ def chromaticity(c):
     return c / np.maximum(s, 1e-9)
 
 
+LUM = np.array([0.2126, 0.7152, 0.0722])
+
+# THE SPLIT CORRECTION: a hue-preserving scalar, plus a bounded chromatic term.
+#
+# The old anchor solved gain = target/observed per channel. That constrains
+# VALUE exactly - the anchor's mean lands on target, verified repeatedly - and
+# constrains hue NOT AT ALL, because a per-channel multiplicative gain preserves
+# hue only when its three channel gains are equal. Every asset is fitted to its
+# own drift, so every asset got a different hue rotation, and assets that agreed
+# in the raw texture were rotated apart: smelter-vs-chest oak went from 0.024 in
+# the Tripo texture to 0.059 after correction, and the chest's oak - which Tripo
+# had rendered nearly perfectly at 0.0094 from target - came out at 0.0292.
+#
+# THE DEAD ZONE IS NOT TUNED. 0.030 is the chromaticity distance at which two
+# samples stop reading as one material, which is the same threshold
+# hue_agreement.py flags DISAGREE at. Inside it the chromatic term is exactly
+# ZERO - not small, none - so a member Tripo already got right is left alone,
+# and the correction is a pure scalar that cannot rotate hue at all.
+#
+# Above the dead zone the term ramps in, reaching full correction at 2x. The
+# ramp rather than a cliff is deliberate: at a hard threshold an anchor sitting
+# at 0.0299 and one at 0.0301 would receive wildly different corrections, which
+# makes the output sensitive to measurement noise exactly where it is least
+# meaningful. Post-correction distance from target is therefore never worse than
+# the dead zone itself.
+#
+# At frac = 1 this reduces EXACTLY to the old gain, so the change is a strict
+# generalisation rather than a different correction.
+CHROMA_DEAD_ZONE = 0.030
+CHROMA_FULL_AT = 0.060
+
+
+def split_gain(observed, target):
+    """Per-channel gain decomposed into value and (bounded) hue.
+
+    Returns (gain, chroma_distance, applied_fraction).
+    """
+    o = np.asarray(observed, dtype=np.float64)
+    t = np.asarray(target, dtype=np.float64)
+    co, ct = chromaticity(o), chromaticity(t)
+    d = float(np.linalg.norm(co - ct))
+    if d <= CHROMA_DEAD_ZONE:
+        frac = 0.0
+    elif d >= CHROMA_FULL_AT:
+        frac = 1.0
+    else:
+        frac = (d - CHROMA_DEAD_ZONE) / (CHROMA_FULL_AT - CHROMA_DEAD_ZONE)
+    c_eff = co + frac * (ct - co)
+    c_eff = c_eff / max(c_eff.sum(), 1e-9)
+    # scale so the corrected mean lands on the target's LUMINANCE regardless of
+    # how much of the chromatic term was applied
+    scale = float(LUM @ t) / max(float(LUM @ c_eff), 1e-9)
+    gain = scale * c_eff / np.maximum(o, 1e-4)
+    return gain, d, frac
+
+
 def kmeans(X, k, iters=ITERS, seed=SEED):
     rng = np.random.default_rng(seed)
     # k-means++ style seeding, cheap version
@@ -332,7 +388,7 @@ def build_remap(a):
     for r in a["rows"]:
         c = np.asarray(r["observed_lin"], dtype=float)
         t = np.asarray(r["palette_lin"], dtype=float)
-        g = np.array([t[k] / max(c[k], 1e-4) for k in range(3)])
+        g, chroma_d, chroma_frac = split_gain(c, t)
 
         # A poor chromaticity match means we are not actually confident this
         # cluster IS that material - and a confident-looking gain built on a bad
@@ -357,6 +413,9 @@ def build_remap(a):
                   f"means the MATCH is suspect, not that the gain needs capping.")
             print(f"     Check this anchor: match d1/d2 = {r['ratio_test']:.2f}, "
                   f"population {r['cluster_pct']:.1f}%.")
+        print(f"    SPLIT {r['member']:14} hue d={chroma_d:.4f} -> chromatic term "
+              f"{chroma_frac*100:.0f}%  (dead zone {CHROMA_DEAD_ZONE}), "
+              f"gain skew {max(clamped)/min(clamped):.2f}")
         anchors.append({
             "member": r["member"],
             "observed": [round(float(v), 6) for v in c],
@@ -366,6 +425,8 @@ def build_remap(a):
             "clamped": bool(np.any(np.abs(clamped - g) > 1e-6)),
             "chroma_dist": round(r["chroma_dist"], 4),
             "match_ratio": round(r["match_ratio"], 3),
+            "chroma_frac": round(float(chroma_frac), 3),
+            "chroma_d_to_target": round(float(chroma_d), 4),
         })
 
     # ---- FALLBACK: a small accent cannot win a centroid -------------------
@@ -425,7 +486,7 @@ def build_remap(a):
                 still.append((member, ratio, why, frac))
                 continue
             c = X[sel].mean(0)
-            g = np.array([t[k] / max(c[k], 1e-4) for k in range(3)])
+            g, chroma_d, chroma_frac = split_gain(c, t)
             clamped = np.clip(g, GAIN_CLAMP[0], GAIN_CLAMP[1])
             if np.any(np.abs(clamped - g) > 1e-6):
                 print(f"  ** CLAMP BOUND on rescued {member}: raw "
@@ -441,6 +502,8 @@ def build_remap(a):
                 "chroma_dist": round(float(np.linalg.norm(
                     chromaticity(c) - chromaticity(t))), 4),
                 "match_ratio": None,
+                "chroma_frac": round(float(chroma_frac), 3),
+                "chroma_d_to_target": round(float(chroma_d), 4),
                 "via": "nearest-texel",
                 "texel_frac": round(frac, 6),
             })

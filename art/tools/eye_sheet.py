@@ -53,8 +53,11 @@ GAP = 26
 PAD = 26
 
 
+SPRITE_DIR = os.path.join(REPO, "art", "sprites")
+
+
 def body_of(name):
-    p = os.path.join(REPO, "art", "sprites", f"{name}.png")
+    p = os.path.join(SPRITE_DIR, f"{name}.png")
     if not os.path.exists(p):
         raise SystemExit(f"MISSING {p}")
     return Image.open(p).convert("RGBA")
@@ -62,7 +65,7 @@ def body_of(name):
 
 def shadow_of(name):
     base = name.replace("_idle", "")
-    sp = os.path.join(REPO, "art", "sprites", f"{base}_shadow.png")
+    sp = os.path.join(SPRITE_DIR, f"{base}_shadow.png")
     if not os.path.exists(sp):
         return None
     return Image.open(sp).convert("RGBA")
@@ -89,7 +92,7 @@ def glow_of(name):
     which is how the two states came back looking identical.
     """
     for base in [n for n in (name, name.rsplit("_", 1)[0]) if n]:
-        gp = os.path.join(REPO, "art", "sprites", f"{base}_glow.png")
+        gp = os.path.join(SPRITE_DIR, f"{base}_glow.png")
         if os.path.exists(gp):
             if body_sprite_of(base) != name:
                 print(f"  SKIP glow on {name}: not the body sprite "
@@ -185,9 +188,14 @@ def main():
     ap.add_argument("--glow", action="store_true",
                     help="composite the additive glow layer, as Godot does")
     ap.add_argument("--glow-strength", type=float, default=1.0)
+    ap.add_argument("--sprite-dir",
+                    help="read sprites from here instead of art/sprites - for "
+                         "before/after sheets against a saved snapshot")
     ap.add_argument("--states",
                     help="comma-separated sprite names, shown at 1x and 2x on one row")
     a = ap.parse_args()
+    if a.sprite_dir:
+        globals()["SPRITE_DIR"] = os.path.abspath(a.sprite_dir)
     if not a.asset and not a.states:
         ap.error("need --asset (or --states)")
 

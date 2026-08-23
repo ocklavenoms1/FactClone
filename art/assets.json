@@ -69,18 +69,20 @@
               0.097587
             ],
             "gain": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.4034,
+              2.439,
+              2.5602
             ],
             "gain_raw": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.4034,
+              2.439,
+              2.5602
             ],
             "clamped": false,
             "chroma_dist": 0.0406,
-            "match_ratio": 0.285
+            "match_ratio": 0.285,
+            "chroma_frac": 0.354,
+            "chroma_d_to_target": 0.0406
           },
           {
             "member": "wrought_iron",
@@ -106,7 +108,9 @@
             ],
             "clamped": false,
             "chroma_dist": 0.0858,
-            "match_ratio": 0.128
+            "match_ratio": 0.128,
+            "chroma_frac": 1.0,
+            "chroma_d_to_target": 0.0858
           },
           {
             "member": "weathered_oak",
@@ -121,18 +125,20 @@
               0.031896
             ],
             "gain": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.265,
+              2.2031,
+              2.583
             ],
             "gain_raw": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.265,
+              2.2031,
+              2.583
             ],
             "clamped": false,
             "chroma_dist": 0.0418,
-            "match_ratio": 0.332
+            "match_ratio": 0.332,
+            "chroma_frac": 0.392,
+            "chroma_d_to_target": 0.0418
           },
           {
             "member": "leather",
@@ -147,18 +153,20 @@
               0.039546
             ],
             "gain": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.0593,
+              1.7129,
+              2.2619
             ],
             "gain_raw": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.0593,
+              1.7129,
+              2.2619
             ],
             "clamped": false,
             "chroma_dist": 0.0537,
-            "match_ratio": 0.423
+            "match_ratio": 0.423,
+            "chroma_frac": 0.791,
+            "chroma_d_to_target": 0.0537
           }
         ],
         "dropped": []
@@ -168,8 +176,7 @@
         "wrought_iron",
         "weathered_oak",
         "leather"
-      ],
-      "albedo_pinned": true
+      ]
     },
     {
       "name": "chest",
@@ -209,18 +216,20 @@
               0.031896
             ],
             "gain": [
-              1.3992,
-              1.43,
-              1.6352
+              1.4235,
+              1.4235,
+              1.4235
             ],
             "gain_raw": [
-              1.3992,
-              1.43,
-              1.6352
+              1.4235,
+              1.4235,
+              1.4235
             ],
             "clamped": false,
             "chroma_dist": 0.0211,
-            "match_ratio": 0.153
+            "match_ratio": 0.153,
+            "chroma_frac": 0.0,
+            "chroma_d_to_target": 0.0211
           },
           {
             "member": "wrought_iron",
@@ -246,12 +255,13 @@
             ],
             "clamped": false,
             "chroma_dist": 0.1147,
-            "match_ratio": 0.118
+            "match_ratio": 0.118,
+            "chroma_frac": 1.0,
+            "chroma_d_to_target": 0.1147
           }
         ],
         "dropped": []
-      },
-      "albedo_pinned": true
+      }
     },
     {
       "name": "power_pole",
@@ -303,7 +313,9 @@
             ],
             "clamped": false,
             "chroma_dist": 0.1276,
-            "match_ratio": 0.14
+            "match_ratio": 0.14,
+            "chroma_frac": 1.0,
+            "chroma_d_to_target": 0.1276
           },
           {
             "member": "wrought_iron",
@@ -329,7 +341,9 @@
             ],
             "clamped": false,
             "chroma_dist": 0.1415,
-            "match_ratio": 0.165
+            "match_ratio": 0.165,
+            "chroma_frac": 1.0,
+            "chroma_d_to_target": 0.1415
           },
           {
             "member": "verdigris",
@@ -344,25 +358,26 @@
               0.132868
             ],
             "gain": [
-              3.3313,
-              2.7237,
-              2.9125
+              2.9302,
+              2.768,
+              2.8184
             ],
             "gain_raw": [
-              3.3313,
-              2.7237,
-              2.9125
+              2.9302,
+              2.768,
+              2.8184
             ],
             "clamped": false,
             "chroma_dist": 0.0382,
             "match_ratio": null,
+            "chroma_frac": 0.274,
+            "chroma_d_to_target": 0.0382,
             "via": "nearest-texel",
             "texel_frac": 0.043085
           }
         ],
         "dropped": []
-      },
-      "albedo_pinned": true
+      }
     },
     {
       "name": "smelter_rot",
@@ -402,18 +417,20 @@
               0.097587
             ],
             "gain": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.4034,
+              2.439,
+              2.5602
             ],
             "gain_raw": [
-              2.3376,
-              2.4401,
-              2.7885
+              2.4034,
+              2.439,
+              2.5602
             ],
             "clamped": false,
             "chroma_dist": 0.0406,
-            "match_ratio": 0.285
+            "match_ratio": 0.285,
+            "chroma_frac": 0.354,
+            "chroma_d_to_target": 0.0406
           },
           {
             "member": "wrought_iron",
@@ -439,7 +456,9 @@
             ],
             "clamped": false,
             "chroma_dist": 0.0858,
-            "match_ratio": 0.128
+            "match_ratio": 0.128,
+            "chroma_frac": 1.0,
+            "chroma_d_to_target": 0.0858
           },
           {
             "member": "weathered_oak",
@@ -454,18 +473,20 @@
               0.031896
             ],
             "gain": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.265,
+              2.2031,
+              2.583
             ],
             "gain_raw": [
-              2.3199,
-              2.1572,
-              3.1558
+              2.265,
+              2.2031,
+              2.583
             ],
             "clamped": false,
             "chroma_dist": 0.0418,
-            "match_ratio": 0.332
+            "match_ratio": 0.332,
+            "chroma_frac": 0.392,
+            "chroma_d_to_target": 0.0418
           },
           {
             "member": "leather",
@@ -480,18 +501,20 @@
               0.039546
             ],
             "gain": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.0593,
+              1.7129,
+              2.2619
             ],
             "gain_raw": [
-              2.1118,
-              1.6661,
-              2.3726
+              2.0593,
+              1.7129,
+              2.2619
             ],
             "clamped": false,
             "chroma_dist": 0.0537,
-            "match_ratio": 0.423
+            "match_ratio": 0.423,
+            "chroma_frac": 0.791,
+            "chroma_d_to_target": 0.0537
           }
         ],
         "dropped": []

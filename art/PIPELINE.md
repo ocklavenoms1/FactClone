@@ -2199,3 +2199,109 @@ actually measured.**
    not from colour or silhouette.
 4. A rectangular-footprint asset, if one is coming. `footprint_fill` controls
    the long axis only, and the chest already leaves 10.2 px of gap at 1.549:1.
+
+## 32. The split correction: value by scalar, hue only when it is wrong
+
+§11 established that the per-cluster remap corrected value and degraded hue: it
+moved every asset's oak FURTHER from target in chromaticity and pushed
+smelter-vs-chest from 0.024 in the raw texture to 0.059 after correction. The
+cause was structural — `gain = target / observed` per channel constrains value
+exactly and hue not at all, because a per-channel multiplicative gain preserves
+hue only when its three channel gains are equal.
+
+### The anchor now solves two things separately
+
+```python
+scale  = lum(target) / lum(c_eff)          # value: hue-preserving by construction
+c_eff  = c_obs + frac * (c_target - c_obs) # hue: bounded, and often zero
+gain   = scale * c_eff / observed
+```
+
+`frac` is 0 below a **dead zone of 0.030** and ramps to 1 at 0.060.
+
+**The dead zone is not tuned.** 0.030 is the chromaticity distance at which two
+samples stop reading as one material — the same threshold `hue_agreement.py`
+already flags DISAGREE at. Inside it the chromatic term is exactly zero, not
+small, so a member Tripo already got right is left alone and the correction
+becomes a pure scalar that cannot rotate hue at all. A tuned constant here
+would have been the clamp mistake again.
+
+The ramp rather than a cliff is deliberate: at a hard threshold, anchors at
+0.0299 and 0.0301 would get wildly different corrections, making the output
+sensitive to measurement noise exactly where it is least meaningful.
+
+Verified at both boundaries: at `frac = 0` the three channel gains are equal to
+14 decimal places and chromaticity is preserved exactly; at `frac = 1` the gain
+is bit-identical to the old one. **The change is a strict generalisation, not a
+different correction.**
+
+What it does per anchor:
+
+| Asset | member | hue d | chromatic term | skew before → after |
+|---|---|---|---|---|
+| `chest` | weathered_oak | 0.0211 | **0%** | 1.17 → **1.00** |
+| `smelter` | weathered_oak | 0.0418 | 39% | 1.46 → 1.17 |
+| `smelter` | fieldstone | 0.0406 | 35% | 1.19 → 1.07 |
+| `power_pole` | weathered_oak | 0.1276 | 100% | 4.01 → 4.01 |
+
+The chest's oak is the case that mattered and it now receives a skew of exactly
+1.00 — Tripo got it right and the correction's only job was to leave it alone.
+
+### Result, judged on cross-asset spread
+
+Success was defined as **reducing the spread**, not reducing each asset's
+distance to target: fitting each asset to its own error is what caused the
+problem.
+
+| Member | pair | before | after | |
+|---|---|---|---|---|
+| oak | smelter vs chest | 0.0420 | **0.0278** | −34%, **now agrees** |
+| oak | smelter vs pole | 0.0907 | 0.0843 | −7% |
+| oak | chest vs pole | 0.0603 | **0.0762** | **+26%, worse** |
+| oak | **spread** | 0.0902 | 0.0841 | −7% |
+| iron | smelter vs chest | 0.0099 | 0.0059 | −40% |
+| iron | smelter vs pole | 0.0532 | 0.0395 | −26% |
+| iron | chest vs pole | 0.0433 | 0.0375 | −13% |
+| iron | **spread** | 0.0529 | 0.0395 | −26% |
+
+**The defect that was diagnosed is fixed.** Smelter-vs-chest oak — the salmon
+against mid brown — drops 34% and lands under 0.030, which is agreement. Every
+iron pair improves and iron's spread falls 26%.
+
+**One pair got worse and it should not be glossed.** Chest-vs-pole oak widens
+26%. The chest is now left alone in the dead zone, where before it received a
+hue rotation that happened to carry it toward the pole. It moved closer to
+target (0.0829 → 0.0673) and further from the pole at the same time, because
+the pole is nowhere near target and cannot be brought there.
+
+### What this exposes: the pole's oak is a SOURCE problem
+
+The pole is unchanged by this work — its oak was at 100% chromatic term before
+and after — and it alone holds oak's spread at 0.084. Its raw hue is 0.1276
+from target at the anchor and its rendered region sits 0.1432 away **even at
+full correction**.
+
+Full correction lands the ANCHOR on target. It cannot land the REGION on
+target, because a multiplicative gain preserves every texel's ratio to the
+anchor, so a region whose colour distribution is skewed keeps that skew. When
+the source wood is strongly orange and blue-deficient — the pole's raw oak
+chromaticity is (0.623, 0.321, 0.056) against a target B of 0.125 — no
+per-cluster gain can fix it.
+
+That is outcome **(c)** from the §11 diagnosis, and removing (a) is what
+exposed it. **It belongs in the style core as a prompt rule — "timber reads
+brown, never pink or orange" — not in the pipeline.**
+
+### How visible is any of this
+
+| Asset | mean Δ | p95 | max |
+|---|---|---|---|
+| `chest` | 2.22/255 | 3 | 4 |
+| `smelter` | 2.45/255 | 5 | 6 |
+| `power_pole` | 0.33/255 | 2 | 4 |
+
+Small. This is a correctness fix that makes the pipeline stop introducing
+disagreement, not a visible restyling — and at three assets the largest
+remaining disagreement is now source, not correction. The value of it is that
+it does not compound: every future asset whose hue Tripo gets right will now be
+left alone instead of being rotated away from the set.

@@ -1,0 +1,32 @@
+
+=== smelter ===
+member                   target              raw        corrected         rendered |  d raw d corr d rend  skew
+fieldstone     (0.328,0.359,0.313) (0.344,0.368,0.288) (0.327,0.361,0.312) (0.328,0.355,0.317) |  0.031  0.003  0.006  1.07
+wrought_iron   (0.281,0.369,0.350) (0.266,0.396,0.338) (0.231,0.384,0.386) (0.296,0.356,0.348) |  0.034  0.064  0.020  1.47
+weathered_oak  (0.576,0.299,0.125) (0.581,0.318,0.101) (0.596,0.289,0.115) (0.534,0.290,0.175) |  0.031  0.024  0.066  1.17
+leather        (0.667,0.198,0.135) (0.671,0.232,0.097) (0.674,0.215,0.111)                - |  0.051  0.031    nan  1.32
+
+=== chest ===
+member                   target              raw        corrected         rendered |  d raw d corr d rend  skew
+weathered_oak  (0.576,0.299,0.125) (0.573,0.307,0.121) (0.566,0.310,0.124) (0.523,0.313,0.164) |  0.010  0.015  0.068  1.00
+wrought_iron   (0.281,0.369,0.350) (0.370,0.364,0.266) (0.289,0.374,0.337) (0.299,0.351,0.349) |  0.122  0.016  0.025  1.67
+
+=== power_pole ===
+member                   target              raw        corrected         rendered |  d raw d corr d rend  skew
+weathered_oak  (0.576,0.299,0.125) (0.623,0.321,0.056) (0.510,0.307,0.182) (0.466,0.321,0.214) |  0.086  0.088  0.143  4.01
+wrought_iron   (0.281,0.369,0.350) (0.348,0.378,0.274) (0.323,0.355,0.322) (0.326,0.350,0.323) |  0.101  0.052  0.055  1.88
+verdigris      (0.189,0.482,0.329) (0.169,0.506,0.325) (0.168,0.488,0.344) (0.181,0.465,0.354) |  0.032  0.026  0.031  1.06
+
+=== CROSS-ASSET AGREEMENT (rendered chromaticity) ===
+The verdict number. Spread is the max pairwise chromaticity distance
+between assets that both contain the member.
+  fieldstone     only in smelter - no cross-asset check
+  wrought_iron   spread 0.0395  <-- DISAGREE
+      smelter        (0.296,0.356,0.348)  1206px
+      chest          (0.299,0.351,0.349)  102px
+      power_pole     (0.326,0.350,0.323)  168px
+  weathered_oak  spread 0.0841  <-- DISAGREE
+      smelter        (0.534,0.290,0.175)  833px
+      chest          (0.523,0.313,0.164)  598px
+      power_pole     (0.466,0.321,0.214)  364px
+  verdigris      only in power_pole - no cross-asset check
