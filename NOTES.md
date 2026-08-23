@@ -839,7 +839,7 @@ Per-tile soil (NOT region-based — Session 1's region scope was reversed at Ses
 - **Wasteland mechanics (Session 4):** tile soil at 0 for 60 sec → scarred (persistent). Wasteland blocks all passive regen. Distinct visual (near-black tint + X-shaped crack pattern). Q-inspect: "DEAD — will scar in Xs" during grace, "WASTELAND" once scarred. PlanterPanel: "IDLE — tile is WASTELAND" + action prompt.
 - **Premium Compost / COMPOST_HIGH (Session 4):** 8× regen for 120s (top tier). On wasteland: snap soil to 30 + erase scarred flag + apply boost (~21 min total recovery designed). On healthy tile: just a stronger MID. Recipes: BREAD × 2 → HIGH (5s? actually 10s), LOAF_PACK × 1 → HIGH (10s — same time, better deal). Stacking: HIGH > MID > LOW; lower-on-higher rejected. LOW/MID on wasteland REJECTED (only HIGH restores).
 - Save schema v14 → v15 → v16 → v17 → v18 (wasteland state added at v18). 4 schema bumps in the arc; migration framework still queued.
-- Tests: 43 sub-suites total — 17 soil + 5 fertilizer-chain + 4 fertilizer-applicator + **10 wasteland sub-suites** (trigger + grace + blocks regen + planter idle + recovery + save v18 + composter HIGH recipes + stacking + grace-rescue + grace-rescue-under-active-farming) + **7 applicator-wasteland-recovery** (audit #4/#5: belt-fed HIGH + HIGH selection + scarred-tile wedge + HIGH restore + accepts-list drift guard both directions + aggregate buffer cap + panel cell colours). The old total here read 31 against addends summing to 35 — corrected while adding the new file; the wasteland list then named only 8 of its 9 ("blocks regen", sub-suite 3, was missing) and the same short list was in `test_wasteland.gd`'s own success string. Wasteland went 9 → 10 (total 42 → 43) at audit #7. Counting rule, so the addends stay checkable: only top-level numbered sub-suites count — letter-suffixed parts (fertilizer-chain 4a/4b, applicator 1/1b, wasteland 10a/10b/10c) are one sub-suite each, which is why those files hold more `# ---- N.` headers than the number here.
+- Tests: 44 sub-suites total — 17 soil + 5 fertilizer-chain + 4 fertilizer-applicator + **11 wasteland sub-suites** (trigger + grace + blocks regen + planter idle + recovery + save v18 + composter HIGH recipes + stacking + grace-rescue + grace-rescue-under-active-farming + late-compost-refused) + **7 applicator-wasteland-recovery** (audit #4/#5: belt-fed HIGH + HIGH selection + scarred-tile wedge + HIGH restore + accepts-list drift guard both directions + aggregate buffer cap + panel cell colours). The old total here read 31 against addends summing to 35 — corrected while adding the new file; the wasteland list then named only 8 of its 9 ("blocks regen", sub-suite 3, was missing) and the same short list was in `test_wasteland.gd`'s own success string. Wasteland went 9 → 10 (total 42 → 43) at audit #7, then 10 → 11 (total 43 → 44) at the #7 follow-up that made a too-late compost apply refuse instead of consume. Counting rule, so the addends stay checkable: only top-level numbered sub-suites count — letter-suffixed parts (fertilizer-chain 4a/4b, applicator 1/1b, wasteland 10a-c and 11a-d) are one sub-suite each. That makes `test_fertilizer_chain.gd` hold 6 `# ---------- N.` headers for 5 sub-suites and `test_fertilizer_applicator.gd` 5 for 4, because those two files give their letter-suffixed parts a full header. `test_wasteland.gd` does not: its 10a-c and 11a-d sit under one parent header each with a shorter `# ---` marker, so it holds exactly 11 headers for 11 sub-suites. `test_soil_exhaustion.gd` (17) and `test_applicator_wasteland_recovery.gd` (7) have no letter-suffixed parts at all.
 
 ### Remaining sessions in the arc
 
@@ -856,6 +856,39 @@ Per-tile soil (NOT region-based — Session 1's region scope was reversed at Ses
   2. **Set up an active planter cluster** that keeps the tile depleted (overlapping 3×3 areas blocking regen). Use for "natural play" testing of the grace-period mechanic itself.
 
 - **Tests don't replace smoke for end-to-end UX flows.** Bug 2 from session-soil-exhaustion-4 PAUSE 1 (Premium Compost hotbar slot missing) was invisible at the data layer (`try_apply_fertilizer` works) but broken at the UX layer (no slot to click). The whole wasteland recovery path was unreachable via hand-apply. **Protocol for future sessions: when adding a new tier or category, smoke the full PLAYER path (click hotbar → see toast → check tile state), not just the data path (`assert apply succeeded`).** The "ship tooling without exhaustive UI testing, surface bugs on first real use" pattern from session-dev-console was validated: 2 real bugs caught on the Dev Console's first deployment, both fixed before commit.
+
+---
+
+## Queued: soil/fertilizer/regrowth run on `_process`, not on ticks — `tick_speed` does not reach them
+
+Found 2026-08-23 while re-applying the audit #7 fix; **recorded, not fixed** — it is a design
+call, not a cleanup. Also filed under "Defects found during re-application" in
+`docs/audits/2026-07-19-flaw-review.md` (deliberately outside the 84-row tables, whose
+arithmetic invariant depends on staying at 84).
+
+**Two-sided, and either side could be the wrong one.** `scripts/systems/tick_system.gd:5-7`
+states the simulation advances on tick boundaries — "Buildings, crops, weather, etc. all
+advance on tick boundaries — **never on `_process`**". But `GridWorld._process`
+(`grid_world.gd:1167-1176`) hands the **raw engine delta** to `_tick_regrowth`,
+`_tick_fertilizer_decay` and `_tick_soil_regen`. Those three are the whole soil arc's clock:
+wasteland grace, soil regen, fertilizer decay, tree regrowth.
+
+`TickSystem.tick_rate_multiplier` scales only `TickSystem._accumulator`
+(`tick_system.gd:42`), so it has no effect on anything driven from `_process`.
+
+**Reproduction:** dev console `tick_speed 10` (clamp is `[TICK_SPEED_MIN 0.1,
+TICK_SPEED_MAX 10.0]`, `console.gd:39-40`). Crops, belts, inserters and processors run 10×.
+Wasteland grace still burns 60 real seconds, soil still regens 1 point per 30 real seconds,
+fertilizer still decays in real time. So at 10× a planter depletes its 3×3 ten times faster
+while the tile recovers at the same speed — the soil balance the arc was tuned against is
+silently a different game whenever the console is used to fast-forward.
+
+**The call to make:** either the three `_process` ticks move onto `TickSystem.tick` (a
+behavior change: regen would gain tick granularity, and `tick_speed` would then accelerate
+soil — arguably what a player fast-forwarding expects), or the `tick_system.gd` doc comment
+is narrowed to say what is actually true (buildings tick; per-tile soil/fertilizer/regrowth
+are frame-driven and deliberately real-time). Do not "fix" it by editing whichever side is
+cheaper to touch.
 
 ---
 
