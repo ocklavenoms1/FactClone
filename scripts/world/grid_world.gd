@@ -846,6 +846,21 @@ func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
 ## Returns true when the tile is not in unscarred grace at all: healthy soil
 ## has no grace entry, and a scarred tile is the _restore_wasteland branch's
 ## business (that snaps soil to 30 outright and never waits on regen).
+##
+## Frame pacing: the decision is a pure function of (decay_remaining, tier)
+## against a fixed threshold — no hysteresis, no dependence on how many frames
+## it took to reach that grace value, so the same tile state always decides the
+## same way. One residual, deliberately left: _tick_soil_regen decrements grace
+## and checks for the scar BEFORE it runs regen, so a rescue that lands on the
+## very tick grace expires loses the tie. The boost delivers its point on the
+## first tick at or past the threshold, which is up to one frame delta late, so
+## grace in [threshold, threshold rounded up to a tick] is accepted here and
+## still scars. That window is narrower than one frame (~16 ms at 60 fps)
+## against a 60-second grace; the alternative is an arbitrary margin constant
+## that no game constant derives, which is worse than a sub-frame edge. Tests
+## pin decay_remaining directly rather than accumulating it, so 11a's boundary
+## cases assert the return value only — 11b's outcome assertions are the ones
+## driven by real ticks, and they sit well clear of the tie.
 func grace_admits_tier(pos: Vector2i, tier: int) -> bool:
 	var grace: float = tile_wasteland_grace_remaining(pos)
 	if grace <= 0.0:
