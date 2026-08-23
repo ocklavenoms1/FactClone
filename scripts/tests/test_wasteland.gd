@@ -263,7 +263,7 @@ static func run(parent: Node) -> Dictionary:
 	_disconnect(world); world.queue_free()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "all 9 sub-suites passed (trigger + grace + recovery + planter + save v18 + recipes + stacking + grace-rescue)" }
+		return { "ok": true, "message": "all 9 sub-suites passed (trigger + grace + blocks regen + planter + recovery + save v18 + recipes + stacking + grace-rescue)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 5))] }
 
 # ---------- helpers ----------
