@@ -105,7 +105,7 @@ is closed at all.
 | 56 | duplicated slot handlers diverge on empty-cursor | `83a72cc` + `fa4b5ca` — **accidental**, a side effect of deduplicating into `SlotClickHandler` | shared handler |
 | 4 | applicator never pulls or applies COMPOST_HIGH | `4c021fb` | `test_applicator_wasteland_recovery.gd` |
 | 5 | one scarred tile permanently wedges LOW/MID application | `4c021fb` — same commit, see the interlock note below | same |
-| 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842` now reads 41 with addends that sum | doc-only; no test |
+| 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842`, the soil arc's sub-suite tally, now states a total its own addends sum to | doc-only; no test |
 | 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
@@ -263,6 +263,45 @@ hard-fails every existing save; ship it batched with other worldgen changes.
 **#30, #33, #70, #71** — deferred pending profiling; the analyses in their entries
 stand ready.
 
+---
+
+## DEFECTS FOUND DURING RE-APPLICATION — deliberately outside the numbered tables
+
+This audit tracks exactly **84** findings and every table above is arithmetic against
+that number (12 closed / 72 live). Defects discovered *while closing* those findings
+are recorded here instead of being numbered #85+, so the 84-row arithmetic stays
+checkable. These are **not** audit findings; nothing above counts them. Forward-looking
+copies live in `NOTES.md` under their own `## Queued:` headings.
+
+### R1. Soil regen, fertilizer decay and tree regrowth run on `_process`, not on ticks — `tick_speed` does not reach them
+
+**Found:** 2026-08-23, while re-applying the #7 fix. **Recorded, not fixed** — which
+side is wrong is a design call, not a cleanup.
+
+`scripts/systems/tick_system.gd:5-7` states the simulation advances on tick boundaries:
+"Buildings, crops, weather, etc. all advance on tick boundaries — never on `_process`."
+But `GridWorld._process` (`grid_world.gd:1167-1176`) passes the **raw engine delta** to
+`_tick_regrowth`, `_tick_fertilizer_decay` and `_tick_soil_regen`. Those three carry the
+entire soil arc's clock: wasteland grace, soil regen, fertilizer decay, tree regrowth.
+`TickSystem.tick_rate_multiplier` scales only `TickSystem._accumulator`
+(`tick_system.gd:42`), so it cannot affect anything driven from `_process`.
+
+**Reproduction:** dev console `tick_speed 10` (clamped to `[0.1, 10.0]`,
+`console.gd:39-40`). Crops, belts, inserters and processors advance 10×. Wasteland grace
+still burns 60 real seconds; soil still regens 1 point per 30 real seconds; fertilizer
+still decays in real time. A planter therefore depletes its 3×3 ten times faster while
+the tile recovers at unchanged speed — the soil balance the arc was tuned against is a
+different game whenever the console fast-forwards.
+
+**Two-sided:** either the three `_process` ticks move onto `TickSystem.tick` (a behavior
+change — regen gains tick granularity and `tick_speed` starts accelerating soil, which is
+arguably what a fast-forwarding player expects), or the `tick_system.gd` doc comment is
+narrowed to say what is true (buildings tick; per-tile soil/fertilizer/regrowth are
+frame-driven and deliberately real-time). Picking whichever side is cheaper to edit is
+not a resolution.
+
+---
+
 ## HIGH -- player-visible breakage or item loss  (10 findings)
 
 ### 1. load_game replaces all buildings without invalidating the fluid-network cache — stale pipe/pump connectivity after F9 quick-load
@@ -399,11 +438,15 @@ if active_tiles.has(pos):
 **Fix:** In _tick_soil_regen, gate the grace-timer decrement on the tile not being actively farmed: wrap lines 1090-1094 in `if not active_tiles.has(pos):` (active_tiles is already computed at line 1054, before the loop, so no reordering is needed). This pauses the scar countdown while the tile is inside an active planter's 3x3, consistent with the existing rule 'active farming = no regen' — neither decay nor recovery advances while active. Leave the grace-erase else branch (1095-1101) and the same-tick rescue (1136-1139) untouched. Update the comment block at 1071-1076 and the try_apply_fertilizer doc (682-685) to state that grace is paused during active farming. Add a test in test_wasteland.gd: place an active planter (growth > 0 or holding output) whose 3x3 overlaps a soil-0 neighbor, tick past WASTELAND_GRACE_SEC, assert the tile is NOT scarred and grace_remaining is unchanged; optionally also assert that applying COMPOST_HIGH then deactivating the planter lets boosted regen rescue the tile. Alternative (if the design intent is that active tiles CAN scar): instead let fertilizer-boosted regen run on active soil-0 tiles by moving the active_tiles check after a soil==0-with-boost exception — but the pause approach is simpler and matches the documented rescue promise.
 
 **SHIPPED at `b92a769` (2026-08-23) — the Alternative, NOT the prescribed Fix. Do not re-apply the prescribed Fix.**
-The prescribed fix (wrapping the grace decrement in `if not active_tiles.has(pos):`) was **rejected**: it contradicts a recorded design decision. `PROJECT_LOG.md:775` states the `wasteland <x> <y>` console command exists because it "bypasses 60-sec grace — required for testing wasteland mechanics **without setting up active planters to keep soil pinned at 0**" — i.e. active planters pinning soil at 0 IS the organic scarring path, on the record. The audit's own text concedes the point ("this active-tile path is effectively the only organic scarring route") without following it through: since an inactive soil-0 tile always self-rescues (`SECONDS_PER_SOIL_POINT` 30 < `WASTELAND_GRACE_SEC` 60), pausing grace on active tiles makes wasteland **organically unreachable**, and the whole Session 4 arc (v18 schema, wasteland visuals, Premium Compost recipes, the applicator recovery path that closed #4/#5) becomes console-only dead content. The finding is real; the prescription would have traded a broken counter-play for a dead mechanic.
+The prescribed fix (wrapping the grace decrement in `if not active_tiles.has(pos):`) was **rejected**: it contradicts a recorded design decision. `PROJECT_LOG.md:775` describes the `wasteland <x> <y>` console command as forcing scarred state at a tile "(bypasses 60-sec grace). Required for testing wasteland mechanics without setting up active planters to keep soil pinned at 0." — i.e. active planters pinning soil at 0 IS the organic scarring path, on the record. The audit's own text concedes the point ("this active-tile path is effectively the only organic scarring route") without following it through. Under the prescribed fix a **continuously**-active planter holds its soil-0 neighbours at `grace = 60.00` forever, so the one scarring path the player can find and understand is gone, and the whole Session 4 arc (v18 schema, wasteland visuals, Premium Compost recipes, the applicator recovery path that closed #4/#5) becomes console-only dead content. The finding is real; the prescription would have traded a broken counter-play for a dead mechanic.
+
+**Correction (2026-08-23), and this entry is the correcting record.** The reasoning above originally rested on "an inactive soil-0 tile always self-rescues (`SECONDS_PER_SOIL_POINT` 30 < `WASTELAND_GRACE_SEC` 60)". **That claim is false as stated**, and `b92a769`'s commit message carries it; the commit is on a shared index and cannot be amended, so the correction lives here. Self-rescue is only guaranteed for a tile that is inactive across the **entire** grace window from soil-0 onset — 30 beats 60 only when the full 60 is available. Measured counter-example on shipped `main`: burn a soil-0 tile's grace down to 15.0 s under an active planter, then let the planter go idle; `tile_regen_progress` was erased on the last active frame, so the tile needs 30 s for +1 soil and has 15 s of grace, and it scars while **fully inactive**. Consequence for the rejection: an *oscillating* planter could still scar a tile even with grace paused, so "organically unreachable" was too strong. The conclusion is unchanged — the argument that carries it is the documented, discoverable path (`PROJECT_LOG.md:775`), not the arithmetic. A future reader spot-checking the old premise would have found it wrong and could have concluded the whole rejection was unfounded. Live copies of the false claim were corrected at the same time in `grid_world.gd` `_tick_soil_regen` and `test_wasteland.gd` sub-suite 10b. The audit's own finding text and Verification notes above are a dated record and are left as written.
 
 What shipped is the Alternative, scoped narrowly: `grid_world.gd` `_tick_soil_regen` now reads `if active_tiles.has(pos) and not (soil_now == 0 and _fertilizer_boost_multiplier(pos) > 1.0):`. The exception requires soil == 0 **and** a live boost, so "active farming = no regen" still holds for boosted tiles above soil 0; scarred tiles `continue` earlier and can never reach it. Once soil hits 1 the exception lapses and the planter's next harvest takes the tile back to 0 — fertilizer buys the player out of scarring, not out of depletion. The `_tick_soil_regen` doc block and the `try_apply_fertilizer` "Grace rescue" doc were corrected in the same commit; the latter had promised a rescue it could not deliver.
 
 Coverage is `test_wasteland.gd` sub-suite 10, which is built to keep this decision from being re-litigated silently. RED before the fix was exactly the two 10a assertions. Mutation-tested three ways: reverting to the plain `if active_tiles.has(pos):` reddens **10a**; implementing the prescribed pause-grace fix instead reddens **10b** (the control asserting an *unfertilized* soil-0 tile under an active planter still scars) *and* 10a's soil assertion, proving the two candidate designs are distinguishable by test; dropping the `soil_now == 0` clause reddens **10c** (soil climbs 50 → 58). 10b exists specifically so a future session that "simplifies" this into the prescribed fix gets a failure instead of a green suite.
+
+**Follow-up shipped 2026-08-23: the symptom survived near the end of grace.** The exception lets the boost regenerate an actively-farmed soil-0 tile, but the boost delivers its first soil point only after `SECONDS_PER_SOIL_POINT / fertilizer_multiplier(tier)` seconds — **3.75 s** (HIGH, 8×), **7.5 s** (MID, 4×), **15 s** (LOW, 2×). Applied with less grace left than that, `try_apply_fertilizer` still returned `true`, `main.gd` consumed the compost, and the tile scarred anyway: measured on shipped `main` at 0.1 s ticks, HIGH at 3.09 s grace → consumed, scarred at soil 0; HIGH at 5.09 s → rescued. Verbatim the audit's own repro, and the "will scar in Xs" countdown invites exactly that late application. `try_apply_fertilizer` now **refuses** an apply whose tier cannot lift soil before the grace runs out, on the same reasoning as the LOW/MID-on-scar rejection: the player keeps the compost, and the tile scars either way. Boost *duration* is not also binding — LOW 30 s ≥ 15 s, MID 60 s ≥ 7.5 s, HIGH 120 s ≥ 3.75 s. The gate ignores accumulated `tile_regen_progress` (not serialized per design Q5, so the decision must not flip across a save/load); ignoring it can only refuse conservatively on a tile that then rescues itself, which costs the player nothing. The predicate is public (`GridWorld.grace_admits_tier`) because `FertilizerApplicator._tile_eligible` must ask it too — a soil-0 tile in grace wins the most-depleted sort every time, so a picker that nominated tiles the apply refuses would sit BLOCKED re-nominating the same tile until it scarred, which is **#5's shape** again. Coverage is `test_wasteland.gd` sub-suite **11** (a: per-tier boundary; b: honest outcome through real ticks; c: the scarred-tile restore path stays immune; d: picker/apply agreement); RED before the fix was 10 assertions. Mutation-tested three ways: deleting the rejection reddens 9 of them; hardcoding the threshold at HIGH's 3.75 s reddens exactly the MID and LOW boundary cases (4 assertions), proving the per-tier derivation is guarded; removing the `_tile_eligible` gate reddens 11d's eligibility assertion alone.
 
 <details><summary>Verification notes</summary>
 
