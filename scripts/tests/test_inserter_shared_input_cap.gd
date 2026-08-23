@@ -32,6 +32,10 @@ extends RefCounted
 ##       does not raise the other type's ceiling above 8 either.
 ##   (5) UNIT — Mixer (the other shared-buffer input building) behaves the
 ##       same for inserter-fed yeast.
+##   (6) UNIT — SCOPE: the per-type rule applies to RECIPE-DRIVEN
+##       destinations only. FertilizerApplicator has no recipe and bounds
+##       its shared compost buffer in aggregate (16), so the inserter must
+##       keep counting it in aggregate too.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 
@@ -43,7 +47,7 @@ const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const SLOT_CAP: int = 8
 
 static func test_name() -> String:
-	return "inserter shared-input cap (per-type, not aggregate: oven deadlock + mixer + cap retained)"
+	return "inserter shared-input cap (per-type for recipe-driven: oven deadlock + mixer + cap retained + applicator stays aggregate)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -104,7 +108,10 @@ static func run(parent: Node) -> Dictionary:
 	var bread_made: int = _buf_count(oven.state.get("out_buffer", []), Items.Type.BREAD)
 	var dough_left: int = _buf_count(oven.state.get("in_buffer", []), Items.Type.RISEN_DOUGH)
 
-	_check(failures, fuel_delivered > 0 or bread_made > 0,
+	# Delivery is asserted on its own, not folded into an `or` with the bake:
+	# an oven can bake yet still be starved later, and an `or` of two
+	# conditions that fail together is not an assertion.
+	_check(failures, fuel_delivered > 0,
 		"(1) DEADLOCK: inserter delivered 0 FUEL_BRIQUETTE into a dough-saturated oven in 400 ticks (aggregate cap rejects it forever)")
 	_check(failures, bread_made > 0,
 		"(1) DEADLOCK: oven baked 0 bread in 400 ticks with 8 dough buffered and fuel available next door, got %d" % bread_made)
@@ -194,6 +201,35 @@ static func run(parent: Node) -> Dictionary:
 	_check(failures, not flour_over,
 		"(5) a %dth FLOUR must still be REJECTED on the mixer" % (SLOT_CAP + 1))
 
+	# ===========================================================================
+	# (6) FERTILIZER_APPLICATOR — the per-type rule must NOT reach here. The
+	# applicator is not recipe-driven: it has no recipe_id, its one input slot
+	# accepts three compost tiers into one in_buffer, and it gates its own
+	# belt pull on an AGGREGATE total (_buffer_total >= INPUT_BUFFER_CAPACITY,
+	# 16). Counting per type would let an inserter park 3x16 = 48 items in a
+	# buffer its owner bounds at 16, and would put the inserter-fed path out
+	# of step with the belt-fed one. This case pins the scope of the finding
+	# #3 fix to recipe-driven destinations.
+	# ===========================================================================
+	var app: Building = FertilizerApplicator.make(Vector2i(0, 0), Belt.DIR_E)
+	var app_cap: int = FertilizerApplicator.INPUT_BUFFER_CAPACITY
+	_check(failures, not app.state.has("recipe_id"),
+		"(6) premise: applicator must have no recipe_id key — the per-type rule keys off its presence")
+	# Aggregate total already at the cap, split across two tiers.
+	app.state["in_buffer"] = [[Items.Type.COMPOST_LOW, app_cap / 2], [Items.Type.COMPOST_MID, app_cap / 2]]
+	var high_over: bool = Inserter._drop_to_processor(app, Items.Type.COMPOST_HIGH)
+	_check(failures, not high_over,
+		"(6) applicator at %d total must REJECT a COMPOST_HIGH — its cap is aggregate, not per type" % app_cap)
+	_check(failures, _buffer_total(app.state.get("in_buffer", [])) == app_cap,
+		"(6) rejected drop must leave the aggregate total at %d, found %d"
+			% [app_cap, _buffer_total(app.state.get("in_buffer", []))])
+	# One below the aggregate cap: the drop must still be allowed, so the
+	# rule is a real cap and not a blanket refusal.
+	app.state["in_buffer"] = [[Items.Type.COMPOST_LOW, app_cap - 1]]
+	var high_ok: bool = Inserter._drop_to_processor(app, Items.Type.COMPOST_HIGH)
+	_check(failures, high_ok,
+		"(6) applicator at %d total must ACCEPT one more item (cap %d)" % [app_cap - 1, app_cap])
+
 	if failures.is_empty():
 		return { "ok": true, "message": "inserter drop caps shared in_buffer per item type (oven line runs, mixer yeast lands, cap still enforced)" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), " | ".join(failures.slice(0, 8))] }
@@ -209,6 +245,12 @@ static func _make_world(parent: Node) -> Node2D:
 		for y in range(8, 14):
 			w.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
 	return w
+
+static func _buffer_total(buf: Array) -> int:
+	var n: int = 0
+	for entry in buf:
+		n += int(entry[1])
+	return n
 
 static func _buf_count(buf: Array, item_type: int) -> int:
 	for entry in buf:

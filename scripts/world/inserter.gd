@@ -664,31 +664,56 @@ static func _drop_to_processor(dst: Building, item: int) -> bool:
 		var accepts: Array = slot.get("accepts", [])
 		if not accepts.is_empty() and not accepts.has(item):
 			continue
-		# Capacity check, PER ITEM TYPE — not against the bag total.
+		# Capacity check. WHICH RULE applies is a property of the destination
+		# module, not a constant: count the buffer the way the module that
+		# owns it counts, or the inserter writes past a bound its owner
+		# enforces and the two feed paths disagree.
 		#
-		# Oven (dough + fuel) and Mixer (flour + yeast) bind two input slots
-		# to ONE in_buffer, a deliberate multi-type bag. Both the Processor
-		# and the slot descriptor cap that bag per type: Processor's pull
+		# RECIPE-DRIVEN destinations (Processor.tick, plus the Smelter and
+		# Composter auto-select wrappers) cap PER ITEM TYPE — their pull
 		# tests `_buffer_count(in_buffer, item_type) >= recipe.input_capacity`
-		# (processor.gd), and buildings.gd documents max_stack as
-		# "per-item-type capacity in the slot's buffer".
+		# (processor.gd), and buildings.gd documents slot max_stack as
+		# "per-item-type capacity in the slot's buffer". Oven (dough + fuel)
+		# and Mixer (flour + yeast) bind two input slots to ONE in_buffer, a
+		# deliberate multi-type bag, so the distinction is load-bearing: this
+		# check used to sum every entry and compare that aggregate against a
+		# single slot's max_stack, which deadlocked the bread line. A belt
+		# fills the dough input to 8, the recipe also needs fuel so it cannot
+		# start, the bag never drains, and the inserter's fuel is refused
+		# forever (audit finding #3).
 		#
-		# This used to sum every entry in the bag and compare that aggregate
-		# against one slot's max_stack, which deadlocked the bread line: a
-		# belt fills the dough input to 8, the recipe also needs fuel so it
-		# cannot start, the bag never drains, and the inserter's fuel is
-		# refused forever (audit finding #3). Counting per type is exactly
-		# what the Processor already does, so reuse its counter rather than
-		# keep a second copy that can drift.
+		# NON-RECIPE destinations cap in AGGREGATE. FertilizerApplicator has
+		# no recipe and gates its own belt pull on
+		# `_buffer_total(in_buffer) >= INPUT_BUFFER_CAPACITY` (16) across the
+		# three compost tiers its one slot accepts. Counting per type there
+		# would let an inserter park 3x16 = 48 items in a buffer its owner
+		# bounds at 16 — no wedge and no loss, but past the module's own
+		# limit and out of step with the belt-fed path.
+		#
+		# Discriminator is the PRESENCE of a recipe_id key, not its value:
+		# Smelter and Composter construct with recipe_id "" pending
+		# auto-select, so an is_empty() test would misfile a freshly placed
+		# one as non-recipe. Same structural-heuristic idiom as
+		# _is_processor_with_output's state.has("out_buffer") below. A future
+		# non-recipe input building therefore defaults to the aggregate rule,
+		# which is the conservative direction.
+		#
+		# Cap source stays this slot's max_stack: the function is entirely
+		# slot_layout-driven (the accepts check above is too), and the slot
+		# agrees with the owning module either way — 16 of the 17
+		# "input"-kind slots declare 8 against 19/19 recipes at
+		# input_capacity 8, and the applicator's declares 16 against its own
+		# INPUT_BUFFER_CAPACITY 16.
 		var in_buf: Array = dst.state.get("in_buffer", [])
-		# Cap source is this slot's max_stack. Every "input"-kind slot in
-		# buildings.gd declares 8 and all 19 recipes in recipes.gd declare
-		# input_capacity 8, so the slot-side and recipe-side ceilings agree.
-		# The slot is the right source here because this whole function is
-		# slot_layout-driven (the accepts check above is too) and a slot
-		# layout exists even when recipe_id is unset.
 		var cap: int = int(slot.get("max_stack", 8))
-		if Processor._buffer_count(in_buf, item) >= cap:
+		var used: int
+		if dst.state.has("recipe_id"):
+			used = Processor._buffer_count(in_buf, item)
+		else:
+			used = 0
+			for entry in in_buf:
+				used += int(entry[1])
+		if used >= cap:
 			return false
 		# Top-up or append.
 		for entry in in_buf:
