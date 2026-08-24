@@ -998,6 +998,103 @@ in the audit; the finding's actual subject is untouched.
 
 ---
 
+## Protocol: silent compensation — when absence is indistinguishable from success
+
+**Codified at the audit re-application session (2026-08-24)** after the third instance in
+one session. It is a property of this codebase, not three coincidences.
+
+**Pattern:** a system stops running, and something downstream compensates well enough that
+nothing observable changes. No exception, no wrong value, no red test — just a quieter
+version of the same behaviour. The compensation is what makes it invisible, and the
+compensation is usually *good design* elsewhere (a pull-based consumer, a defensive
+default, a tolerant loop). That is why these survive review: every individual piece is
+correct.
+
+**Three instances, all found the hard way:**
+
+1. **A test registration was deleted** from `test_runner.gd` by a concurrent session's bare
+   `git commit` absorbing a staged deletion. HEAD ran one whole file fewer and printed
+   green — the runner reports what it was told to run, so a shorter list is a successful
+   run. *Compensator:* the pass/fail summary is derived from the registry, not from disk.
+   Now guarded by `test_registration_completeness.gd`.
+
+2. **`Inventory.load_array` truncated the player's inventory** on a malformed row. A
+   GDScript runtime error aborts only the innermost function, so `load_array` died and
+   `load_game` carried on to `success = true` with `skipped_entries` at **0** — the load
+   did not merely fail to notice, it affirmatively reported nothing was skipped. One
+   corruption shape (`"xy"`) produced no error line at all, since `int("x")` is 0.
+   *Compensator:* the caller's success path had no dependency on the callee finishing.
+   Fixed at `7a86195`; recorded as R3 in the audit tracker.
+
+3. **`Buildings.post_tick_one` — pass 2 of the documented two-pass tick — was wholly
+   uncovered.** Delete it and belt-to-belt handoff stops everywhere in the game while the
+   runner prints `54 passed, 0 failed`. *Compensator:* every other belt consumer
+   (`Chest.tick`, `Processor._try_pull_inputs`, `Inserter._try_pickup`) **pulls** rather
+   than being pushed to, so a suite can run a belt into a chest and never touch pass 2.
+   Now pinned by `test_tick_loop_wiring.gd`.
+
+### The detection question
+
+**For each system: if it silently stopped running, what would notice — and how would the
+failure present?** "A test would fail" is not an answer until you have deleted the call and
+watched it fail. In all three cases above the honest answer was "nothing", and in two of
+them the intuition beforehand was "obviously something would".
+
+A second-order form worth asking too: *what compensates for this system?* A system with a
+pull-based consumer, a tolerant default, or a caller that does not depend on it finishing
+is a candidate before you test anything.
+
+### Current coverage, so the next arc does not add a fourth
+
+`test_tick_loop_wiring.gd` now pins seven call sites — the `TickSystem.tick` connect,
+`PowerNetwork.update_supply_demand`, `Buildings.tick_one`, `Buildings.post_tick_one`, and
+the three `_process` calls (`_tick_regrowth`, `_tick_fertilizer_decay`, `_tick_soil_regen`).
+Each was verified by deleting it and watching a specific sub-case redden.
+
+**Still unasked, and worth asking before the next arc:** the systems reached *inside*
+`Buildings.tick_one`'s dispatch rather than at the loop level — per-building tick handlers,
+the burner fuel path, fluid network updates — plus anything a future arc adds to either
+entry point. The wiring test pins that the **loop** runs; it does not pin that the loop
+dispatches to every building type it should. That is the same shape one level down.
+
+**When adding a system to any tick path, delete the call and run the suite before you
+consider it covered.** If nothing reddens, the coverage does not exist yet.
+
+## Protocol: reproduce the described consequence, not just the described mechanism
+
+**Codified at the audit re-application session (2026-08-24)**, after two findings in one
+session diverged from their own descriptions — in opposite directions, and both had
+survived adversarial verification.
+
+**The standard, for any inherited defect report:** a finding names a *mechanism* and a
+*consequence*. Verification usually confirms the mechanism, because the mechanism is what
+you can read in the code. The consequence is what determines severity and what determines
+whether a fix is complete — and it is the half that goes unchecked.
+
+**Two divergences this session, one each way:**
+
+- **#8/#9** described item destruction across four call sites. The mechanism was quoted
+  correctly; the consequence could not occur, because the audit had misread render-scratch
+  and single-type buffers. Closed as NOT-A-BUG. **Wrong in the direction of alarm.**
+- **#11** described a crash on a malformed save. True for every shape it enumerated — but
+  for `player_inventory` the reality was silent truncation with a zero skip-count.
+  **Wrong in the direction of comfort**, and marked CLOSED on a fix that addressed every
+  mechanism the title named while the stated consequence stayed reachable. Its row now
+  cites two commits and says the first closure was premature.
+
+Both passed 1-2 independent skeptic passes instructed to REFUTE. **Adversarial verification
+confirms that something is there. It does not confirm what shape it is.**
+
+**In practice:** before closing an inherited finding, construct the failure the finding
+describes and watch it happen. If the reproduction does not match the description, *the
+mismatch is the finding* — record it before fixing it, because it tells you the severity
+was assigned from the wrong facts. This applies to all 68 findings still live in
+`docs/audits/2026-07-19-flaw-review.md`.
+
+Related: the STATUS RULE at the top of that document (a status claim describes what shipped
+on `main`, verified by commit) governs the *closing* half; this protocol governs the
+*opening* half.
+
 ## Protocol: locked architectural decisions can be reversed by reconnaissance findings
 
 **Codified at session-building-ui-4** after the third project-level architectural reversal. Extended at session-soil-exhaustion-2 with the playtest-gate addition.
