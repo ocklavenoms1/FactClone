@@ -861,10 +861,9 @@ Per-tile soil (NOT region-based — Session 1's region scope was reversed at Ses
 
 ## Queued: soil/fertilizer/regrowth run on `_process`, not on ticks — `tick_speed` does not reach them
 
-Found 2026-08-23 while re-applying the audit #7 fix; **recorded, not fixed** — it is a design
-call, not a cleanup. Also filed under "Defects found during re-application" in
-`docs/audits/2026-07-19-flaw-review.md` (deliberately outside the 84-row tables, whose
-arithmetic invariant depends on staying at 84).
+**This is audit finding #31** (LIVE — MEDIUM), not a new defect. Re-derived 2026-08-23 while
+re-applying the audit #7 fix and briefly mis-filed as "newly found R1" before anyone checked
+the table it was already in. **Recorded, not fixed** — it is a design call, not a cleanup.
 
 **Two-sided, and either side could be the wrong one.** `scripts/systems/tick_system.gd:5-7`
 states the simulation advances on tick boundaries — "Buildings, crops, weather, etc. all

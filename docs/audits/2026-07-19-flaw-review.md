@@ -174,7 +174,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `test_smelter.gd:153-171` |
 | 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1330-1356` (early-out at `:1337` never fires) |
 | 30 | `_draw` walks every tile and building per frame | `grid_world.gd:1103, 1464-1469, 1554-1563` |
-| 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1094-1102` vs `tick_system.gd:7` |
+| 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
 | 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | `grid_world.gd:1128-1149, 1183-1186` |
 | 33 | per-tick transient allocations in processor pull/push | `processor.gd:101-102, 119, 126`; `buildings.gd:936-956` |
 | 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is 812 lines |
@@ -393,39 +393,30 @@ are recorded here instead of being numbered #85+, so the 84-row arithmetic stays
 checkable. These are **not** audit findings; nothing above counts them. Forward-looking
 copies live in `NOTES.md` under their own `## Queued:` headings.
 
-### R1. Soil regen, fertilizer decay and tree regrowth run on `_process`, not on ticks — `tick_speed` does not reach them
+### R1 — WITHDRAWN. It was already finding #31, and filing it here was the error.
 
-**Found:** 2026-08-23, while re-applying the #7 fix. **Recorded, not fixed** — which
-side is wrong is a design call, not a cleanup.
+**Withdrawn 2026-08-23**, the same day it was filed. R1 described soil regen, fertilizer
+decay and tree regrowth running on `_process` instead of ticks. That is **finding #31**,
+LIVE — MEDIUM in the table above, filed in the original 2026-07-19 audit. Recording it as
+"newly found" was exactly the drift this document exists to catch, committed inside the
+document itself.
 
-**Scoped in full at `docs/scoping/r1-two-clocks.md`** — which side is wrong and on what
-evidence, what breaks if the three systems move onto ticks, the three candidate
-options, and the finding that decided the shape of the write-up: **no existing test
-would catch the change in either direction.** Every soil-arc test calls
-`world._tick_soil_regen(delta)` directly, bypassing both `_process` and `TickSystem`,
-so all 44 sub-suites stay green through a migration that changes the game.
+Nothing is lost: the scoping work done under the R1 name is real and now hangs off #31.
+See **`docs/scoping/r1-two-clocks.md`** (filename kept so existing links resolve).
 
-`scripts/systems/tick_system.gd:5-7` states the simulation advances on tick boundaries:
-"Buildings, crops, weather, etc. all advance on tick boundaries — never on `_process`."
-But `GridWorld._process` (`grid_world.gd:1182-1191`) passes the **raw engine delta** to
-`_tick_regrowth`, `_tick_fertilizer_decay` and `_tick_soil_regen`. Those three carry the
-entire soil arc's clock: wasteland grace, soil regen, fertilizer decay, tree regrowth.
-`TickSystem.tick_rate_multiplier` scales only `TickSystem._accumulator`
-(`tick_system.gd:42`), so it cannot affect anything driven from `_process`.
+The one thing the scoping added that #31 did not have is a disagreement with #31's own
+fix text, and it is worth stating here because it changes the size of the job. #31 says:
 
-**Reproduction:** dev console `tick_speed 10` (clamped to `[0.1, 10.0]`,
-`console.gd:39-40`). Crops, belts, inserters and processors advance 10×. Wasteland grace
-still burns 60 real seconds; soil still regens 1 point per 30 real seconds; fertilizer
-still decays in real time. A planter therefore depletes its 3×3 ten times faster while
-the tile recovers at unchanged speed — the soil balance the arc was tuned against is a
-different game whenever the console fast-forwards.
+> No test changes needed — `test_fertilizer_chain.gd`, `test_soil_exhaustion.gd`, and
+> `test_tree_harvest_lifecycle.gd` all invoke the `_tick_*` helpers directly with explicit
+> deltas, so relocating the call site is transparent to the 33/33 suite.
 
-**Two-sided:** either the three `_process` ticks move onto `TickSystem.tick` (a behavior
-change — regen gains tick granularity and `tick_speed` starts accelerating soil, which is
-arguably what a fast-forwarding player expects), or the `tick_system.gd` doc comment is
-narrowed to say what is true (buildings tick; per-tile soil/fertilizer/regrowth are
-frame-driven and deliberately real-time). Picking whichever side is cheaper to edit is
-not a resolution.
+That is **factually true and is the problem, not the reassurance**. The suite pins the
+*functions*; nothing pins the *wiring*. A migration that changes the game therefore ships
+green, and so would a migration that silently dropped one of the three calls. Under any
+option chosen for #31, the first work item is a wiring test — drive `TickSystem.tick`,
+assert soil actually moved — because nothing does that today, in either direction.
+
 
 ### R2. Two save shapes still reach #11's bricked-boot failure — `player_progression` and a building's `"s"` state
 

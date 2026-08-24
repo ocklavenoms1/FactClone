@@ -1,10 +1,15 @@
 # R1 — Two clocks: `_process` delta vs `TickSystem`
 
 **Status: OPEN SCOPING QUESTION. Do not fix in passing.**
-Found 2026-08-23 during the audit re-application session, while reviewing the
-finding-#7 fix. Recorded as R1 in `docs/audits/2026-07-19-flaw-review.md`
-(the "defects found during re-application" section, deliberately outside the
-84 numbered rows so that document's arithmetic invariant holds).
+**This scopes audit finding #31** (LIVE — MEDIUM), not a new defect.
+
+Re-derived 2026-08-23 during the audit re-application session while reviewing
+the finding-#7 fix, and filed as "R1, newly found" before anyone noticed #31
+already said it — in the document whose whole purpose is catching that. The R1
+entry is withdrawn; the filename stays so links resolve. Read #31's entry
+alongside this: it carries the original evidence and a fix prescription, and
+this document disagrees with one line of it (see "Would any existing test
+catch the change?").
 
 This looks like a wrong comment. It is a simulation-determinism decision.
 
@@ -150,7 +155,7 @@ asserts soil regen *does* respond to `tick_speed`, and none asserts it *doesn't*
 
 ## The decision to make
 
-Three options, in the order I would defend them:
+Four options, in the order I would defend them (the fourth is finding #31's own):
 
 1. **Move the three systems onto `TickSystem`.** Honours the stated law, makes
    `tick_speed` global, closes the oversized-delta hole, reduces per-frame cost.
@@ -166,7 +171,19 @@ Three options, in the order I would defend them:
    frame-rate independence without the balance change. Probably the worst of the
    three — it keeps two clocks while looking like one, which is how this defect
    arose.
+4. **Finding #31's own variant of option 1: run them every N ticks rather than
+   every tick**, with `dt = N * TICK_INTERVAL_SEC`. #31 proposes N=20 (a 1 s
+   cadence), reasoning that soil granularity is 30 s per point so the coarser
+   step is invisible and cheapest. Worth costing against plain option 1 — it cuts
+   the sparse-dict walks another 20×, but it also makes the grace timer's
+   resolution 1 s, which interacts with the sub-frame tie recorded at `841fe3f`
+   and with the `grace_admits_tier` threshold shipped at `e47b6a2`. Neither is
+   obviously broken by it; neither has been checked.
 
 Not decided here. Option 2 is a legitimate design answer and this document does
 not assume otherwise; it argues only that the current state — a law the code
 breaks in three places, with no test on either side — is not one of the options.
+
+Note that #31's fix text picks option 1 (or 4) outright and treats the doc
+comment as correct by default. That is a reasonable default, but it is a choice,
+and #31 does not present it as one.
