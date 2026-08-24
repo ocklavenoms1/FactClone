@@ -131,8 +131,10 @@ would partly close as a side effect.
 
 ## Would any existing test catch the change?
 
-**No. Not one.** This is the strongest argument that the decision needs a plan
-rather than an edit.
+**No. Not one** — as of the date this section was written. **One now does**: see
+"Update 2026-08-24" at the end of this section. The reasoning below is left
+intact because it is the argument that produced that test, and because it
+remains true of every *other* suite in the project.
 
 Every soil-arc test drives the private method directly with a hand-supplied
 delta — `world._tick_soil_regen(1.0)`, `world._tick_soil_regen(0.1)`, and so on
@@ -150,6 +152,48 @@ actually moved — because today nothing does.
 
 That gap also means the current split is untested in both directions: no test
 asserts soil regen *does* respond to `tick_speed`, and none asserts it *doesn't*.
+
+### Update 2026-08-24 — the wiring test exists
+
+`scripts/tests/test_tick_loop_wiring.gd` (suite went 54 → 55). This is the work
+item the paragraph above calls for, and **only** that work item: it changes no
+production code, takes no position on which of the four options wins, and does
+not close #31.
+
+What it pins, in both directions:
+
+- a `TickSystem.tick` emission drives `PowerNetwork.update_supply_demand`,
+  `Buildings.tick_one` and `Buildings.post_tick_one` — and `_process` does not;
+- a `_process(delta)` call drives `_tick_regrowth`, `_tick_fertilizer_decay` and
+  `_tick_soil_regen` — and a tick emission does not;
+- `GridWorld._ready` is actually connected to `TickSystem.tick` at all.
+
+The negative halves are the point. A test written to accept either wiring would
+recreate the gap it exists to close, so sub-cases (7), (8) and (9) each assert
+that a tick emission leaves the timer/soil value **untouched**. That is not this
+document changing its mind about which side is wrong — it is the split being made
+loud instead of silent.
+
+**Consequence for whoever decides #31.** Options 1, 3 and 4 all move the three
+systems onto ticks, and all three turn sub-cases (7)-(9) red. That is deliberate:
+the author has to open the file, flip the two halves of each sub-case, and record
+which option they took. Option 2 (amend the law to name two clocks) leaves the
+file passing as-is, and the file becomes part of that decision's documentation.
+
+**What this does NOT settle.** Everything in "The decision to make" below is
+still open. Specifically still uncosted: the rate arithmetic re-derivation, the
+ordering of the three systems relative to the two-pass building tick, and #31's
+own N=20 cadence variant against plain option 1. The test tells you *that* the
+wiring changed; it does not tell you the migration was arithmetically right.
+
+Two things measured while building it, both worth knowing here:
+
+- Deleting `_tick_regrowth`, `_tick_fertilizer_decay` or `_tick_soil_regen` from
+  `_process` left the pre-existing suite at **54 passed, 0 failed** each time.
+  The claim in this section was not an estimate; it is now a measurement.
+- The same is true of `Buildings.post_tick_one` in `_on_tick` — a call site on
+  the *tick* side of the split, entirely uncovered until now. The wiring gap this
+  document identified for the soil arc was not confined to the soil arc.
 
 ---
 

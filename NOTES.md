@@ -898,6 +898,62 @@ both, so all 44 sub-suites stay green through a migration that changes the game.
 first work item under any option is a wiring test — drive `TickSystem.tick`, assert
 soil moved — because nothing does that today.
 
+**That first work item is now done** — `scripts/tests/test_tick_loop_wiring.gd`, landed
+2026-08-24 and described in the entry directly below. It changes nothing about the
+decision; it makes the decision **visible**. Whoever moves the three systems onto ticks
+now gets sub-cases (7), (8) and (9) in the face and has to state which option they took.
+**The decision itself is still open.**
+
+---
+
+## Landed: the tick loop's own call sites are pinned (`test_tick_loop_wiring.gd`)
+
+Added 2026-08-24. New coverage, not a bug fix — nothing was broken, and nothing in
+`scripts/` outside the tests changed. Suite went 54 → **55**.
+
+**The gap it closes.** Every other suite in the project reaches a simulation system by
+calling it directly with hand-supplied arguments — `world._tick_soil_regen(1.0)`,
+`Belt.tick(b, w)`, `PowerNetwork.update_supply_demand(world)`. None of them goes through
+`GridWorld._on_tick` or `GridWorld._process`. So the suite pinned the *functions* and
+nothing pinned the *wiring*: a deleted call site changed the game and shipped green.
+Same failure class as the dropped test registration that `test_registration_completeness.gd`
+guards — absence indistinguishable from success.
+
+**How bad it actually was — measured, by deleting each call site in turn and running the
+54-suite baseline without the new file:**
+
+| call site (`grid_world.gd`) | pre-existing suite result |
+|---|---|
+| `_ready` → `TickSystem.tick.connect(_on_tick)` | 18 suites red |
+| `_on_tick` → `PowerNetwork.update_supply_demand(self)` | 2 suites red |
+| `_on_tick` → `Buildings.tick_one(...)` | 18 suites red |
+| `_on_tick` → `Buildings.post_tick_one(...)` | **54 passed, 0 failed** |
+| `_process` → `_tick_regrowth(delta)` | **54 passed, 0 failed** |
+| `_process` → `_tick_fertilizer_decay(delta)` | **54 passed, 0 failed** |
+| `_process` → `_tick_soil_regen(delta)` | **54 passed, 0 failed** |
+
+Four of the seven were undetectable. The `post_tick_one` row is the one worth staring at:
+belt-to-belt handoff is the only thing that pass dispatches, and removing it stops every
+belt chain in the game one tile short of its destination while the runner prints
+`54 passed, 0 failed`. Nothing covered it because every other belt consumer *pulls*
+(`Chest.tick`, `Processor._try_pull_inputs`, `Inserter._try_pickup`) rather than being
+pushed to, so a suite can run a belt into a chest and never touch pass 2. The three rows
+that DO redden existing suites redden them only with downstream symptoms — "expected ≥9
+grain, got 0", 18 suites at once — with nothing naming the cause.
+
+**What it asserts.** Ten sub-cases, each with a PREMISE floor so it cannot pass vacuously.
+A `TickSystem.tick` emission must drive the power pre-pass, building pass 1 (belt shift,
+mill starting a cycle, inserter picking up) and building pass 2 (belt handoff); a
+`_process(delta)` call must drive regrowth, fertilizer decay and soil regen. Observable
+simulation state only — no call counters, and **no instrumentation was added to
+production code**.
+
+**Two-sided on purpose, and this is the part not to "simplify" later.** Each sub-case also
+asserts the *other* clock does NOT do that work. That is what stops the file from
+degenerating into "either path works", which would recreate the gap it exists to close —
+and it is what makes finding #31 visible. The file states in its own header that it pins
+today's wiring rather than blessing it.
+
 ---
 
 ## Landed: a test suite that ERRORS no longer hangs the whole runner
