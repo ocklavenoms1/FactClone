@@ -65,6 +65,11 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_load_malformed_save.gd"),
 	preload("res://scripts/tests/test_quick_load_refresh.gd"),
 	preload("res://scripts/tests/test_forward_incompat_save.gd"),
+	# Guards the CALL SITES. Every other suite reaches the simulation systems
+	# by calling them directly, so a dropped call site in _on_tick or _process
+	# reddens nothing — see the file's header, and audit finding #31 for why
+	# the two clocks it pins are pinned as-is rather than blessed.
+	preload("res://scripts/tests/test_tick_loop_wiring.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
