@@ -559,7 +559,7 @@ FileAccess.open(save_path, FileAccess.WRITE) truncates the existing save immedia
 ```
 save_system.gd:296-301: `var file := FileAccess.open(save_path, FileAccess.WRITE) ... file.store_string(JSON.stringify(data)) file.close()` — no temp file, no rename, no backup of the previous save.
 ```
-**Fix:** In save_game, derive paths from the current static save_path (tests override it, line 127): (1) write JSON to save_path + ".tmp" and close; (2) if the real save exists, rename it to save_path + ".bak" via DirAccess.rename_absolute (or copy_absolute); (3) rename the .tmp over save_path with DirAccess.rename_absolute — atomic on the same filesystem; on any rename error, push_error and return false without touching the original. In load_game, when the primary file fails to parse (the null/typeof check at lines 322-326), attempt save_path + ".bak" before returning failure, and set error_message to note the backup was used so main.gd can toast it. Add a test in scripts/tests/ that writes garbage to save_path with a valid .bak present and asserts load_game recovers.
+**Fix:** In save_game, derive paths from the current static save_path (tests override it, line 127): (1) write JSON to save_path + ".tmp" and close; (2) if the real save exists, rename it to save_path + ".bak" via DirAccess.rename_absolute (or copy_absolute); (3) rename the .tmp over save_path with DirAccess.rename_absolute — atomic on the same filesystem [**FALSE ON WINDOWS — see the CLOSED note below.** `DirAccess.rename_absolute` unlinks an existing destination before renaming (`DirAccessWindows::rename`), verified empirically: renaming a *missing* source over an existing destination destroyed the destination and returned an error. A direct .tmp → save_path rename therefore has its own delete-then-rename window with nothing backed up. Moving the live save to `.bak` FIRST — step (2) — is what makes step (3)'s destination guaranteed-absent, and is an ordering requirement, not merely a backup step]; on any rename error, push_error and return false without touching the original. In load_game, when the primary file fails to parse (the null/typeof check at lines 322-326), attempt save_path + ".bak" before returning failure, and set error_message to note the backup was used so main.gd can toast it. Add a test in scripts/tests/ that writes garbage to save_path with a valid .bak present and asserts load_game recovers.
 
 <details><summary>Verification notes</summary>
 
@@ -619,8 +619,10 @@ reddens sub-cases 2, 3 and 4 on loaded field values.
 the truncating partial write an interrupted old-style save leaves, assert `load_game`
 still returns A. It failed with `load_game failed (error_message=Save file is corrupt
 or unreadable.)` while the same file's "A saves and loads back as A" sub-case passed.
-Mutation-tested five further ways: reverting `save_game` to the single truncating
-write (seam still aborting mid-body) reddens sub-cases 2 and 3; removing the `.bak`
+Mutation-tested six further ways: reverting `save_game` to the single truncating
+write (seam still aborting mid-body) reddens sub-cases 2, 3 and 4 — 13 assertions,
+re-measured 2026-08-23; sub-case 4 reddens because it reads the `.bak` sub-case 3 is
+supposed to have left, and the mutation leaves none; removing the `.bak`
 fallback from `load_game` reddens 3 and 4; moving `file.close()` to after both renames
 reddens 17 suites, because on Windows the renames then fail outright; the
 `save_exists` and inert-seam mutations are described above; and moving the

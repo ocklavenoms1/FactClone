@@ -128,16 +128,19 @@ static var save_path: String = DEFAULT_SAVE_PATH
 
 ## True if the given path looks like a test fixture (test files set save_path
 ## to scratch paths during negative-path tests; those should NEVER trigger
-## user-facing OS.alert popups even if the test runs windowed). Used to gate
-## OS.alert calls in load_game error branches. push_error still fires for
-## logging in both cases.
+## user-facing OS.alert popups even if the test runs windowed). push_error
+## still fires for logging in both cases.
+##
+## TWO callers, and the second is the consequential one:
+##   1. `load_game`'s error branches, to suppress OS.alert under test.
+##   2. `_should_interrupt`, which is what keeps `save_game`'s fault-injection
+##      seam from ever firing on a real save.
+## Loosening this predicate to fix an alert edge case therefore also widens the
+## fault-injection gate. Change it with (2) in mind, not only (1).
 static func _is_test_fixture_path(path: String) -> bool:
 	return path.begins_with("user://test_") or path.find("/test_artifacts/") >= 0
 
 ## Suffixes for the two sidecars the atomic write uses (audit finding #12).
-## Derived from the CURRENT `save_path`, never from DEFAULT_SAVE_PATH — tests
-## override `save_path`, and a sidecar pinned to the default would have them
-## writing .tmp/.bak beside the player's real save.
 const TMP_SUFFIX: String = ".tmp"
 const BAK_SUFFIX: String = ".bak"
 
@@ -163,8 +166,12 @@ static var _interrupt_after_stage: String = ""
 ## a static, so a test that failed to restore it (an early return past its
 ## cleanup) would otherwise leave every subsequent save in the process — the
 ## player's included, in an editor session — silently returning false or, at
-## the "backup_renamed" stage, with no save file on disk at all. Gating means
-## the worst a leaked value can do is nothing. The cost is that a future test
+## the "backup_renamed" stage, with no save file on disk at all. Gating narrows
+## that to exactly one claim: a leak cannot reach a REAL save. It is not
+## harmless in the suite — a leaked value still makes `save_game` return false,
+## or leave no file, for every fixture path, which is every save the tests
+## perform. What the gate buys is that the blast radius stops at the fixtures.
+## The cost is that a future test
 ## using a non-fixture path would find the seam inert; that cannot pass
 ## vacuously, because every sub-case asserts the on-disk state an abort
 ## produces, and a completed save fails those assertions.
@@ -347,6 +354,9 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# partial file fails JSON.parse_string and main.gd's hotfix regenerates a
 	# fresh world. Instead: write .tmp, move the live save aside to .bak, move
 	# .tmp into place. At every instant at least one complete save exists.
+	# Both sidecars are derived from the CURRENT `save_path`, never from
+	# DEFAULT_SAVE_PATH — tests override `save_path`, and sidecars pinned to the
+	# default would have them writing .tmp/.bak beside the player's real save.
 	var tmp_path: String = save_path + TMP_SUFFIX
 	var bak_path: String = save_path + BAK_SUFFIX
 

@@ -68,6 +68,11 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_registration_completeness.gd"),
 ]
 
+## Directories that hold save fixtures, for the per-test sidecar scrub below.
+## These are exactly the two shapes `SaveSystem._is_test_fixture_path` accepts:
+## `user://test_*` at the root, and anything under `user://test_artifacts/`.
+const FIXTURE_DIRS: Array = ["user://", "user://test_artifacts/"]
+
 func _ready() -> void:
 	# Pause the global tick system so each test can drive ticks manually.
 	TickSystem.paused = true
@@ -88,6 +93,8 @@ func _ready() -> void:
 		# Run; catch hard errors as best we can. GDScript doesn't have try/except
 		# but @warning_ignore lets us surface assert failures readably.
 		result = test_class.run(self)
+		# Per-test teardown, AFTER the suite has restored its own save_path.
+		_scrub_fixture_sidecars()
 
 		var ok: bool = bool(result.get("ok", false))
 		var message: String = String(result.get("message", ""))
@@ -100,6 +107,39 @@ func _ready() -> void:
 
 	print("\n%d passed, %d failed\n" % [passed, failed])
 	get_tree().quit(0 if failed == 0 else 1)
+
+## Delete the `.tmp` / `.bak` sidecars of every save fixture (audit #12 follow-up).
+##
+## `save_game` writes `<save_path>.tmp` and moves the live save to `<save_path>.bak`.
+## Every save-using suite deletes its primary fixture and nothing else, so the
+## sidecars belong to nobody. Nothing leaks today, but only incidentally: each
+## existing suite happens to delete its primary before it saves to that path a
+## second time, so the `.bak` branch never runs. A suite that saved twice without
+## an intervening delete would strand `user://test_foo.json.bak` across runs — and
+## since `load_game` falls back to `.bak` and `save_exists()` counts it, the next
+## run's documented "no save file ⇒ silent fresh start" contract
+## (`load_result.gd`) would quietly become "loads a stale save" for that path.
+##
+## Runner-side rather than a helper each suite calls, deliberately: a suite
+## written later cannot forget to opt in, which is the whole failure mode. The
+## sweep is scoped to the same paths `SaveSystem._is_test_fixture_path` accepts,
+## so the scrub and the fault-injection gate agree on what a fixture is and the
+## player's real save is never a candidate.
+##
+## This does NOT restore `SaveSystem.save_path` — that is audit #63 (runner
+## restores neither `save_path` nor tick rate), which is broader and still live.
+func _scrub_fixture_sidecars() -> void:
+	for dir_path in FIXTURE_DIRS:
+		var dir: DirAccess = DirAccess.open(dir_path)
+		if dir == null:
+			continue
+		for file_name in dir.get_files():
+			if not (file_name.ends_with(SaveSystem.TMP_SUFFIX) or file_name.ends_with(SaveSystem.BAK_SUFFIX)):
+				continue
+			var full_path: String = dir_path + file_name
+			if not SaveSystem._is_test_fixture_path(full_path):
+				continue
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(full_path))
 
 ## Disconnect every connection on a signal — keeps tests isolated from
 ## leftovers from prior tests.
