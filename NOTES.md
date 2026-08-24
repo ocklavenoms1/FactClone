@@ -901,6 +901,48 @@ soil moved — because nothing does that today.
 
 ---
 
+## Landed: a test suite that ERRORS no longer hangs the whole runner
+
+Found and fixed 2026-08-23 during the #11/#13/#21 review response. Recorded because the
+failure signature is one this project has lost time to before, and because the fix
+changes what a red run looks like.
+
+**The failure.** GDScript has no try/except, so a suite that hits a runtime error simply
+stops and `run()` hands back whatever its declared return type defaults to. Two shapes,
+and only one of them was survivable:
+
+- `run()` declared `-> Dictionary` (all 54 suites today) unwinds to `{}`. That reads as
+  `ok == false`, prints `FAIL`, costs one suite, and the run completes. Survivable.
+- `run()` with **no return annotation** unwinds to `null`, and the runner's
+  `var result: Dictionary = test_class.run(self)` rejected null on the ASSIGNMENT. That
+  second error aborted `_ready` itself: **`exit=124`, nine PASS lines, no summary,
+  `get_tree().quit()` never reached.** The process hung until the timeout killed it —
+  indistinguishable from the compile-error hang, and equally uninformative.
+
+Nothing enforced the annotation, so the safe shape was a convention every suite happened
+to follow.
+
+**The fix** (`scripts/tests/test_runner.gd`): take the result into an **untyped** local,
+which cannot fail; scrub fixtures; then check the shape and report
+`ERROR <name> — run() returned Nil instead of a result Dictionary` before continuing.
+Re-measured against the same reproduction: `exit=1`, `53 passed, 1 failed`, summary
+printed.
+
+**Side benefit worth knowing about.** The fixture scrub used to sit between `run()` and
+the pass/fail branch, so it covered PASS and FAIL but not ERROR — an errored suite left
+its `.tmp`/`.bak`/`.incompatible` sidecars behind, which is exactly the suite most likely
+to have made a mess. The scrub now runs before the shape check, so it covers all three.
+That closes a hole in the "a suite written later cannot forget to opt in" guarantee the
+runner-side scrub exists for.
+
+**Related but NOT fixed:** audit #63 (runner restores neither `SaveSystem.save_path` nor
+`tick_rate_multiplier`) stays live. Its verification note argued the risk was low because
+"a hard error aborts the runner's own _ready loop … loud failure, not silent corruption".
+The measurement above shows that abort was silent, not loud. The reasoning is corrected
+in the audit; the finding's actual subject is untouched.
+
+---
+
 ## Protocol: locked architectural decisions can be reversed by reconnaissance findings
 
 **Codified at session-building-ui-4** after the third project-level architectural reversal. Extended at session-soil-exhaustion-2 with the playtest-gate addition.

@@ -112,13 +112,23 @@ is closed at all.
 | 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842`, the soil arc's sub-suite tally, now states a total its own addends sum to | doc-only; no test |
 | 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
 | 12 | non-atomic save write — a crash mid-write destroys the only slot | `b04c1f6` — the prescribed fix, with two departures recorded below | `test_save_atomicity.gd` (6 sub-cases) |
-| 11 | load_game indexes save arrays without shape validation | `61de9ee` | `test_load_malformed_save.gd` (6 sub-cases) |
+| 11 | load_game indexes save arrays without shape validation | `61de9ee` | `test_load_malformed_save.gd` (10 sub-cases) — **see R2**, two shapes reached the same failure and were fixed 2026-08-23 |
 | 13 | F9 quick-load leaves vision and the map stale | `9508d3f` — the fix text's optional shared helper taken as mandatory; see the entry below | `test_quick_load_refresh.gd` (3 sub-cases) |
-| 21 | forward-incompat save armed for destruction | `1198233` — **scoped down to one of the three cases it named**; see the scoping note below | `test_forward_incompat_save.gd` (7 sub-cases) |
+| 21 | forward-incompat save armed for destruction | `1198233` — **scoped down to one of the three cases it named**; see the scoping note below | `test_forward_incompat_save.gd` (9 sub-cases) |
 
-Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
-all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
-for every type with the drill exemption scoped to the resource-node check only.
+Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
+sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
+with the drill exemption scoped to the resource-node check only.
+
+**This block used to say "none is partial", and that claim did not survive the review
+of #11/#13/#21.** Three defects in the closed work were found by that review and are
+recorded where they belong rather than here: #11's residual `Inventory.load_array`
+truncation (see #11's entry — the note describing it was itself wrong about what it
+did), #21's worldgen alert still quoting `save_path` (see #21's scoping note), and
+**R2**, two save shapes that still reached #11's exact bricked-boot failure. All three
+are fixed; the lesson kept is that a half-fix check performed by the same pass that
+wrote the fix is not independent evidence. Prefer the per-finding notes below to this
+summary line.
 
 ### LIVE — HIGH (0)
 
@@ -257,6 +267,17 @@ one. Mutating `INCOMPAT_SUFFIX` to `".bak"` leaves sub-cases 1 and 2 passing and
 reddens sub-case 3 with the preserved copy reading `version 18 / world_seed 61002`
 — the first fresh save, rotated on top — which is that argument as an assertion.
 
+**Scope correction (re-measured 2026-08-23).** The prediction above under-claimed.
+The *values* were exactly right, but the mutation reddens more than sub-case 3: **all
+four** of sub-case 3's assertions (version, seed, the lost future field, and
+byte-identity), **sub-case 7's PREMISE** ("the preserved copy should be the only thing
+left on disk" — with the two suffixes aliased, the scrub loop that clears `.bak`
+removes it), and now **sub-case 8** as well, which under the aliasing finds the
+worldgen fixture it just moved to `bak_path` sitting at `kept_path`. Six assertions
+across three sub-cases, not four across one. Sub-case 8's reddening is path aliasing
+rather than a signal about preservation, and is recorded here so a future reader does
+not read it as one.
+
 Consequently **the audit's fix text is partly redundant and was not implemented as
 written.** "Copy the save aside before returning" was kept, because rotation still
 reaches `.bak`; the copy goes to a `.incompatible` sidecar `save_game` never writes
@@ -272,8 +293,36 @@ would be plumbing for a weaker restatement.
 
 One thing found while tracing that the finding does not mention: the alert quoted
 `save_path` unconditionally, so a save reached through the `.bak` fallback was
-reported at a path that does not exist. Both the message and the copy now use the
-path the data was actually read from; sub-case 4 covers it.
+reported at a path that does not exist.
+
+**This paragraph previously claimed the fix was complete, and it was not.** It read
+"Both the message and the copy now use the path the data was actually read from;
+sub-case 4 covers it." Both halves of that were wrong.
+
+*Wrong on scope.* Only the FORWARD-INCOMPAT alert was changed at `1198233`. The
+**worldgen-mismatch** alert a few lines below it still read `_native_path(save_path)`,
+with `source_path` in scope on that very line — and that alert is the one that tells
+the player to **delete** the file it names. A crash between `save_game`'s two renames
+leaves only `.bak`; if that save also has a worldgen mismatch, the player is sent to
+delete a file that does not exist while the real one sits at `.bak` and is rotated
+away by the second F5. Fixed 2026-08-23; the rule is now stated at the site rather
+than left to the two branches happening to agree.
+
+*Wrong on coverage.* Sub-case 4 asserts the **copy** is taken from the backup and
+that `error_message` still names the versions. It does not assert the **path in the
+message**, and no test can: `error_message` deliberately does not carry the path
+(`main.gd` toasts it, and a full native path belongs in the modal), and the dialog
+text reaches only `push_error` and a fixture-gated `OS.alert`. Sub-case 8 was added
+to pin that the worldgen branch is genuinely REACHABLE through `.bak` — the
+precondition the defect needed — and the string itself is guarded by the comment at
+the branch and by review. Recorded as a known coverage gap rather than papered over.
+
+Every other path-quoting message in `save_system.gd` was checked at the same time and
+is correct: `_preserve_incompatible`'s two `push_error`s quote their own `source_path`
+/ `dest`; `save_game`'s two rename failures quote `tmp_path` / `bak_path`, which are
+the paths those messages are about; the `.bak`-recovery `push_warning` names both
+deliberately. `_native_path` is used at exactly three sites, all dialog text, matching
+its docstring.
 
 ### Severity note — #19 is arguably mis-rated
 
@@ -302,6 +351,14 @@ the command rather than incrementing. `SAVE_VERSION` was re-checked at each and
 is unchanged at 18 — #12 changed the write mechanism, #11 the read robustness,
 #13 nothing in this file at all, and #21 only what `load_game` does with a
 version it has already decided it cannot read. None touched the schema.
+
+Re-derived again 2026-08-23 for the #11/#13/#21 review response: the suite count is
+**still 54**, because that pass added sub-cases to two existing files rather than new
+files — `test_load_malformed_save.gd` 6 → 10 sub-cases, `test_forward_incompat_save.gd`
+7 → 9. Sub-case counts are not in this table on purpose; they live beside the finding
+that owns them, where they can be checked against the file. `SAVE_VERSION` re-checked
+and unchanged at 18: that pass changed only what the reader does with data it cannot
+parse, never what the writer emits.
 
 | Value | Command |
 |---|---|
@@ -369,6 +426,65 @@ arguably what a fast-forwarding player expects), or the `tick_system.gd` doc com
 narrowed to say what is true (buildings tick; per-tile soil/fertilizer/regrowth are
 frame-driven and deliberately real-time). Picking whichever side is cheaper to edit is
 not a resolution.
+
+### R2. Two save shapes still reach #11's bricked-boot failure — `player_progression` and a building's `"s"` state
+
+**Found:** 2026-08-23, while verifying the "only two uncounted drop sites" claim during
+the #11/#13/#21 review response. **FIXED in the same pass** — recorded here anyway,
+because what they mean for #11's CLOSED status is a judgement call for a human, not a
+cleanup.
+
+Finding #11 is closed on the strength of `_first_mistyped_array_field` plus a per-entry
+guard on every collection, and the CLOSED block above states "Each was checked for the
+half-fix pattern; **none is partial**." Two shapes escaped both, and both produced
+exactly #11's headline failure: `load_game` aborts, the caller receives **null** instead
+of a LoadResult, `main.gd` dereferences it, and the boot bricks on every subsequent run
+until the file is deleted by hand.
+
+**Reproduction** (both measured, literal):
+
+```
+"player_progression": "not a dictionary"
+  SCRIPT ERROR: Invalid assignment of property or key 'player_progression' with value
+  of type 'String' on a base object of type 'RefCounted (LoadResult)'.
+     at: load_game (res://scripts/systems/save_system.gd:808)
+  → load_game returned NULL
+
+"buildings": [ ..., {"t": 1, "x": 40, "y": 41, "s": "not a dictionary"} ]
+  SCRIPT ERROR: Invalid type in function 'new' in base 'GDScript'. Cannot convert
+  argument 3 from String to Dictionary.     at: from_dict (building.gd:28)
+  SCRIPT ERROR: Invalid access to property or key 'anchor' on a base object of type 'Nil'.
+     at: load_game (res://scripts/systems/save_system.gd:760)
+  → load_game returned NULL
+```
+
+**Why `ARRAY_FIELDS` could never have caught either.** `player_progression` is *supposed*
+to be a Dictionary, so the array-field validator has nothing to say about it, and
+`LoadResult.player_progression` is typed — the assignment itself raises, after every
+world mutation has already been applied. The building case passes the container check
+AND the per-entry `is Dictionary` check and then dies one level further in, inside
+`Building._init`'s typed `initial_state` parameter. Both are *inside* structures #11's
+fix validated the *outside* of.
+
+**Fixed:** type-check before the assignment and count the drop; `Building.from_dict`
+returns null for an unreadable `"s"` and `load_game` skips and counts it. Coverage is
+sub-cases 8 and 9 of `test_load_malformed_save.gd`. Mutation-tested: removing the
+progression guard reddens sub-case 8 with the null-result message; removing
+`load_game`'s `if b == null` reddens sub-case 9 the same way. Removing `from_dict`'s own
+check does **not** redden the suite — `load_game`'s null guard still catches it — but it
+puts one SCRIPT ERROR back in the log, which is why both are kept.
+
+**Open question for a human, deliberately not decided here:** whether #11 returns to
+LIVE. The argument for is that "none is partial" is now demonstrably false for #11 and
+the audit's own half-fix check missed these. The argument against is that every shape
+#11's text *named* is genuinely closed and both of these were found and fixed within the
+same review cycle. The 16-closed / 68-live arithmetic below is unchanged pending that
+call.
+
+**Not exhaustive.** Two further shapes were noticed and NOT chased: `Building.from_dict`
+silently defaults a missing `"t"` to type 0 rather than dropping the entry, and two
+`buildings` rows sharing an anchor silently overwrite (`save_game` cannot produce that,
+a hand-edit can). Neither aborts the load; both are uncounted.
 
 ---
 
@@ -665,11 +781,63 @@ reddens 1, 2, 3 and 5; restoring the typed `var player_pos: Array = ...`
 declaration reddens sub-case 2 alone, which is the one fixture that never
 reaches an index.
 
-**Residual, deliberately out of scope.** `Inventory.load_array`
-(`inventory.gd:148-150`) still reads `entry[0]`/`entry[1]` off each slot
-unguarded, so a corrupt *row* inside a well-typed `player_inventory` array
-crashes there rather than in `load_game`. Same class of defect, different file;
-#11's fix text does not cover it.
+**Residual — CLOSED 2026-08-23, and the note that recorded it was wrong about what
+it did.** It read: "a corrupt *row* inside a well-typed `player_inventory` array
+crashes there rather than in `load_game`."
+
+**It did not crash the load. It silently truncated the inventory, which is quieter
+and worse.** A GDScript runtime error aborts only the INNERMOST function, so the
+unguarded `entry[1]` killed `Inventory.load_array` alone and `load_game` carried
+straight on to `result.success = true`. Every slot from the bad row onward was never
+written, `skipped_entries` stayed **0**, and `main.gd` toasted "World loaded from save
+(seed N)" with no suffix at all. The next F5 then wrote the truncated inventory over
+the only save slot. A future reader must not go looking for a loud failure — there
+was nothing in the log to find.
+
+One of the five corruption shapes produced no log line whatever: a String row such as
+`"xy"` is indexable and `int("x")` is `0`, so it raised no error, wrote item id 0 into
+the slot, and did not even truncate. Entirely undiagnosed.
+
+Fixed by guarding each row in `load_array` (`entry is Array and entry.size() >= 2`),
+clearing the slot rather than leaving a half-parsed id behind, and RETURNING the skip
+count so `load_game` can fold it into `skipped`. The return value is the load-bearing
+half: a guard alone would have stopped the truncation while still reporting a clean
+load. Coverage is sub-case 7 of `test_load_malformed_save.gd`, five shapes
+(`[7]` / `7` / `"xy"` / `{"a":1}` / `[]`), asserting on the stack stored AFTER the
+corrupted row rather than on the call's return.
+
+Mutation-tested three ways, each verified by echoing the mutated line: removing the
+row guard reddens all five shapes (15 assertions) and restores 4 SCRIPT ERRORs;
+pinning `load_array`'s return to 0 reddens exactly the five count assertions and
+nothing else; dropping the `skipped +=` at the call site does the same, which is what
+makes the wiring — not just the guard — a tested claim.
+
+**This does NOT reopen #11.** #11's headline defect is the null return that bricks
+the boot, and that remains closed for every shape #11 named. This was the separate,
+quieter defect the note above misdescribed. See R2 below for two shapes that DO still
+reach #11's headline failure and were found while verifying this one.
+
+**What `skipped_entries` measures, decided rather than left implicit.** The review
+asked whether the count should become per-collection so the toast could name which
+data was lost. **It stays scalar.** The case that most wants naming does not reach the
+count at all: a collection that is present but MISTYPED — `"buildings": {"chest": 1}`
+— is not skipped row by row, it fails the load outright through
+`_first_mistyped_array_field` with the field named in `error_message`, which sub-case
+4b has pinned since `61de9ee`. So "your whole base is gone" is already reported as a
+named failure, not as a count of 1. (The review's demonstration of the opposite —
+`success=true skipped=1 buildings=0` — does not reproduce against this code; it
+predates that guard.) What remains is genuine per-row damage, where a per-collection
+breakdown would render as "1 buildings, 1 tiles" and still not answer the question the
+player has, which is *how much*. That question is unanswerable from a corrupt row:
+the data needed to size the loss is the data that could not be read.
+
+The real defect was therefore not the number but the sentence around it. A row is not
+a common unit — one `buildings` row is one building, one `player_inventory` row is a
+whole stack, one `player` field is the spawn position — so the count reports
+INCIDENCE, never volume. `main.gd._skipped_suffix` now ends "— check your base and
+inventory", which is the part the player can act on, and the limit is documented at
+`LoadResult.skipped_entries` with the argument above so a future reader can overturn
+it deliberately rather than by accident.
 
 ### 12. save_game writes the save file non-atomically — a crash mid-write destroys the only save slot
 **Where:** `scripts/systems/save_system.gd:296` | **Category:** design-flaw, found by save-integrity
@@ -1751,6 +1919,32 @@ test_runner.gd:62-65 resets only current_tick and tick connections: "# Per-test 
 - Core claim confirmed: test_runner.gd:62-65 restores only current_tick and tick connections; SaveSystem.save_path (static var, save_system.gd:127) is snapshotted/restored privately by 12 suites, several on 2-3 exit paths each (e.g. test_mining_drill.gd:202,259; test_save_load_roundtrip.gd:238,283), and TickSystem.tick_rate_multiplier is restored only by a trailing execute in test_console.gd:110. No central guarantee exists. However the scariest prong is wrong: a GDScript hard error aborts the runner's own _ready loop, so later suites never run with a stranded path (loud failure, not silent corruption), save_path resets each process start, and all 12 SaveSystem-using suites currently override save_path before I/O, so no suite depends on the default. No CONVENTIONS.md rule mandates central restoration. Real as a latent design-flaw/hardening gap, but no reachable failure today and the severity is overstated.
 
 </details>
+
+**Correction 2026-08-23 — "loud failure, not silent corruption" was false, and that half
+is now fixed (#63 itself stays LIVE).** The verification note above rests on a hard
+error aborting the runner being obvious. It was not. Measured: a suite whose `run()`
+returns null — which is what an UNDECLARED return type does when a runtime error
+unwinds it — made `var result: Dictionary = test_class.run(self)` raise on the
+ASSIGNMENT, aborting `_ready` itself. Result: **`exit=124`, nine PASS lines, no
+summary, no `get_tree().quit()`** — the process simply sat there until the CI timeout
+killed it. That is the same signature as the compile-error hang this project has
+already been bitten by, and it is indistinguishable from a genuine hang.
+
+Worth noting the two shapes differ, which is why this went unnoticed: a suite declaring
+`-> Dictionary` (all 54 do today) unwinds to `{}`, not null, so it reads as an ordinary
+FAIL and costs one suite. Only the undeclared-return shape hangs — but nothing enforces
+the annotation.
+
+Fixed: the runner now takes the result into an untyped local, scrubs, and checks the
+shape, reporting `ERROR <name> — run() returned Nil instead of a result Dictionary`.
+Re-measured against the same reproduction: `exit=1`, `53 passed, 1 failed`, summary
+printed. This also closes the gap the fixture scrub had — it sat between `run()` and
+the pass/fail branch, so it covered PASS and FAIL but not ERROR, which bounded the
+"a suite cannot forget to opt in" guarantee that scrub is built on.
+
+**#63's actual subject — `save_path` and `tick_rate_multiplier` not being restored
+centrally — is untouched and remains LIVE.** What changed is only that its stated
+reason for being low-risk no longer holds.
 
 ### 64. Hotbar category cycling, disabled-slot logic, map panel, and minimap have zero coverage
 **Where:** `scripts/tests/test_runner.gd:14` | **Category:** test-gap, found by test-quality
