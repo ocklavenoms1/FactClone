@@ -361,11 +361,10 @@ func _ready() -> void:
 		var seed_msg: int = _generate_fresh_world()
 		_show_toast("New world (seed %d) · 1-9 build · Tab · R rotate · F5 save · B bag · M map" % seed_msg)
 
-	# Run an initial vision update from the player's spawn position — upgrades
-	# the 5×5 around player from fog (or unrevealed) to active. Same call site
-	# for both fresh-start and loaded-save paths.
-	_player_last_region = GridWorld.region_of_world_pos(player.global_position)
-	grid_world.update_vision(_player_last_region)
+	# Bring vision and the map into step with whichever world the branch above
+	# produced — a loaded one or a freshly generated one. Same call as F9's,
+	# deliberately: see _refresh_after_load.
+	_refresh_after_load()
 
 	# Scenario boot flags: `godot --path . -- --scenario=electric_rig`, or
 	# `-- --scenario=pole_tiers` for the Electricity Session 3 PAUSE 1 rig, or
@@ -409,6 +408,57 @@ func _skipped_suffix(result: LoadResult) -> String:
 	if result.skipped_entries <= 0:
 		return ""
 	return " · %d damaged entr%s skipped" % [result.skipped_entries, "y" if result.skipped_entries == 1 else "ies"]
+
+## Put vision and the map back in step with the world that is now in memory.
+##
+## ONE helper, called from BOTH load sites — `_ready` and `_quick_load` — and
+## that sharing is the fix, not an incidental tidy-up. Audit finding #13 was
+## precisely that the two paths had drifted: `load_game` clears
+## `region_visibility` and restores every explored region as FOG, documenting at
+## that line that active state "will be set by main.gd's vision update after load
+## completes", and only the boot path did it. Leaving two copies of this to drift
+## again is how the same finding comes back.
+##
+## The 5×5. `_process` re-runs `update_vision` only when the player's region
+## CHANGES, so F5-then-F9 without moving — the ordinary case — left
+## `_player_last_region` equal to the region the save put the player back in,
+## fired nothing, and the player stood in a 5×5 of fog. Deriving
+## `_player_last_region` from the LOADED position rather than trusting what it
+## already held is what closes that.
+##
+## The map gets a FULL rebuild rather than the changed-regions diff `_process`
+## uses, because that diff CANNOT describe this transition. `update_vision`
+## returns the regions whose state it changed, but `load_game` erased the
+## dictionary wholesale: a region explored in this session and absent from the
+## save is now missing entirely, and no per-region comparison will ever report a
+## region that is not there. Without the rebuild the M-map and minimap keep
+## rendering exploration the loaded world does not have. See
+## MapPanel.rebuild_all for why it resets the background build instead of
+## queueing 256 dirty regions.
+func _refresh_after_load() -> void:
+	_player_last_region = GridWorld.region_of_world_pos(player.global_position)
+	grid_world.update_vision(_player_last_region)
+	map_panel.rebuild_all()
+
+## F9 quick-load. A method rather than an inline `_process` block so the whole
+## load path — not just the pieces a pure function could be carved out of — is
+## reachable from a test; audit finding #13 was a divergence between this path
+## and the boot path, and a test that could only call the shared helper directly
+## would have passed against the bug.
+func _quick_load() -> void:
+	var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
+	if result.success:
+		_apply_loaded_progression(result.player_progression)
+		# The world in memory was just replaced; vision and the map still
+		# describe the one before it. Success only — a failed load left the
+		# standing world alone and there is nothing to re-derive.
+		_refresh_after_load()
+		# Same backup notice as the boot-time load above (audit #12), and the
+		# same skipped-entry notice (audit #11).
+		var loaded_msg: String = "Loaded the previous save — the newest one was damaged" if result.used_backup else "Loaded"
+		_show_toast(loaded_msg + _skipped_suffix(result))
+	else:
+		_show_toast(result.error_message if result.error_message != "" else "Nothing to load")
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
 ## defaults that main.gd's `player_progression` was initialized with — this
@@ -769,15 +819,7 @@ func _process(delta: float) -> void:
 		else:
 			_show_toast("Save failed — see console")
 	if Input.is_action_just_pressed("quick_load"):
-		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
-		if result.success:
-			_apply_loaded_progression(result.player_progression)
-			# Same backup notice as the boot-time load above (audit #12), and the
-			# same skipped-entry notice (audit #11).
-			var loaded_msg: String = "Loaded the previous save — the newest one was damaged" if result.used_backup else "Loaded"
-			_show_toast(loaded_msg + _skipped_suffix(result))
-		else:
-			_show_toast(result.error_message if result.error_message != "" else "Nothing to load")
+		_quick_load()
 
 	# Bag consume — two-press confirm. Decay BEFORE input check so an
 	# expiry-frame press always reads as a fresh first press, never a

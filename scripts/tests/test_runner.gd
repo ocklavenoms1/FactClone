@@ -63,6 +63,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_applicator_wasteland_recovery.gd"),
 	preload("res://scripts/tests/test_save_atomicity.gd"),
 	preload("res://scripts/tests/test_load_malformed_save.gd"),
+	preload("res://scripts/tests/test_quick_load_refresh.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.

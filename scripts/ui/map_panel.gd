@@ -138,6 +138,37 @@ func tick_background_build() -> void:
 	if _build_index >= _build_total:
 		_initial_built = true
 
+## Discard the built map and re-render every region from scratch.
+##
+## Called after a load completes (main.gd's `_refresh_after_load`, audit finding
+## #13). A load REPLACES `world.region_visibility` rather than editing it, so a
+## region explored in this session but absent from the save is simply gone from
+## the dict — `mark_regions_dirty` cannot express that, because the changed-region
+## list every other caller passes is derived from comparisons, and nothing is
+## left to compare a deleted entry against.
+##
+## Resetting the background build rather than queueing all 256 regions dirty,
+## for two reasons:
+##   - PACE. `tick_background_build` renders REGIONS_PER_BUILD_FRAME (8) regions
+##     a frame, so a 256-region rebuild spreads over 32 frames at the same
+##     ~0.8 ms/frame the initial build already costs and is equally invisible.
+##     Marking all 256 dirty instead drains them in ONE `_apply_dirty_regions`
+##     call — a single ~26 ms hitch — and pays 32,640 comparisons to queue them,
+##     because `mark_region_dirty` linear-scans `_dirty_regions` on every append.
+##   - REACH. `_apply_dirty_regions` runs only while the map is OPEN, so the
+##     dirty-list route would leave the MINIMAP — which samples this same texture
+##     every frame — showing pre-load exploration until the player happened to
+##     press M. `tick_background_build` is called unconditionally from main.gd's
+##     `_process` and updates the texture on every build frame, so the minimap
+##     corrects itself with no player action at all.
+##
+## Pending dirty regions are dropped: the rebuild repaints them anyway, and
+## keeping them would only re-render those regions a second time on M-open.
+func rebuild_all() -> void:
+	_build_index = 0
+	_initial_built = false
+	_dirty_regions.clear()
+
 ## Public getter for the cached map texture. Used by Minimap (which samples
 ## a region of this texture each frame via draw_texture_rect_region).
 func get_shared_texture() -> ImageTexture:
