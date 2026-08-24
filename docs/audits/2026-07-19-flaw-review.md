@@ -76,6 +76,8 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-23 | #7 | **12 closed / 72 live** — no HIGH remains |
 | 2026-08-23 | #12 | **13 closed / 71 live** |
 | 2026-08-23 | #11 | **14 closed / 70 live** |
+| 2026-08-23 | #13 | **15 closed / 69 live** |
+| 2026-08-23 | #21 (narrowed — see below) | **16 closed / 68 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -93,7 +95,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (14)
+### CLOSED (16)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -111,6 +113,8 @@ is closed at all.
 | 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
 | 12 | non-atomic save write — a crash mid-write destroys the only slot | `b04c1f6` — the prescribed fix, with two departures recorded below | `test_save_atomicity.gd` (6 sub-cases) |
 | 11 | load_game indexes save arrays without shape validation | `61de9ee` | `test_load_malformed_save.gd` (6 sub-cases) |
+| 13 | F9 quick-load leaves vision and the map stale | `9508d3f` — the fix text's optional shared helper taken as mandatory; see the entry below | `test_quick_load_refresh.gd` (3 sub-cases) |
+| 21 | forward-incompat save armed for destruction | `1198233` — **scoped down to one of the three cases it named**; see the scoping note below | `test_forward_incompat_save.gd` (7 sub-cases) |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
@@ -140,11 +144,10 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (24)
+### LIVE — MEDIUM (22)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 13 | F9 quick-load never refreshes vision or map | `main.gd:750-756` vs `:359-360` |
 | 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
 | 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
 | 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1598-1606` (bad check `:1602`) |
@@ -152,7 +155,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `smelter.gd:117-125` |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 21 | load-failure fallthrough overwrites a recoverable newer save | `save_system.gd:466-492` — re-derived at `233467f` |
 | 22 | one Esc press performs two actions | `map_panel.gd:243-245`, `console.gd:180-182`, `main.gd:611-622` |
 | 23 | console `place` paves anchor only; leaves stray STONE on failure | `console.gd:625-639` |
 | 24 | unbounded radius in `deplete_area` / `tile` | `console.gd:550-562, 743-744, 782-812` |
@@ -220,6 +222,59 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1007` vs `:834` |
 | 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
 
+### Scoping note — #21 was closed NARROWER than it was written
+
+**Do not "complete" this finding by making the other two cases stop generating a
+fresh world.** #21's title names three load failures — forward-incompat, worldgen
+mismatch, migration failure — and treats all three as a save being destroyed. Its
+own verification notes already concluded it overreaches on two of them, and
+`CONVENTIONS.md` sanctions the fallthrough for those two in as many words:
+
+> Migration returns `null` (or a dict with an unexpected version field) → `_try_migrate`
+> aborts the chain → `load_game` returns `success = false` with a descriptive
+> `error_message`. `main.gd`'s post-3.5 hotfix catches this and falls through to
+> fresh-world generation. Player isn't stranded; their save data is genuinely lost in
+> this case. — *Failure handling*
+
+> `worldgen_version` … stays as hard-fail. Procgen output changing for the same seed
+> cannot be migrated … Better to surface the failure and let the post-3.5 hotfix
+> regenerate fresh. — *Worldgen version is a separate axis*
+
+Neither is recoverable by any build, so there is nothing to preserve them *for*, and
+the migration-failure alert already warns about the F5 overwrite. Only the
+forward-incompat case is a genuine defect, because only it tells the player their
+save still works elsewhere. Sub-cases 5 and 6 of `test_forward_incompat_save.gd` pin
+the other two as failure-with-a-message that preserves nothing; mutating
+`load_game` to preserve on worldgen mismatch reddens sub-case 5.
+
+**What the `.bak` mechanism had already changed.** Finding #12's atomic write
+(`b04c1f6`) post-dates this audit and moves the live save to `.bak` before the new
+one lands, so the first F5 after the fallthrough does **not** destroy the newer
+save. Traced and asserted rather than assumed — sub-case 2 pins it. What #12 does
+not give is durability: `.bak` is a rotating slot, so the **second** F5 moves the
+fresh world onto it and the newer save is gone. The window was two keypresses, not
+one. Mutating `INCOMPAT_SUFFIX` to `".bak"` leaves sub-cases 1 and 2 passing and
+reddens sub-case 3 with the preserved copy reading `version 18 / world_seed 61002`
+— the first fresh save, rotated on top — which is that argument as an assertion.
+
+Consequently **the audit's fix text is partly redundant and was not implemented as
+written.** "Copy the save aside before returning" was kept, because rotation still
+reaches `.bak`; the copy goes to a `.incompatible` sidecar `save_game` never writes
+and `save_exists` deliberately never counts (sub-case 7 pins that — counting it
+would re-run the refusal dialog on every subsequent boot forever). "Extend the alert
+text" was kept and reworded to match the migration-failure alert's existing
+overwrite warning. No `LoadResult` failure-kind field was added, despite the
+precedent of `used_backup` and `skipped_entries`: the alert is authored at the
+failure site where the kind is already known statically, and it is modal and
+blocking, so the player has read the full explanation before `main.gd`'s toast is
+drawn. A field re-deriving in `main.gd` what `save_system.gd` just finished saying
+would be plumbing for a weaker restatement.
+
+One thing found while tracing that the finding does not mention: the alert quoted
+`save_path` unconditionally, so a save reached through the `.bak` fallback was
+reported at a path that does not exist. Both the message and the copy now use the
+path the data was actually read from; sub-case 4 covers it.
+
 ### Severity note — #19 is arguably mis-rated
 
 `_drop_to_chest` survived the entire Inserter Arc rework **byte-shape-identical** and
@@ -242,15 +297,17 @@ reader can check in one line instead of trusting the number.
 
 Verified 2026-08-23 at `09ab238`; the test-suite row re-derived 2026-08-23 at
 `233467f` (50 → 51, the #12 suite) and again at `bf839ba` (51 → 52, the #11
-suite), by re-running the command rather than incrementing. `SAVE_VERSION` was
-re-checked at both and is unchanged at 18 — #12 changed the write mechanism and
-#11 the read robustness, neither the schema.
+suite), and again at `c6c24af` (52 → 54, the #13 and #21 suites), by re-running
+the command rather than incrementing. `SAVE_VERSION` was re-checked at each and
+is unchanged at 18 — #12 changed the write mechanism, #11 the read robustness,
+#13 nothing in this file at all, and #21 only what `load_game` does with a
+version it has already decided it cannot read. None touched the schema.
 
 | Value | Command |
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **52** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **54** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
 | `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
 | **13** ProcessorPanel subclasses | `grep -rc 'extends ProcessorPanel' scripts/ui/*.gd \| grep -v ':0'` |
@@ -274,7 +331,7 @@ stand ready.
 ## DEFECTS FOUND DURING RE-APPLICATION — deliberately outside the numbered tables
 
 This audit tracks exactly **84** findings and every table above is arithmetic against
-that number (12 closed / 72 live). Defects discovered *while closing* those findings
+that number (16 closed / 68 live). Defects discovered *while closing* those findings
 are recorded here instead of being numbered #85+, so the 84-row arithmetic stays
 checkable. These are **not** audit findings; nothing above counts them. Forward-looking
 copies live in `NOTES.md` under their own `## Queued:` headings.
@@ -711,6 +768,29 @@ main.gd:518-524: quick_load branch calls only `SaveSystem.load_game(...)` + `_ap
 
 </details>
 
+**CLOSED 2026-08-23 at `9508d3f`.** Both halves fixed, and the fix text's *optional*
+last sentence — "optionally extract the shared post-load refresh … into one helper" —
+was treated as the mandatory part, because the drift between the two load paths IS the
+finding and leaving two copies invites it back. `main._refresh_after_load()` is called
+from `_ready` and from the new `_quick_load()`. Of the two map-refresh shapes the fix
+text offered, the **background-build reset** was chosen over `mark_all_dirty()`:
+`_apply_dirty_regions` only runs while the map is OPEN, so the dirty-list route would
+leave the minimap — which samples the same texture every frame — stale until an
+M-press, and it drains all 256 regions in one ~26 ms frame after paying 32,640
+comparisons to `mark_region_dirty`'s linear dedup. `MapPanel.rebuild_all()` instead
+lets the existing 8-regions-per-frame build repaint over ~32 frames at the ~0.8 ms/frame
+it already costs.
+
+Coverage is `scripts/tests/test_quick_load_refresh.gd`, asserting **state values**:
+`region_visibility` states for the vision half and pixels read back out of the map
+panel's own image for the map half. It drives the real `_quick_load()` rather than the
+shared helper, since a test calling the helper directly would have passed against the
+bug. RED before the fix showed all 25 regions at state 1 and the stale region's pixel
+still at `(0.1176, 0.2471, 0.1176)` — grass green × the 0.45 fog dimming. Removing
+`update_vision` from the helper reddens sub-case 1; removing `rebuild_all` reddens only
+sub-case 2; calling the helper from `_ready` alone reddens sub-case 1, which is what
+proves F9 routes through it.
+
 ### 14. Processors without an output prefer_dir push outputs backward onto their feeder belts, jamming the input line
 **Where:** `scripts/world/processor.gd:229` | **Category:** design-flaw, found by sim-core
 
@@ -871,6 +951,30 @@ main.gd:243-245: 'push_warning("Save load failed (%s) — generating fresh world
 - Reproduced for the forward-incompat case: save v19 vs SAVE_VERSION=18 → save_system.gd:346-356 alerts "Update the game to load this save", returns success=false; main.gd:236-245 then generates a playable fresh world, and F5 (main.gd:512-514 → save_system.gd:296-302) opens the same save_path with FileAccess.WRITE and unconditionally destroys the newer, fully-recoverable save the dialog told the player to keep — no .bak in any path. However, the claim overreaches on the other two cases: CONVENTIONS.md:125 explicitly sanctions fresh-world fallthrough for migration failure ("save data is genuinely lost in this case", and the alert at save_system.gd:342 even warns "overwritten on next F5"), and CONVENTIONS.md:136 explicitly endorses the fallthrough for worldgen mismatch. Only the version>SAVE_VERSION path is a genuine defect: its alert promises recoverability but carries no overwrite warning and the code arms silent destruction.
 
 </details>
+
+**CLOSED 2026-08-23 at `1198233`, scoped to the forward-incompat case only** — see
+the scoping note in the status block above for the `CONVENTIONS.md` quotes that
+narrow it and for the traced `.bak` interaction. Three corrections to the fix text
+as written, all of them consequences of `b04c1f6` post-dating this audit:
+
+1. **"copy the save aside … to `save_path + '.bak'`" would now destroy it.** `.bak` is
+   the atomic write's rotation slot: `save_game` moves the live save there on every
+   F5, so a copy left at that path survives exactly one more save. The copy goes to
+   a `.incompatible` sidecar instead, which `save_game` never writes.
+2. **"arms one-keypress destruction" is no longer true — it is two.** The first F5
+   *moves* the newer save to `.bak` rather than truncating it; the second rotates the
+   fresh world on top. The verification notes' reproduction predates the atomic write.
+3. **No `LoadResult` `kind` field was added**, though the fix text offers one and
+   `used_backup` / `skipped_entries` set the precedent. The alert is written where the
+   kind is statically known and is modal, so the player has read it before `main.gd`
+   toasts; a field would only let `main.gd` restate it more weakly.
+
+The alert now names the path the data was actually read from — it previously always
+named `save_path`, which is wrong when the `.bak` fallback supplied the data — and
+carries the F5 overwrite warning the fix text asked for, worded to match the
+migration-failure alert that already had one. Coverage is
+`scripts/tests/test_forward_incompat_save.gd`, 7 sub-cases, asserting the preserved
+copy's **parsed contents and bytes**, not its existence. `SAVE_VERSION` did not move.
 
 ### 22. One Esc press performs two actions: modal Esc handlers in _input race main's polled Esc priority chain in the same frame
 **Where:** `scripts/ui/map_panel.gd:243` | **Category:** bug, found by main-console
