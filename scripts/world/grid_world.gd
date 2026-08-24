@@ -1716,9 +1716,14 @@ func _draw() -> void:
 		if anchor.y + fp.y - 1 < min_tile.y or anchor.y > max_tile.y:
 			continue
 		# Sprite path (session-art-probe-1) — OFF by default. With
-		# SpriteLibrary.enabled false this is one boolean test and the call
-		# below is reached unchanged for every building, including the three
-		# that have art. Buildings.draw_one() itself is untouched.
+		# SpriteLibrary.enabled false the added per-building work is exactly:
+		# one local bool init, two reads of a static bool, and three branches.
+		# No draw call changes, and Buildings.draw_one() below is reached
+		# unchanged for every building including the three that have art —
+		# measured, not assumed: six flag-off frames, three at 42f6758 and
+		# three with this code in place, are byte-identical PNGs (md5
+		# 4a2f646cf8fe8f65cb987697f5e38fd7, 0 of 921600 pixels differing).
+		# Buildings.draw_one() itself is untouched.
 		var drew_sprite: bool = false
 		if SpriteLibrary.enabled:
 			drew_sprite = SpriteLibrary.draw_building(b, self, tile_to_world_origin(anchor), TILE_SIZE)

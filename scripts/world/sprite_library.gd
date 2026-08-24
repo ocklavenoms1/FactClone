@@ -9,10 +9,14 @@ extends RefCounted
 ## failure story survive contact with the engine — at asset three, where the
 ## cost of being wrong is one session, instead of at asset twenty.
 ##
-## OFF BY DEFAULT. `SpriteLibrary.enabled` is the single toggle. With it false
-## every building — including the three — goes through `Buildings.draw_one()`
-## exactly as before; the only added work is one boolean test per building per
-## frame at `grid_world.gd:1688`'s loop. `Buildings.draw_one()` is untouched.
+## OFF BY DEFAULT. `SpriteLibrary.enabled` is the single toggle, and the dev
+## console's `sprites on|off` flips it. With it false every building — including
+## the three — goes through `Buildings.draw_one()` exactly as before; the added
+## per-building work at the `grid_world.gd:1709` building loop is one local bool
+## init, two reads of this static, and three branches. Measured, not asserted:
+## six flag-off frames — three at 42f6758, three with this file in place — are
+## byte-identical PNGs (md5 4a2f646cf8fe8f65cb987697f5e38fd7, 0 of 921600
+## pixels differing). `Buildings.draw_one()` is untouched.
 ##
 ## ---------------------------------------------------------------------------
 ## HOW THE PNGs ARE LOADED, AND WHY IT IS NOT `load()`
@@ -506,9 +510,9 @@ static func state_key_for(b: Building) -> String:
 # in the same session that documents it.
 #
 # The precedent is already in the codebase and it went the other way:
-# `inserter.gd:943` reads `cycle_progress` out of building state and
+# `inserter.gd:944` reads `cycle_progress` out of building state and
 # `inserter.gd:990` / `:995` interpolate the arm angle from it — a swing driven
-# by simulation state, not by elapsed seconds. `inserter.gd:985-988` records
+# by simulation state, not by elapsed seconds. `inserter.gd:981-986` records
 # why: "The underlying cycle_progress is untouched by the stall, so the swing
 # resumes from where it left off when power returns."
 #
