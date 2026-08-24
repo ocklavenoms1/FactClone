@@ -337,7 +337,15 @@ func _ready() -> void:
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
 		if result.success:
 			_apply_loaded_progression(result.player_progression)
-			_show_toast("World loaded from save (seed %d)" % grid_world.world_seed)
+			# Audit #12: the load succeeded, but off the .bak sidecar — the
+			# newest save was interrupted mid-write. Say so, because the player
+			# is looking at a world one save older than the one they last
+			# pressed F5 for, and would otherwise read the difference as the
+			# game losing their work at random.
+			if result.used_backup:
+				_show_toast("Last save was damaged — recovered the previous one (seed %d)" % grid_world.world_seed)
+			else:
+				_show_toast("World loaded from save (seed %d)" % grid_world.world_seed)
 		else:
 			# Hotfix (post-3.5, NOTES.md "Schema-mismatch UX gap"): when load
 			# fails (schema mismatch, corrupt JSON, missing fields, etc.),
@@ -751,7 +759,8 @@ func _process(delta: float) -> void:
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
 		if result.success:
 			_apply_loaded_progression(result.player_progression)
-			_show_toast("Loaded")
+			# Same backup notice as the boot-time load above (audit #12).
+			_show_toast("Loaded the previous save — the newest one was damaged" if result.used_backup else "Loaded")
 		else:
 			_show_toast(result.error_message if result.error_message != "" else "Nothing to load")
 

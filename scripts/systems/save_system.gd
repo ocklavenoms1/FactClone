@@ -134,6 +134,45 @@ static var save_path: String = DEFAULT_SAVE_PATH
 static func _is_test_fixture_path(path: String) -> bool:
 	return path.begins_with("user://test_") or path.find("/test_artifacts/") >= 0
 
+## Suffixes for the two sidecars the atomic write uses (audit finding #12).
+## Derived from the CURRENT `save_path`, never from DEFAULT_SAVE_PATH — tests
+## override `save_path`, and a sidecar pinned to the default would have them
+## writing .tmp/.bak beside the player's real save.
+const TMP_SUFFIX: String = ".tmp"
+const BAK_SUFFIX: String = ".bak"
+
+## TEST-ONLY fault injection for `save_game`. Set to a stage name to make
+## save_game return false at that exact point, leaving on disk precisely what
+## a process kill at that moment would leave. Production never sets this; it
+## defaults to "" and `_should_interrupt` additionally refuses to fire unless
+## `save_path` is a test fixture path, so a value leaked into a shipped build
+## still cannot touch a real save.
+##
+## Recognised stages (see save_game):
+##   "tmp_written"     — the .tmp is fully written and closed, no rename yet.
+##   "backup_renamed"  — the live save has been moved to .bak and the .tmp is
+##                       not yet in place, so `save_path` DOES NOT EXIST. This
+##                       is the window the atomic write itself introduces and
+##                       the one the .bak fallback exists to cover.
+## Covered by scripts/tests/test_save_atomicity.gd.
+static var _interrupt_after_stage: String = ""
+
+## True when the test seam should abort `save_game` right now.
+##
+## The `_is_test_fixture_path` gate is deliberate. `_interrupt_after_stage` is
+## a static, so a test that failed to restore it (an early return past its
+## cleanup) would otherwise leave every subsequent save in the process — the
+## player's included, in an editor session — silently returning false or, at
+## the "backup_renamed" stage, with no save file on disk at all. Gating means
+## the worst a leaked value can do is nothing. The cost is that a future test
+## using a non-fixture path would find the seam inert; that cannot pass
+## vacuously, because every sub-case asserts the on-disk state an abort
+## produces, and a completed save fails those assertions.
+static func _should_interrupt(stage: String) -> bool:
+	if _interrupt_after_stage != stage:
+		return false
+	return _is_test_fixture_path(save_path)
+
 # ---------- migration framework (session-save-migration) ----------
 #
 # Replaces the prior hard-fail-on-version-mismatch behavior. When loading
@@ -301,39 +340,111 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		"player_progression": player_progression,
 	}
 
-	var file := FileAccess.open(save_path, FileAccess.WRITE)
+	# ---- ATOMIC WRITE (audit finding #12) ----------------------------------
+	# FileAccess.WRITE TRUNCATES ON OPEN. Writing straight to save_path meant
+	# any interruption between the truncation and the flush left the single
+	# save slot empty or half-written, and load_game had no fallback: the
+	# partial file fails JSON.parse_string and main.gd's hotfix regenerates a
+	# fresh world. Instead: write .tmp, move the live save aside to .bak, move
+	# .tmp into place. At every instant at least one complete save exists.
+	var tmp_path: String = save_path + TMP_SUFFIX
+	var bak_path: String = save_path + BAK_SUFFIX
+
+	var file := FileAccess.open(tmp_path, FileAccess.WRITE)
 	if file == null:
-		push_error("Failed to open save file for writing: %s" % FileAccess.get_open_error())
+		push_error("Failed to open temp save file for writing: %s" % FileAccess.get_open_error())
 		return false
 	file.store_string(JSON.stringify(data))
 	file.close()
+
+	# Crash here and save_path still holds the previous save, untouched.
+	if _should_interrupt("tmp_written"):
+		return false
+
+	# Move the live save ASIDE before moving the new one in — not merely so a
+	# backup exists, but because renaming .tmp straight over a live save_path
+	# would not be atomic. DirAccess.rename_absolute deletes an existing
+	# destination first (DirAccessWindows::rename), so a direct overwrite has
+	# its own delete-then-rename window in which save_path does not exist and
+	# nothing has been backed up. With the live file moved to .bak first, the
+	# destination of the second rename is guaranteed absent and no delete runs.
+	if FileAccess.file_exists(save_path):
+		var bak_err: int = DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(save_path), ProjectSettings.globalize_path(bak_path))
+		if bak_err != OK:
+			push_error("Save aborted: could not move the existing save to %s (error %d). The original is untouched." % [bak_path, bak_err])
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp_path))
+			return false
+
+	# Crash here and save_path DOES NOT EXIST — this is the window the fix
+	# itself introduces, and .bak is the only copy of the player's progress.
+	# load_game's backup fallback and save_exists' backup check are what make
+	# it survivable.
+	if _should_interrupt("backup_renamed"):
+		return false
+
+	var live_err: int = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(tmp_path), ProjectSettings.globalize_path(save_path))
+	if live_err != OK:
+		# Nothing was destroyed: the previous save is complete at .bak, which
+		# load_game reads and save_exists counts. Deliberately NOT rolled back
+		# here — a rollback that itself fails would leave two error paths to
+		# reason about, and the .bak fallback already covers this state as the
+		# same state a crash one line earlier produces.
+		push_error("Save aborted: could not move %s into place (error %d). The previous save is preserved at %s." % [tmp_path, live_err, bak_path])
+		return false
 	return true
+
+## Open `path` and parse it as a save Dictionary. Returns the Dictionary, or
+## null if the file cannot be opened, is not valid JSON, or parses to
+## something other than a Dictionary — i.e. every shape an interrupted write
+## leaves behind (empty file, truncated JSON) collapses to the same null.
+static func _read_save_dict(path: String) -> Variant:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return null
+	var text: String = f.get_as_text()
+	f.close()
+	var parsed = JSON.parse_string(text)
+	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
+		return null
+	return parsed
 
 ## Returns a LoadResult. Convention:
 ## - result.success == false, error_message == "" → no save file (silent).
 ## - result.success == false, error_message != "" → load failed; caller surfaces error.
 ## - result.success == true → grid_world / player / player_inventory mutated;
 ##   result.player_progression carries any progression state the caller needs to apply.
+##   result.used_backup is true iff the data came from the .bak sidecar.
+##
+## Backup fallback (audit finding #12): the primary save can be absent (a crash
+## between save_game's two renames) or unparseable (a pre-fix truncating write
+## that was interrupted). Either way the previous save is complete at .bak and
+## is tried before the load is declared a failure.
 static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inventory) -> LoadResult:
 	var result := LoadResult.new()
-	if not FileAccess.file_exists(save_path):
+	var bak_path: String = save_path + BAK_SUFFIX
+	var primary_exists: bool = FileAccess.file_exists(save_path)
+	var backup_exists: bool = FileAccess.file_exists(bak_path)
+	if not primary_exists and not backup_exists:
 		return result   # silent failure; treat as "fresh start"
 
-	var file := FileAccess.open(save_path, FileAccess.READ)
-	if file == null:
-		result.error_message = "Could not open save file for reading."
-		push_error(result.error_message)
-		return result
-	var text: String = file.get_as_text()
-	file.close()
+	var used_backup: bool = false
+	var candidate = _read_save_dict(save_path) if primary_exists else null
+	if candidate == null:
+		candidate = _read_save_dict(bak_path) if backup_exists else null
+		if candidate == null:
+			# Both unusable — or the primary is corrupt and there is no backup
+			# at all, which is what a save interrupted before it ever had a
+			# predecessor looks like. Fail with a non-empty error_message so
+			# the caller surfaces it; used_backup stays false.
+			result.error_message = "Save file is corrupt or unreadable." if primary_exists else "Save file is missing and no usable backup was found."
+			push_error(result.error_message)
+			return result
+		used_backup = true
+		push_warning("SaveSystem.load_game: %s is missing or unreadable; recovering from %s." % [save_path, bak_path])
 
-	var parsed = JSON.parse_string(text)
-	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
-		result.error_message = "Save file is corrupt or unreadable."
-		push_error(result.error_message)
-		return result
-
-	var data: Dictionary = parsed
+	var data: Dictionary = candidate
 	var version: int = int(data.get("version", 0))
 	# Migration framework (session-save-migration): older saves migrate
 	# forward through the MIGRATIONS chain. Newer saves (running an old
@@ -511,8 +622,18 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		player_inventory.load_array(data["player_inventory"])
 
 	result.player_progression = data.get("player_progression", {})
+	# Set here, not where the source was chosen: the convention is that
+	# used_backup is meaningful only on success, and every error branch above
+	# returns before this point rather than reporting a backup for a load that
+	# did not happen.
+	result.used_backup = used_backup
 	result.success = true
 	return result
 
+## True if there is anything to load. Counts the .bak sidecar (audit #12): a
+## crash between save_game's two renames leaves save_path absent while .bak
+## holds the whole of the player's progress, and main.gd gates its load call
+## on this — a save_path-only check would skip straight to fresh-world
+## generation and lose a save that load_game could have recovered.
 static func save_exists() -> bool:
-	return FileAccess.file_exists(save_path)
+	return FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + BAK_SUFFIX)

@@ -17,7 +17,20 @@ extends RefCounted
 ##   Empty-but-present `player_progression` ({}) is acceptable for forward-
 ##   compatibility — caller should keep its own defaults if the dict is
 ##   missing keys.
+## - `used_backup` is meaningful ONLY when `success == true`; it is never set
+##   on a failure path. It cannot be signalled through `error_message`,
+##   because recovering from the backup is a SUCCESS and the convention above
+##   reads a non-empty `error_message` as failure. That is why it is its own
+##   field rather than the note the audit's fix text suggested.
 
 var success: bool = false
 var error_message: String = ""
 var player_progression: Dictionary = {}
+
+## True when `load_game` could not use the primary save file and read the
+## `.bak` sidecar instead (audit finding #12 — the primary was absent because
+## a crash landed between save_game's two renames, or unparseable because an
+## older non-atomic write was interrupted). The load succeeded; the caller
+## should tell the player that the newest save was lost so they know the state
+## they are looking at is one save behind.
+var used_backup: bool = false
