@@ -75,6 +75,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-23 | #83 | **11 closed / 73 live** |
 | 2026-08-23 | #7 | **12 closed / 72 live** — no HIGH remains |
 | 2026-08-23 | #12 | **13 closed / 71 live** |
+| 2026-08-23 | #11 | **14 closed / 70 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -92,7 +93,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (13)
+### CLOSED (14)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -109,6 +110,7 @@ is closed at all.
 | 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842`, the soil arc's sub-suite tally, now states a total its own addends sum to | doc-only; no test |
 | 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
 | 12 | non-atomic save write — a crash mid-write destroys the only slot | `b04c1f6` — the prescribed fix, with two departures recorded below | `test_save_atomicity.gd` (6 sub-cases) |
+| 11 | load_game indexes save arrays without shape validation | `61de9ee` | `test_load_malformed_save.gd` (6 sub-cases) |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
@@ -138,11 +140,10 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (25)
+### LIVE — MEDIUM (24)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 11 | load_game indexes save arrays without shape validation | `save_system.gd:494-495`, loops at `:511,:528,:551,:561,:573,:584,:587` — re-derived at `233467f`, the #12 fix moved them |
 | 13 | F9 quick-load never refreshes vision or map | `main.gd:750-756` vs `:359-360` |
 | 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
 | 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
@@ -240,14 +241,16 @@ class of defect. Each entry below carries the command that produces it, so a
 reader can check in one line instead of trusting the number.
 
 Verified 2026-08-23 at `09ab238`; the test-suite row re-derived 2026-08-23 at
-`233467f` (50 → 51, the #12 suite). `SAVE_VERSION` was re-checked at the same
-commit and is unchanged at 18 — #12 changed the write mechanism, not the schema.
+`233467f` (50 → 51, the #12 suite) and again at `bf839ba` (51 → 52, the #11
+suite), by re-running the command rather than incrementing. `SAVE_VERSION` was
+re-checked at both and is unchanged at 18 — #12 changed the write mechanism and
+#11 the read robustness, neither the schema.
 
 | Value | Command |
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **51** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **52** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
 | `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
 | **13** ProcessorPanel subclasses | `grep -rc 'extends ProcessorPanel' scripts/ui/*.gd \| grep -v ':0'` |
@@ -549,6 +552,67 @@ save_system.gd:372-373: `var player_pos: Array = data.get("player", [0, 0])` / `
 - Confirmed. All quoted code exists: unguarded player_pos[0]/[1] at save_system.gd:372-373; entry[0]..[3] indexed without size checks for tile_modifications (:389-392, only entry[4] guarded), tile_soil (:429-431), tile_fertilizer (:439-444), tile_wasteland (:451-456), explored_regions (:462-463); the sole defensive read is :408. No guard elsewhere — only the JSON-parse/top-level-Dict check (:322-326) and version checks (:329-370) precede the indexing, so a hand-edited v18 save (SAVE_VERSION=18, :121) with matching worldgen_version and a short array reaches the crash. A GDScript out-of-bounds index (or non-Array assigned to typed `player_pos: Array`) aborts load_game with null return; main.gd:231-232 then dereferences null via `result.success`, so the documented fresh-world fallthrough (main.gd:236-245, CONVENTIONS.md:122-126) never runs and the crash repeats every boot. CONVENTIONS.md:114-118 explicitly requires defensiveness for hand-edited/corrupted saves. No test in scripts/tests/ covers malformed entries — all save tests (test_save_load_roundtrip.gd, test_save_migration.gd, test_wasteland.gd:172, test_fertilizer_chain.gd:201) use well-formed data, consistent with 33/33 passing. Minor caveat: the 'Migration robustness' section is textually scoped to migrations, but the Failure-handling contract applies to load_game directly, and the crash stands on its own.
 
 </details>
+
+**CLOSED 2026-08-23 at `61de9ee`.** The two-tier validation above shipped as
+prescribed. Coverage is `scripts/tests/test_load_malformed_save.gd`, six
+sub-cases asserting on **loaded field values** (seed / player position / flour
+count / the surviving tile, chest and soil entries), not on the call's return.
+Every fixture is a save the real `save_game` wrote, read back as JSON with one
+field edited — so each is genuinely a v18 save that parses and passes every
+version check before reaching the indexing. `SAVE_VERSION` did not move;
+`test_save_migration.gd`, `test_save_load_roundtrip.gd` and
+`test_save_atomicity.gd` pass unmodified.
+
+**RED**, literally: five of the six fixtures made `load_game` return **null**,
+with **6 SCRIPT ERRORs** — `Out of bounds get index '1' (on base: 'Array')` at
+the player read, `Trying to assign value of type 'String' to a variable of type
+'Array'` at the typed declaration, `Invalid access of index '3'` in the
+`tile_modifications` loop, `Invalid access of index '1' on a base object of
+type: 'String'` in the soil loop, and `Cannot convert argument 1 from String to
+Dictionary` at `Building.from_dict` twice. That error count is **expected in RED
+and is zero post-fix** — the same convention as the migration suite's
+deliberate failure-path ERROR lines. Sub-case 6 (a well-formed save) was
+correctly green pre-fix; it is the regression control.
+
+**Three decisions on top of the fix text.**
+
+1. **The type check runs ONCE, up front, over `ARRAY_FIELDS` — not per loop.**
+   The fix text puts it inside each collection's block. Hoisting it ahead of the
+   first world mutation means a mistyped field cannot leave `grid_world`
+   regenerated from the seed with some collections applied and others not, which
+   the caller cannot distinguish from a completed load. It also puts the list of
+   validated fields in one readable place instead of eight.
+2. **Skips are counted and surfaced, which the fix text does not ask for.**
+   Silently dropping malformed rows means a player's buildings vanish with no
+   indication — a worse failure than a load that says so. The count rides on
+   `LoadResult.skipped_entries` and both `main.gd` load sites append it to their
+   toast, following the `used_backup` precedent from #12 exactly: a field set on
+   the success path only, handled at both call sites. Mutating the counter to
+   always report 0 reddens sub-cases 1, 2, 3 and 5, so the count is real rather
+   than decorative.
+3. **An unreadable `"player"` counts as a skipped entry.** The fix text treats it
+   as warn-and-continue only. A silently reset spawn is lost data the player
+   reads as the game teleporting them, so it is reported like any other drop.
+
+**`data["player_inventory"] is Array` needs no separate guard**, contrary to the
+fix text's last sentence: the field is in `ARRAY_FIELDS`, so a non-Array already
+failed the load before the `load_array` call is reached.
+
+**Mutation-tested four ways**, each verified as applied by echoing the mutated
+line: dropping `"tile_soil_modifications"` from `ARRAY_FIELDS` reddens sub-case
+4a — and note it does *not* crash, it makes the load silently succeed having
+discarded the whole collection, which is what the type check is for; removing
+the `tile_modifications` entry-size guard reddens sub-case 3 with the original
+`Invalid access of index '3'` crash; pinning `result.skipped_entries` to 0
+reddens 1, 2, 3 and 5; restoring the typed `var player_pos: Array = ...`
+declaration reddens sub-case 2 alone, which is the one fixture that never
+reaches an index.
+
+**Residual, deliberately out of scope.** `Inventory.load_array`
+(`inventory.gd:148-150`) still reads `entry[0]`/`entry[1]` off each slot
+unguarded, so a corrupt *row* inside a well-typed `player_inventory` array
+crashes there rather than in `load_game`. Same class of defect, different file;
+#11's fix text does not cover it.
 
 ### 12. save_game writes the save file non-atomically — a crash mid-write destroys the only save slot
 **Where:** `scripts/systems/save_system.gd:296` | **Category:** design-flaw, found by save-integrity
