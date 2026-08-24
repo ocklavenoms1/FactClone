@@ -278,9 +278,16 @@ copies live in `NOTES.md` under their own `## Queued:` headings.
 **Found:** 2026-08-23, while re-applying the #7 fix. **Recorded, not fixed** — which
 side is wrong is a design call, not a cleanup.
 
+**Scoped in full at `docs/scoping/r1-two-clocks.md`** — which side is wrong and on what
+evidence, what breaks if the three systems move onto ticks, the three candidate
+options, and the finding that decided the shape of the write-up: **no existing test
+would catch the change in either direction.** Every soil-arc test calls
+`world._tick_soil_regen(delta)` directly, bypassing both `_process` and `TickSystem`,
+so all 44 sub-suites stay green through a migration that changes the game.
+
 `scripts/systems/tick_system.gd:5-7` states the simulation advances on tick boundaries:
 "Buildings, crops, weather, etc. all advance on tick boundaries — never on `_process`."
-But `GridWorld._process` (`grid_world.gd:1167-1176`) passes the **raw engine delta** to
+But `GridWorld._process` (`grid_world.gd:1182-1191`) passes the **raw engine delta** to
 `_tick_regrowth`, `_tick_fertilizer_decay` and `_tick_soil_regen`. Those three carry the
 entire soil arc's clock: wasteland grace, soil regen, fertilizer decay, tree regrowth.
 `TickSystem.tick_rate_multiplier` scales only `TickSystem._accumulator`

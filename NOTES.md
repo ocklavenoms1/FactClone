@@ -869,7 +869,7 @@ arithmetic invariant depends on staying at 84).
 **Two-sided, and either side could be the wrong one.** `scripts/systems/tick_system.gd:5-7`
 states the simulation advances on tick boundaries — "Buildings, crops, weather, etc. all
 advance on tick boundaries — **never on `_process`**". But `GridWorld._process`
-(`grid_world.gd:1167-1176`) hands the **raw engine delta** to `_tick_regrowth`,
+(`grid_world.gd:1182-1191`) hands the **raw engine delta** to `_tick_regrowth`,
 `_tick_fertilizer_decay` and `_tick_soil_regen`. Those three are the whole soil arc's clock:
 wasteland grace, soil regen, fertilizer decay, tree regrowth.
 
@@ -889,6 +889,15 @@ soil — arguably what a player fast-forwarding expects), or the `tick_system.gd
 is narrowed to say what is actually true (buildings tick; per-tile soil/fertilizer/regrowth
 are frame-driven and deliberately real-time). Do not "fix" it by editing whichever side is
 cheaper to touch.
+
+**Scoped in full at `docs/scoping/r1-two-clocks.md`** — the evidence on which side is
+wrong, what breaks on migration, and a third option (move to ticks but exempt from the
+multiplier) that is probably the worst of the three. The write-up's decisive finding:
+**no existing test would catch this change in either direction.** Every soil-arc test
+calls `world._tick_soil_regen(delta)` directly, bypassing `_process` and `TickSystem`
+both, so all 44 sub-suites stay green through a migration that changes the game. The
+first work item under any option is a wiring test — drive `TickSystem.tick`, assert
+soil moved — because nothing does that today.
 
 ---
 
