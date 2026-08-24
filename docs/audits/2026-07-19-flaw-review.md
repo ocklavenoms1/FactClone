@@ -74,6 +74,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-23 | #4 + #5 (one unit) | **10 closed / 74 live** |
 | 2026-08-23 | #83 | **11 closed / 73 live** |
 | 2026-08-23 | #7 | **12 closed / 72 live** — no HIGH remains |
+| 2026-08-23 | #12 | **13 closed / 71 live** |
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -91,7 +92,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (12)
+### CLOSED (13)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -107,6 +108,7 @@ is closed at all.
 | 5 | one scarred tile permanently wedges LOW/MID application | `4c021fb` — same commit, see the interlock note below | same |
 | 83 | "31 sub-suites total" but components sum to 35 | `4c021fb` — `NOTES.md:842`, the soil arc's sub-suite tally, now states a total its own addends sum to | doc-only; no test |
 | 7 | grace timer runs on actively-farmed soil-0 tiles, making the documented fertilizer rescue impossible | `b92a769` — **not** the fix this audit prescribed; see the entry below | `test_wasteland.gd` sub-suite 10 (10a rescue / 10b design control / 10c narrowness) |
+| 12 | non-atomic save write — a crash mid-write destroys the only slot | `b04c1f6` — the prescribed fix, with two departures recorded below | `test_save_atomicity.gd` (6 sub-cases) |
 
 Each was checked for the half-fix pattern; none is partial. #8/#9's resolver reaches
 all four call sites (take, ctrl-take, draw, hover); #10 guards every footprint cell
@@ -136,12 +138,11 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (26)
+### LIVE — MEDIUM (25)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 11 | load_game indexes save arrays without shape validation | `save_system.gd:383-384`, loops at `:400,:440,:450,:462,:473,:476` |
-| 12 | **non-atomic save write — a crash mid-write destroys the only slot** | `save_system.gd:304-310` (zero `.tmp`/`rename_absolute` hits repo-wide) |
+| 11 | load_game indexes save arrays without shape validation | `save_system.gd:494-495`, loops at `:511,:528,:551,:561,:573,:584,:587` — re-derived at `233467f`, the #12 fix moved them |
 | 13 | F9 quick-load never refreshes vision or map | `main.gd:750-756` vs `:359-360` |
 | 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
 | 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
@@ -150,7 +151,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `smelter.gd:117-125` |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 21 | load-failure fallthrough overwrites a recoverable newer save | `save_system.gd:355-368` |
+| 21 | load-failure fallthrough overwrites a recoverable newer save | `save_system.gd:466-492` — re-derived at `233467f` |
 | 22 | one Esc press performs two actions | `map_panel.gd:243-245`, `console.gd:180-182`, `main.gd:611-622` |
 | 23 | console `place` paves anchor only; leaves stray STONE on failure | `console.gd:625-639` |
 | 24 | unbounded radius in `deplete_area` / `tile` | `console.gd:550-562, 743-744, 782-812` |
@@ -171,8 +172,8 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 37 | `tile_regen_progress` not cleared on load | `save_system.gd:439-472` |
-| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:404-405` |
+| 37 | `tile_regen_progress` not cleared on load | `save_system.gd:550-579` — re-derived at `233467f` |
+| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:515-516` — re-derived at `233467f` |
 | 39 | Harvester reassigns `b.state["buffer"]` instead of mutating | `harvester.gd:123, 163` |
 | 40 | drill pulls fuel from all 4 edges | `mining_drill.gd:119` |
 | 41 | composter recipes comment claims non-rotatable | `recipes.gd:207-208` |
@@ -180,7 +181,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 43 | `try_pull_fuel` docstring says inserters pass -1 | `burner.gd:56` |
 | 44 | composter header claims non-rotatable (dup #41) | `composter.gd:15, 69` |
 | 45 | fallback-lake exclusion tests only the anchor | `world_generator.gd:448` |
-| 46 | regen accumulators bleed on load (dup #37) | `save_system.gd:439-472` |
+| 46 | regen accumulators bleed on load (dup #37) | `save_system.gd:550-579` — re-derived at `233467f` |
 | 47 | `set_soil` doesn't clear wasteland | `console.gd:527-531` |
 | 48 | `deplete_planter_area` writes out-of-world tiles | `grid_world.gd:703-710, 734-741` |
 | 49 | `_neighbor_falloff_cost` floors at 1 | `grid_world.gd:719-720` |
@@ -238,13 +239,15 @@ suites" until 2026-08-23, two suites behind, inside the document tracking that
 class of defect. Each entry below carries the command that produces it, so a
 reader can check in one line instead of trusting the number.
 
-Verified 2026-08-23 at `09ab238`:
+Verified 2026-08-23 at `09ab238`; the test-suite row re-derived 2026-08-23 at
+`233467f` (50 → 51, the #12 suite). `SAVE_VERSION` was re-checked at the same
+commit and is unchanged at 18 — #12 changed the write mechanism, not the schema.
 
 | Value | Command |
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **50** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **51** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
 | `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
 | **13** ProcessorPanel subclasses | `grep -rc 'extends ProcessorPanel' scripts/ui/*.gd \| grep -v ':0'` |
@@ -563,6 +566,67 @@ save_system.gd:296-301: `var file := FileAccess.open(save_path, FileAccess.WRITE
 - Confirmed. save_system.gd:296-301 opens save_path with FileAccess.WRITE (truncate-on-open), writes the whole JSON in one store_string, no temp/rename/backup. Project-wide grep finds zero atomic-write or .bak logic; PROJECT_LOG.md:208/214 explicitly lists backup-before-migration as deferred. load_game:314-326 has no fallback — a partial/empty file fails JSON.parse_string and returns failure, and main.gd:230-245's hotfix then regenerates a fresh world, with comments (main.gd:243, save_system.gd:342) confirming the old save is overwritten on next F5. Single slot (line 122) means an interrupted write destroys all progress. Only nit: failure isn't fully "silent" (push_error + toast fire), but the loss is unrecoverable as claimed.
 
 </details>
+
+**CLOSED 2026-08-23 at `b04c1f6`.** The three-step write above shipped as prescribed
+— `.tmp`, live → `.bak`, `.tmp` → live, all through `DirAccess.rename_absolute` on
+globalized paths. Coverage is `scripts/tests/test_save_atomicity.gd`, six sub-cases
+asserting on **loaded field values** (world_seed / player position / flour count, all
+three different between the two states) rather than on `save_game`'s return.
+`SAVE_VERSION` did not move; `test_save_migration.gd` and
+`test_save_load_roundtrip.gd` pass unmodified.
+
+**Two departures from the fix text. Do not "restore" either one.**
+
+1. **The backup notice is `LoadResult.used_backup`, not a note in `error_message`.**
+   The fix text says to "set error_message to note the backup was used so main.gd
+   can toast it." That is unimplementable under this API's own convention
+   (`load_result.gd:11-15`, `save_system.gd`'s header on `load_game`): recovering
+   from `.bak` is `success == true`, and a non-empty `error_message` on a result is
+   defined to mean the load *failed*. Writing the notice there would have made every
+   caller that branches on `error_message != ""` treat a successful recovery as a
+   failure — including `main.gd`'s F9 path, which toasts `error_message` verbatim.
+   The notice is its own boolean field, meaningful only on success, toasted at both
+   `main.gd` load sites. Sub-case 5 exists to hold this line: a corrupt save with no
+   backup must report a non-empty `error_message` **and** `used_backup == false`.
+2. **`save_exists()` now counts the `.bak` sidecar**, which the fix text does not
+   mention. Without it the fix half-works: a crash between the two renames leaves
+   `save_path` absent, `main.gd:336` gates its entire load path on `save_exists()`,
+   and the boot would skip straight to fresh-world generation over a backup
+   `load_game` could have read — the same progress loss the finding is about,
+   reached through the window the fix itself introduces. Mutating `save_exists`
+   back to a `save_path`-only check reddens sub-case 3's `save_exists` assertion
+   alone.
+
+**Beyond the prescription, and load-bearing:** the live save is moved to `.bak`
+*before* the `.tmp` is moved into place, and the retention comment at that line says
+why it is an ordering requirement rather than merely a backup step.
+`DirAccess.rename_absolute` deletes an existing destination before renaming
+(`DirAccessWindows::rename`), so renaming `.tmp` straight over a live `save_path`
+would have its own delete-then-rename window with nothing backed up — a smaller
+version of the original defect. Mutating the ordering (skipping the `.bak` rename and
+overwriting directly) leaves every other suite green and reddens sub-cases 3 and 4.
+
+**The seam.** `save_game` carries `_interrupt_after_stage`, a test-only static that
+aborts after a named stage's work has actually been performed, so the on-disk state
+is what a kill at that instant would leave. It is gated on `_is_test_fixture_path`:
+the static could survive a test's early return, and an ungated leak would make every
+later save in the process return false — or, at the `backup_renamed` stage, leave no
+save file at all. The gate cannot hide a vacuous test, because every sub-case asserts
+the on-disk state an abort produces; making `_should_interrupt` always return false
+reddens sub-cases 2, 3 and 4 on loaded field values.
+
+**RED before the fix** was the property itself, not the seam: save state A, perform
+the truncating partial write an interrupted old-style save leaves, assert `load_game`
+still returns A. It failed with `load_game failed (error_message=Save file is corrupt
+or unreadable.)` while the same file's "A saves and loads back as A" sub-case passed.
+Mutation-tested five further ways: reverting `save_game` to the single truncating
+write (seam still aborting mid-body) reddens sub-cases 2 and 3; removing the `.bak`
+fallback from `load_game` reddens 3 and 4; moving `file.close()` to after both renames
+reddens 17 suites, because on Windows the renames then fail outright; the
+`save_exists` and inert-seam mutations are described above; and moving the
+`tmp_written` seam to *before* the temp write reddens exactly the assertion that the
+abort happens after real work.
+
 
 ### 13. F9 quick-load never refreshes vision or map dirty state — active vision and map texture stay stale until the player crosses a region boundary
 **Where:** `scripts/main.gd:519` | **Category:** bug, found by save-integrity
