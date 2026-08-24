@@ -87,17 +87,43 @@ func _ready() -> void:
 
 	for test_class in TESTS:
 		var name: String = test_class.test_name()
-		var result: Dictionary = {}
 		# Per-test isolation: reset tick counter and clear any tick listeners
 		# from prior tests. Tests connect their own world's _on_tick.
 		TickSystem.current_tick = 0
 		_disconnect_all(TickSystem.tick)
 
-		# Run; catch hard errors as best we can. GDScript doesn't have try/except
-		# but @warning_ignore lets us surface assert failures readably.
-		result = test_class.run(self)
-		# Per-test teardown, AFTER the suite has restored its own save_path.
+		# UNTYPED, AND THAT IS THE POINT. GDScript has no try/except, so a suite
+		# that hits a runtime error simply stops: `run()` aborts and hands back
+		# whatever its declared return type defaults to. For `-> Dictionary`
+		# that is `{}`, which reads as a FAIL and costs one suite. For an
+		# UNDECLARED return type it is `null`, and a typed
+		# `var result: Dictionary = test_class.run(self)` rejects null on the
+		# ASSIGNMENT — a second runtime error, this one inside `_ready`, which
+		# aborts the runner itself. Measured before this line was written: nine
+		# PASS lines, then nothing. No summary, no `get_tree().quit()`, and
+		# `--headless` sat there until the CI timeout killed it (`exit=124`) —
+		# the same signature as the compile-error hang this project has already
+		# been bitten by, and just as uninformative.
+		#
+		# So the result is taken into an untyped local, which cannot fail, and
+		# the shape is checked afterwards. A suite that errors now costs one
+		# suite and says so, exactly like one that fails.
+		var raw = test_class.run(self)
+		# Per-test teardown. Covers PASS, FAIL and ERROR alike, which is why it
+		# sits above the branch rather than inside it — the errored suite is the
+		# one MOST likely to have left a fixture behind.
+		#
+		# Note this does NOT depend on the suite having restored `SaveSystem.save_path`
+		# first, as this comment used to imply. The sweep scans FIXTURE_DIRS and
+		# filters what it finds through `_is_test_fixture_path`; it never reads
+		# `save_path` at all.
 		_scrub_fixture_sidecars()
+
+		if not (raw is Dictionary):
+			failed += 1
+			print("  ERROR %s — run() returned %s instead of a result Dictionary. The suite aborted on a runtime error; look for the SCRIPT ERROR above." % [name, type_string(typeof(raw))])
+			continue
+		var result: Dictionary = raw
 
 		var ok: bool = bool(result.get("ok", false))
 		var message: String = String(result.get("message", ""))
