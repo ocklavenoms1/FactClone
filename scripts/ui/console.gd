@@ -387,6 +387,11 @@ func _register_commands() -> void:
 			"usage": "set_soil <x> <y> <value>",
 			"help": "Direct write to tile_soil_modifications. value clamped to 0..100. Skips falloff math.",
 		},
+		"sprites": {
+			"fn": "_cmd_sprites",
+			"usage": "sprites [on | off]",
+			"help": "Toggle the flagged sprite render path (session-art-probe-1). No argument reports the manifest: declared vs loaded vs failed. OFF is the default and renders every building through Buildings.draw_one().",
+		},
 		"tick_speed": {
 			"fn": "_cmd_tick_speed",
 			"usage": "tick_speed <multiplier>",
@@ -694,6 +699,26 @@ func _cmd_clear(args: Array) -> String:
 		b.state["bag"] = []
 		return "Cleared chest at %s." % str(pos)
 	return "Usage: clear inventory | clear chest <x> <y>"
+
+## The single toggle for the sprite path. Bare `sprites` reports the manifest
+## rather than toggling: the most useful thing this command can do is answer
+## "is the art actually loaded", which is precisely the question a silent
+## fallback makes hard to answer by looking at the screen.
+func _cmd_sprites(args: Array) -> String:
+	if args.size() > 1:
+		return "Usage: sprites [on | off]"
+	if args.size() == 1:
+		var a: String = String(args[0]).to_lower()
+		if a != "on" and a != "off":
+			return "Usage: sprites [on | off]"
+		SpriteLibrary.enabled = (a == "on")
+		if SpriteLibrary.enabled:
+			SpriteLibrary.ensure_loaded()
+	var lines: Array = SpriteLibrary.manifest_report_lines()
+	var failed: Array = SpriteLibrary.failures()
+	if not failed.is_empty():
+		lines.append("Those buildings render as untextured fallbacks, marked magenta in the world.")
+	return "\n".join(lines)
 
 func _cmd_tick_speed(args: Array) -> String:
 	if args.size() != 1:

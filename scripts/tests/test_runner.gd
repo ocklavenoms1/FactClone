@@ -70,6 +70,14 @@ const TESTS: Array = [
 	# reddens nothing — see the file's header, and audit finding #31 for why
 	# the two clocks it pins are pinned as-is rather than blessed.
 	preload("res://scripts/tests/test_tick_loop_wiring.gd"),
+	# Sprite render path (session-art-probe-1). The anchor suite is pure maths
+	# and pins the general form against the degenerate one the three shipped
+	# assets cannot distinguish it from. The manifest suite is the layer of the
+	# silent-compensation guard that fires when nobody runs the game: a sprite
+	# that fails to load falls back to draw_one() and the building still
+	# renders, so a broken asset otherwise looks like a working game.
+	preload("res://scripts/tests/test_sprite_anchor.gd"),
+	preload("res://scripts/tests/test_sprite_manifest.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.

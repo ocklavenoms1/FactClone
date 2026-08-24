@@ -238,6 +238,10 @@ var _component_accumulator_drain: Dictionary = {}     # int (comp_id) → float 
 
 @export var camera: Camera2D
 
+# Additive glow pass for the sprite path (session-art-probe-1). Null unless
+# SpriteLibrary.enabled has been true at least once this run — see _process.
+var _sprite_glow_layer: Node2D = null
+
 func _ready() -> void:
 	TickSystem.tick.connect(_on_tick)
 
@@ -1189,6 +1193,23 @@ func _process(delta: float) -> void:
 	_tick_fertilizer_decay(delta)
 	_tick_soil_regen(delta)
 	queue_redraw()
+	# Additive glow pass (session-art-probe-1). Created lazily and ONLY while
+	# the sprite flag is on, so the default configuration has no such node.
+	#
+	# This is NOT a fourth clock. `delta` is not read here and no timer is
+	# advanced — the pulse phase comes from the smelter's tick-counted
+	# `progress` (see SpriteLibrary.glow_phase_for). This line requests a
+	# redraw, the same thing the `queue_redraw()` above it does, and finding
+	# #31 explicitly excludes `queue_redraw` from its scope
+	# (docs/scoping/r1-two-clocks.md, correction dated 2026-08-24).
+	if SpriteLibrary.enabled:
+		if _sprite_glow_layer == null:
+			_sprite_glow_layer = SpriteLibrary.make_glow_layer(self)
+			add_child(_sprite_glow_layer)
+		_sprite_glow_layer.queue_redraw()
+	elif _sprite_glow_layer != null:
+		_sprite_glow_layer.queue_free()
+		_sprite_glow_layer = null
 
 # ---------- per-tile soil regen (session-soil-exhaustion-2) ----------
 
@@ -1694,7 +1715,20 @@ func _draw() -> void:
 			continue
 		if anchor.y + fp.y - 1 < min_tile.y or anchor.y > max_tile.y:
 			continue
-		Buildings.draw_one(b, self, tile_to_world_origin(anchor), TILE_SIZE)
+		# Sprite path (session-art-probe-1) — OFF by default. With
+		# SpriteLibrary.enabled false this is one boolean test and the call
+		# below is reached unchanged for every building, including the three
+		# that have art. Buildings.draw_one() itself is untouched.
+		var drew_sprite: bool = false
+		if SpriteLibrary.enabled:
+			drew_sprite = SpriteLibrary.draw_building(b, self, tile_to_world_origin(anchor), TILE_SIZE)
+		if not drew_sprite:
+			Buildings.draw_one(b, self, tile_to_world_origin(anchor), TILE_SIZE)
+			# A building that HAS art but fell back still renders, and a
+			# rendering fallback is therefore invisible — the silent-
+			# compensation shape NOTES.md warns about. Mark it in the frame.
+			if SpriteLibrary.enabled:
+				SpriteLibrary.draw_fallback_marker(b, self, tile_to_world_origin(anchor), TILE_SIZE)
 
 	# Power wire pass — between buildings and post-pass indicators so wires
 	# render on the building layer but below hover/harvest UI.
