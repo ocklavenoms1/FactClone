@@ -404,10 +404,19 @@ func _ready() -> void:
 ## count the player cannot rely on. Skipping a corrupt row is right — it costs
 ## the player that row instead of the whole world — but saying nothing turns
 ## "your save had 40 damaged buildings" into "the game deleted my base".
+##
+## THE TRAILING CLAUSE IS THE HONEST PART, not padding. `skipped_entries` counts
+## ROWS, and a row is not a fixed amount of anything: one dropped `buildings` row
+## is one building, one dropped `player_inventory` row is a whole stack, one
+## dropped `player` field is the spawn position. The number therefore reports
+## THAT data was lost and roughly how many pieces — never how much. "1 damaged
+## entry skipped" with no further wording invites the player to shrug at what may
+## have been a full stack of a rare item. Telling them to look is the part they
+## can act on. See `LoadResult.skipped_entries` for why the count stayed scalar.
 func _skipped_suffix(result: LoadResult) -> String:
 	if result.skipped_entries <= 0:
 		return ""
-	return " · %d damaged entr%s skipped" % [result.skipped_entries, "y" if result.skipped_entries == 1 else "ies"]
+	return " · %d damaged entr%s skipped — check your base and inventory" % [result.skipped_entries, "y" if result.skipped_entries == 1 else "ies"]
 
 ## Put vision and the map back in step with the world that is now in memory.
 ##

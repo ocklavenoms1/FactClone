@@ -579,7 +579,28 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		# regenerated — so there is nothing to keep the file for, and
 		# CONVENTIONS.md sanctions this fallthrough outright: "Better to surface
 		# the failure and let the post-3.5 hotfix regenerate fresh."
-		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, _native_path(save_path)]
+		#
+		# `source_path`, NOT `save_path`. This alert asks the player to go and
+		# DELETE a file, so quoting the wrong one sends them after a file that
+		# does not exist. Reaching this branch through the `.bak` fallback is an
+		# ordinary outcome (finding #12): a crash between save_game's two renames
+		# leaves only the backup, and a backup can have a worldgen mismatch like
+		# any other save. The player then deletes nothing, the real file sits at
+		# `.bak`, and the second F5 rotates it away.
+		#
+		# The forward-incompat branch above was fixed at `1198233`; this one was
+		# missed, which is the whole reason to state the rule here rather than
+		# rely on the two sites happening to agree: EVERY message that quotes a
+		# path to the player quotes the path the data was read from.
+		#
+		# Not pinned by a test. `error_message` deliberately does not carry the
+		# path (main.gd toasts it, and a full native path belongs in the modal,
+		# not a toast), and the dialog text reaches only `push_error` and a
+		# fixture-gated `OS.alert` — neither observable from the suite. Sub-case 8
+		# of test_forward_incompat_save.gd pins that this branch is genuinely
+		# REACHABLE through `.bak`, which is the precondition the defect needed;
+		# the string itself is guarded by this comment and review.
+		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, _native_path(source_path)]
 		result.error_message = "Worldgen version mismatch (v%d vs v%d) — see dialog." % [saved_worldgen_version, WorldGenerator.VERSION]
 		push_error(msg)
 		if not _is_test_fixture_path(save_path):
@@ -659,7 +680,19 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			skipped += 1
 			continue
 		var rs_pos := Vector2i(int(entry[0]), int(entry[1]))
-		var rs_state: Dictionary = entry[2] if entry.size() > 2 and entry[2] is Dictionary else {}
+		# A row that passed `_entry_ok(entry, 2, …)` can still be missing its
+		# payload — `min_size` is 2 because entry[1] is the highest UNCONDITIONAL
+		# read, and entry[2] is read behind this test. Until this branch existed
+		# the payload was replaced with `{}`, which was a drop with two costs the
+		# skip counter never saw: the tile's saved richness or regrowth was gone,
+		# and the empty dict was written into `resource_state_modifications`, so
+		# `save_game` re-serialised the junk row on the next F5 and it persisted
+		# for the life of the save. Skipping the row entirely stops that.
+		if not (entry.size() > 2 and entry[2] is Dictionary):
+			push_warning("SaveSystem.load_game: skipping 'resource_state_modifications' entry with an unreadable payload: %s" % str(entry))
+			skipped += 1
+			continue
+		var rs_state: Dictionary = entry[2]
 		# Store the modification as-is (defensive copy).
 		grid_world.resource_state_modifications[rs_pos] = rs_state.duplicate()
 		# Merge into resource_state. For ore tiles, the canonical state already
@@ -669,8 +702,17 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		if rs_state.has("richness"):
 			if grid_world.resource_state.has(rs_pos):
 				grid_world.resource_state[rs_pos]["richness"] = int(rs_state["richness"])
-			# else: tile not present in canonical resource_state (rare;
-			# defensive — skip silently)
+			# else: tile not present in canonical resource_state.
+			#
+			# DELIBERATELY NOT COUNTED, unlike the payload drop above, and the
+			# difference is whether anything was lost. The entry was stored into
+			# `resource_state_modifications` two lines up, so it round-trips to
+			# disk intact and a later build that regenerates ore there will apply
+			# it. Nothing is dropped — a saved richness simply has no canonical
+			# state to merge into, which means the save and procgen disagree about
+			# what is at this tile, and `worldgen_version` hard-fails the only
+			# thing that causes that at scale. Counting it would put "1 damaged
+			# entry skipped" in front of the player for data that is intact.
 		elif rs_state.has("regrowth_remaining"):
 			# Tree regrowth: canonical state is "mature" (no entry). Insert
 			# the regrowth dict so _tick_regrowth picks it up next frame.
@@ -735,7 +777,15 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			push_warning("SaveSystem.load_game: skipping malformed 'buildings' entry: %s" % str(bdict))
 			skipped += 1
 			continue
+		# `from_dict` returns null when the entry is a Dictionary but not a
+		# READABLE one — today that means a non-Dictionary `"s"`. Without this
+		# check the next line dereferences null and aborts the whole load, which
+		# is the bricked-boot shape audit #11 is about; the container and
+		# entry-type guards above both pass such an entry through.
 		var b: Building = Building.from_dict(bdict)
+		if b == null:
+			skipped += 1
+			continue
 		grid_world.buildings[b.anchor] = b
 		var fp: Vector2i = Buildings.footprint_of(b.type)
 		for dx in fp.x:
@@ -769,12 +819,35 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	grid_world.mark_fluid_network_dirty()
 
 	if data.has("player_inventory"):
-		# No `is Array` check needed here: the field is in ARRAY_FIELDS, so a
-		# non-Array already failed the load above. `load_array` is typed
-		# `(arr: Array)` and a non-Array aborts on the call itself.
-		player_inventory.load_array(data["player_inventory"])
+		# No `is Array` check needed for the FIELD: it is in ARRAY_FIELDS, so a
+		# non-Array already failed the load above, and `load_array` is typed
+		# `(arr: Array)` so a non-Array would abort on the call itself.
+		#
+		# That covers the container and NOTHING ELSE — the rows inside it are
+		# player-authored too, and this comment used to stop at the sentence
+		# above, which read as "this line is guarded". It was not. An unguarded
+		# `entry[1]` inside `load_array` aborted only `load_array`, so control
+		# returned here and ran on to `result.success = true` with every slot
+		# from the bad row onward silently unwritten. `load_array` guards its own
+		# rows now and RETURNS the count, which has to be added to `skipped` —
+		# dropping the return value on the floor restores the silent truncation
+		# with the guard still in place.
+		skipped += player_inventory.load_array(data["player_inventory"])
 
-	result.player_progression = data.get("player_progression", {})
+	# Type-checked before assignment. `LoadResult.player_progression` is a typed
+	# `Dictionary`, so a save whose `player_progression` is a String or a list
+	# raises on the ASSIGNMENT — aborting `load_game` after every world mutation
+	# above has already been applied, handing `main.gd` null, and bricking the
+	# boot exactly as audit #11 describes. `ARRAY_FIELDS` cannot cover this one:
+	# the field is supposed to be a Dictionary, so the array-field validator has
+	# nothing to say about it. Dropping it costs the player their bag-cap
+	# progression and cursor stack, which is a skipped entry like any other.
+	var loaded_progression = data.get("player_progression", {})
+	if loaded_progression is Dictionary:
+		result.player_progression = loaded_progression
+	else:
+		push_warning("SaveSystem.load_game: 'player_progression' is %s, not a Dictionary — keeping the caller's defaults." % type_string(typeof(loaded_progression)))
+		skipped += 1
 	# Same convention as used_backup below: reported on success only. Set here
 	# rather than at each skip site so there is exactly one place where the
 	# count reaches the caller.

@@ -36,11 +36,37 @@ extends RefCounted
 ##      non-null result so main.gd's fresh-world fallthrough fires.
 ##   5. A non-Dictionary `buildings` entry → skipped and counted, not crashed.
 ##   6. An untouched well-formed save still loads identically.
+##   7. A malformed ROW inside a well-typed `player_inventory` (five shapes) →
+##      that slot is dropped, every later slot still loads, and the drop is
+##      counted. See the block below — this one is not #11.
+##   8. `player_progression` is not a Dictionary → dropped and counted, not an
+##      aborted load. Not an ARRAY_FIELDS shape; see the sub-case.
+##   9. A `buildings` entry whose "s" state is not a Dictionary → that building
+##      is dropped and counted; the load survives.
+##  10. A `resource_state_modifications` row whose payload is unreadable → the
+##      row is dropped and counted, rather than stored with an empty payload
+##      that re-serialises on every later save.
+##
+## SUB-CASE 7 IS A DIFFERENT DEFECT FROM 1-6, AND A QUIETER ONE.
+## #11's failure is loud: `load_game` aborts, the caller gets null, the boot
+## bricks. `Inventory.load_array` fails the opposite way. A GDScript runtime
+## error aborts only the INNERMOST function, so an unguarded `entry[1]` killed
+## `load_array` and `load_game` carried straight on to `result.success = true`.
+## Every slot from the bad row onward was never written, `skipped_entries`
+## stayed 0, and the player was toasted a clean load. The next F5 then wrote the
+## truncated inventory over the only save slot.
+##
+## The `"xy"` shape is the one that has to be in this list. A String is indexable
+## and `int("x")` is 0, so it raises NO error at all: pre-fix it produced a slot
+## with `item_type == 0` — a real item id — and a skip nobody counted. Nothing in
+## the log, nothing in the toast. That is why sub-case 7 asserts on
+## `item_type == -1` rather than on `is_empty()`, which a zero-count slot
+## satisfies either way.
 ##
 ## Every assertion is on a LOADED FIELD VALUE (seed, player position, flour
-## count, the surviving tile / building / soil entries), never on "the call
-## returned true" — a load that returns success having applied nothing would
-## pass the latter.
+## count, the surviving inventory stacks, the surviving tile / building / soil
+## entries), never on "the call returned true" — a load that returns success
+## having applied nothing would pass the latter.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_load_malformed_save.json"
@@ -62,6 +88,20 @@ const SOIL_POS := Vector2i(7, 8)
 const SOIL_VALUE: int = 42
 const WASTE_POS := Vector2i(11, 12)
 
+# Sub-case 7's inventory geometry. The capacity matches what `_load_fixture`
+# constructs, so `load_array` takes its NO-RESIZE path — the one where a skipped
+# row would otherwise keep whatever the live inventory already held, which is
+# what a mid-session F9 quick-load actually does (main.gd reuses the standing
+# `player_inventory`).
+const INV_CAPACITY: int = 16
+# A second stack, placed AFTER the row each fixture corrupts. Reading it back is
+# the whole point: pre-fix `load_array` died at BAD_SLOT and never wrote this
+# one, so it returned 0 while `load_game` reported a clean load.
+const MARKER_SLOT: int = 5
+const MARKER_ITEM: int = Items.Type.WHEAT
+const MARKER_COUNT: int = 17
+const BAD_SLOT: int = 2
+
 static func test_name() -> String:
 	return "malformed save shapes return a LoadResult instead of crashing (audit #11)"
 
@@ -77,7 +117,7 @@ static func run(parent: Node) -> Dictionary:
 	_scrub()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "6 sub-cases pass: a short player array, a non-Array player, a short tile_modifications entry and a non-Dictionary buildings entry all load with the bad data skipped and counted; a mistyped collection fails with a named field; a clean save is unaffected" }
+		return { "ok": true, "message": "10 sub-cases pass: a short player array, a non-Array player, a short tile_modifications entry, a non-Dictionary buildings entry and five shapes of malformed player_inventory row all load with the bad data skipped and counted; an unreadable progression dict, building state and resource-state payload are each dropped and counted; a mistyped collection fails with a named field; a clean save is unaffected" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 static func _run_all(parent: Node, failures: Array) -> void:
@@ -179,6 +219,102 @@ static func _run_all(parent: Node, failures: Array) -> void:
 		_check_reference_fields(failures, "(6)", loaded_6, POS_OK)
 		_teardown_loaded(loaded_6)
 
+	# ===================================================================
+	# (7) A malformed ROW inside a well-typed player_inventory. Five shapes,
+	#     because they fail in three different ways and only one of them is
+	#     noisy:
+	#       7a [7]        — Array, one element. entry[1] is out of bounds.
+	#       7b 7          — not indexable at all; entry[0] raises.
+	#       7c "xy"       — indexable, and int("x") is 0. NO error is raised;
+	#                       pre-fix this wrote item id 0 into the slot and
+	#                       counted nothing. The silent one.
+	#       7d {"a": 1}   — Dictionary; entry[0] is a missing KEY, not an index.
+	#       7e []         — empty Array; entry[0] is out of bounds.
+	#     A premise check first: the row being corrupted has to be one the
+	#     reference actually stores between two live stacks, or the sub-case
+	#     proves nothing about truncation.
+	# ===================================================================
+	var inv_rows = reference.get("player_inventory")
+	_check(failures, inv_rows is Array and inv_rows.size() == INV_CAPACITY,
+		"(7) PREMISE: the reference save's player_inventory is %s, expected an Array of %d rows" % [str(inv_rows), INV_CAPACITY])
+	_check(failures, BAD_SLOT < MARKER_SLOT,
+		"(7) PREMISE: the corrupted row (%d) must come BEFORE the marker stack (%d), or a truncating load would drop the marker for the wrong reason" % [BAD_SLOT, MARKER_SLOT])
+	_expect_inventory_row_skipped(parent, failures, "(7a)", reference, [7])
+	_expect_inventory_row_skipped(parent, failures, "(7b)", reference, 7)
+	_expect_inventory_row_skipped(parent, failures, "(7c)", reference, "xy")
+	_expect_inventory_row_skipped(parent, failures, "(7d)", reference, { "a": 1 })
+	_expect_inventory_row_skipped(parent, failures, "(7e)", reference, [])
+
+	# ===================================================================
+	# (8) `player_progression` is not a Dictionary.
+	#
+	# NOT reachable through ARRAY_FIELDS — the field is supposed to BE a
+	# Dictionary, so the array-field validator has nothing to say about it,
+	# and `LoadResult.player_progression` is typed, so the assignment itself
+	# raised. Measured before the guard: load_game aborted at the assignment
+	# and returned null, having already applied every world mutation, which
+	# is #11's bricked-boot shape reached through a door #11's fix left open.
+	# ===================================================================
+	var data_8: Dictionary = reference.duplicate(true)
+	data_8["player_progression"] = "not a dictionary"
+	var loaded_8 = _load_fixture(parent, failures, "(8)", data_8)
+	if loaded_8 != null:
+		_check(failures, loaded_8["result"].success,
+			"(8) an unreadable progression dict must not fail the whole load — error_message=%s" % str(loaded_8["result"].error_message))
+		_check(failures, loaded_8["result"].player_progression is Dictionary,
+			"(8) player_progression must still be a Dictionary the caller can iterate")
+		_check(failures, loaded_8["result"].skipped_entries == 1,
+			"(8) skipped_entries is %d, expected 1 — losing bag-cap progression and the cursor stack is lost data like any other" % loaded_8["result"].skipped_entries)
+		_check_reference_fields(failures, "(8)", loaded_8, POS_OK)
+		_teardown_loaded(loaded_8)
+
+	# ===================================================================
+	# (9) A `buildings` entry that IS a Dictionary but whose "s" state is not.
+	#
+	# Passes the container check AND the per-entry `is Dictionary` check, then
+	# hits `Building._init`'s typed `initial_state` param. Same bricked-boot
+	# shape as (8): from_dict aborted, returned null, and `b.anchor` on null
+	# aborted the load.
+	# ===================================================================
+	var data_9: Dictionary = reference.duplicate(true)
+	var buildings_9: Array = data_9["buildings"]
+	buildings_9.append({ "t": 1, "x": 40, "y": 41, "s": "not a dictionary" })
+	data_9["buildings"] = buildings_9
+	var loaded_9 = _load_fixture(parent, failures, "(9)", data_9)
+	if loaded_9 != null:
+		_check(failures, loaded_9["result"].success,
+			"(9) one building with an unreadable state must not fail the whole load — error_message=%s" % str(loaded_9["result"].error_message))
+		_check(failures, not loaded_9["world"].buildings.has(Vector2i(40, 41)),
+			"(9) the unreadable building was placed anyway — its state dict is what every type reads its buffers from")
+		_check(failures, loaded_9["result"].skipped_entries == 1,
+			"(9) skipped_entries is %d, expected 1" % loaded_9["result"].skipped_entries)
+		_check_reference_fields(failures, "(9)", loaded_9, POS_OK)
+		_teardown_loaded(loaded_9)
+
+	# ===================================================================
+	# (10) A `resource_state_modifications` row whose payload is unreadable.
+	#
+	# Long enough for `_entry_ok(entry, 2, …)` — 2 is the highest UNCONDITIONAL
+	# index plus one — so it reaches the payload read behind that guard.
+	# Measured before the fix: success=true, skipped=0, and an empty dict
+	# written back into resource_state_modifications, which `save_game` then
+	# re-serialised on every subsequent F5. An uncounted drop that propagated.
+	# ===================================================================
+	var data_10: Dictionary = reference.duplicate(true)
+	var rsm_10: Array = data_10.get("resource_state_modifications", [])
+	rsm_10.append([70, 71, "not a dictionary"])
+	data_10["resource_state_modifications"] = rsm_10
+	var loaded_10 = _load_fixture(parent, failures, "(10)", data_10)
+	if loaded_10 != null:
+		_check(failures, loaded_10["result"].success,
+			"(10) one unreadable resource-state payload must not fail the whole load — error_message=%s" % str(loaded_10["result"].error_message))
+		_check(failures, not loaded_10["world"].resource_state_modifications.has(Vector2i(70, 71)),
+			"(10) the row was stored with an empty payload — it carries nothing, and save_game re-serialises it on the next F5, so the junk row outlives the save that introduced it")
+		_check(failures, loaded_10["result"].skipped_entries == 1,
+			"(10) skipped_entries is %d, expected 1 — this was one of the two drop sites the count did not reach" % loaded_10["result"].skipped_entries)
+		_check_reference_fields(failures, "(10)", loaded_10, POS_OK)
+		_teardown_loaded(loaded_10)
+
 # ---------- sub-case shapes ----------
 
 ## Sub-cases 1 and 2: the load succeeds, everything except the player position
@@ -194,6 +330,48 @@ static func _expect_loads_with_default_spawn(parent: Node, failures: Array, labe
 	# The point of the sentinel: the position must be what it was BEFORE the
 	# load, not the saved one and not a coincidental zero.
 	_check_reference_fields(failures, label, loaded, SPAWN_SENTINEL)
+	_teardown_loaded(loaded)
+
+## Sub-case 7: replace ONE row of a well-typed `player_inventory` with `bad_row`
+## and require that only that row is lost.
+##
+## The load must still succeed — a single hand-corrupted slot is not a reason to
+## throw away a world — but the slot must come back EMPTY, the slots on both
+## sides of it must come back intact, and the drop must reach
+## `LoadResult.skipped_entries`. The last two are the assertions that fail
+## pre-fix, and they fail for different fixtures: 7a/7b/7d/7e truncated the
+## inventory (so the marker was lost), 7c did not truncate but reported nothing.
+static func _expect_inventory_row_skipped(parent: Node, failures: Array, label: String, reference: Dictionary, bad_row) -> void:
+	var data: Dictionary = reference.duplicate(true)
+	var rows: Array = data["player_inventory"]
+	rows[BAD_SLOT] = bad_row
+	data["player_inventory"] = rows
+	var loaded = _load_fixture(parent, failures, label, data)
+	if loaded == null:
+		return
+	var result = loaded["result"]
+	var inv: Inventory = loaded["inv"]
+	_check(failures, result.success,
+		"%s one malformed inventory row must not fail the whole load — error_message=%s" % [label, str(result.error_message)])
+	_check(failures, inv.capacity == INV_CAPACITY,
+		"%s inventory capacity is %d, expected %d" % [label, inv.capacity, INV_CAPACITY])
+	# The row itself: dropped, and dropped to EMPTY. `item_type == -1` rather
+	# than `is_empty()` on purpose — a slot holding item id 0 with count 0 is
+	# "empty" by that predicate, and id 0 with count 0 is exactly what the
+	# unguarded `int("x")` path produced for 7c.
+	if inv.slots.size() > BAD_SLOT:
+		_check(failures, inv.slots[BAD_SLOT].item_type == -1 and inv.slots[BAD_SLOT].count == 0,
+			"%s slot %d came back as item_type=%d count=%d, expected an empty slot (-1 / 0) — an unreadable row must be dropped, not half-parsed into a real item id" % [label, BAD_SLOT, inv.slots[BAD_SLOT].item_type, inv.slots[BAD_SLOT].count])
+	# THE TRUNCATION ASSERTION. Pre-fix `load_array` aborted at BAD_SLOT and
+	# every later slot stayed empty, while `load_game` reported success.
+	_check(failures, inv.total_of(MARKER_ITEM) == MARKER_COUNT,
+		"%s the stack stored at row %d came back as %d, expected %d — the rows AFTER the malformed one were never written, and the load reported success anyway" % [label, MARKER_SLOT, inv.total_of(MARKER_ITEM), MARKER_COUNT])
+	# And the row before it, so "nothing loaded at all" cannot pass the above.
+	_check(failures, inv.total_of(Items.Type.FLOUR) == FLOUR_OK,
+		"%s the stack before the malformed row came back as %d flour, expected %d" % [label, inv.total_of(Items.Type.FLOUR), FLOUR_OK])
+	_check(failures, result.skipped_entries >= 1,
+		"%s skipped_entries is %d — a dropped inventory slot has to be counted, or the player is told 'World loaded from save' with no suffix and F5s the truncated inventory over the only save" % [label, result.skipped_entries])
+	_check_reference_fields(failures, label, loaded, POS_OK)
 	_teardown_loaded(loaded)
 
 ## Sub-case 4: a mistyped collection fails the load, names the field, and still
@@ -225,6 +403,11 @@ static func _check_reference_fields(failures: Array, label: String, loaded: Dict
 		"%s player position is %s, expected %s" % [label, str(player.global_position), str(want_pos)])
 	_check(failures, inv.total_of(Items.Type.FLOUR) == FLOUR_OK,
 		"%s flour count loaded as %d, expected %d" % [label, inv.total_of(Items.Type.FLOUR), FLOUR_OK])
+	# The marker stack sub-case 7 reads back. Asserted for EVERY sub-case, not
+	# just 7: it is the only thing in this suite that would notice a fix which
+	# hardened `load_array` by dropping the tail of a perfectly good inventory.
+	_check(failures, inv.total_of(MARKER_ITEM) == MARKER_COUNT,
+		"%s the stack at inventory row %d loaded as %d, expected %d" % [label, MARKER_SLOT, inv.total_of(MARKER_ITEM), MARKER_COUNT])
 	_check(failures, world.tile_modifications.has(TILE_POS) and world.tile_modifications[TILE_POS].overlay == Terrain.Overlay.SOIL_TILLED,
 		"%s the tile modification at %s did not come back as a tilled tile" % [label, str(TILE_POS)])
 	_check(failures, world.buildings.has(BUILDING_POS) and world.buildings[BUILDING_POS].type == Buildings.Type.CHEST,
@@ -249,8 +432,12 @@ static func _write_reference_save(parent: Node) -> bool:
 	var player := Node2D.new()
 	parent.add_child(player)
 	player.global_position = POS_OK
-	var inv := Inventory.new(16)
+	var inv := Inventory.new(INV_CAPACITY)
 	inv.add(Items.Type.FLOUR, FLOUR_OK)
+	# Placed by index rather than through `add`, which would fill the first free
+	# slot (row 1) and leave nothing after sub-case 7's corrupted row.
+	inv.slots[MARKER_SLOT].item_type = MARKER_ITEM
+	inv.slots[MARKER_SLOT].count = MARKER_COUNT
 	var ok: bool = SaveSystem.save_game(world, player, inv, {})
 	player.queue_free()
 	_teardown(world)

@@ -46,6 +46,11 @@ extends RefCounted
 ##   6. Migration failure still fails with a message and preserves nothing.
 ##   7. With only the preserved copy left on disk, `save_exists()` reports no
 ##      save — the copy is kept for a future build, not offered to this one.
+##   8. A worldgen mismatch reached only through `.bak` still fails the same way
+##      and still preserves nothing. Reachability guard for the alert that
+##      quotes a path the player is told to delete — see the note there.
+##   9. A second refused save overwrites the first preserved copy: one
+##      preservation slot per save slot, as `_preserve_incompatible` documents.
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const TEST_SAVE_PATH: String = "user://test_forward_incompat.json"
@@ -82,7 +87,7 @@ static func run(parent: Node) -> Dictionary:
 	_scrub()
 
 	if failures.is_empty():
-		return { "ok": true, "message": "7 sub-cases pass: a newer save fails with the forward-incompat message and is copied aside; the copy survives the first F5 and the .bak rotation the second one causes; a newer save reached only through .bak is preserved too; worldgen mismatch and migration failure still fail with a message and preserve nothing; the copy is not counted as a loadable save" }
+		return { "ok": true, "message": "9 sub-cases pass: a newer save fails with the forward-incompat message and is copied aside; the copy survives the first F5 and the .bak rotation the second one causes; a newer save reached only through .bak is preserved too; worldgen mismatch and migration failure still fail with a message and preserve nothing, including a worldgen mismatch reached only through .bak; the copy is not counted as a loadable save; a second refused save overwrites the first preserved copy" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), "; ".join(failures.slice(0, 16))] }
 
 static func _run_all(parent: Node, failures: Array) -> void:
@@ -219,6 +224,66 @@ static func _run_all(parent: Node, failures: Array) -> void:
 	# loading the fresh world the player has been playing since.
 	_check(failures, not SaveSystem.save_exists(),
 		"(7) save_exists() must not count the preserved copy — it is a file kept for a future build, not a save this one can load")
+
+	# ===================================================================
+	# (8) Worldgen mismatch reached ONLY through .bak.
+	#
+	# The precondition for the path-quoting defect this sub-case exists for:
+	# the worldgen alert asks the player to DELETE the file it names, and it
+	# quoted `save_path` unconditionally. If this branch were unreachable
+	# except via the primary, that would be harmless. It is not — a crash
+	# between save_game's two renames leaves only `.bak`, and a `.bak` can
+	# carry a worldgen mismatch like any other save. The player is then told
+	# to delete a file that does not exist while the real one sits at `.bak`
+	# and is rotated away by the second F5.
+	#
+	# HONEST LIMIT: this pins REACHABILITY, not the string. The path appears
+	# only in `push_error` + a fixture-gated `OS.alert`, and deliberately not
+	# in `error_message` (main.gd toasts that, and a native path belongs in
+	# the modal). Neither is observable from here. See the comment at the
+	# branch in save_system.gd.
+	# ===================================================================
+	_scrub()
+	if not _write_mutated_save(parent, SEED_FUTURE, {"worldgen_version": WorldGenerator.VERSION + 1000}):
+		failures.append("(8) PREMISE: could not produce the worldgen-mismatch fixture")
+		return
+	DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(TEST_SAVE_PATH), ProjectSettings.globalize_path(bak_path))
+	_check(failures, not FileAccess.file_exists(TEST_SAVE_PATH),
+		"(8) PREMISE: the primary should be gone, leaving only the backup")
+	_check(failures, SaveSystem.save_exists(),
+		"(8) PREMISE: save_exists() counts the backup, so main.gd still calls load_game here")
+	var r8: LoadResult = _load(parent)
+	_check(failures, not r8.success,
+		"(8) a worldgen mismatch reached through .bak must fail the load exactly as one reached through the primary does")
+	_check(failures, r8.error_message.find(str(WorldGenerator.VERSION)) >= 0,
+		"(8) the failure must still be the worldgen one, naming this build's version — got '%s'" % r8.error_message)
+	_check(failures, not FileAccess.file_exists(kept_path),
+		"(8) the narrowed #21 scope holds through the backup path too: a worldgen mismatch preserves nothing")
+
+	# ===================================================================
+	# (9) A SECOND newer save overwrites the first preserved copy.
+	#
+	# Documented as intended at `_preserve_incompatible` — "one preservation
+	# slot per save slot, holding the most recent save this build had to
+	# refuse" — and pinned here because it is a data-loss-shaped decision
+	# nothing else covers. The alternative (accumulating numbered copies)
+	# would be a defensible design; what must not happen is the code doing
+	# one thing while the doc claims the other.
+	# ===================================================================
+	_scrub()
+	if not _write_future_save(parent, SEED_FUTURE):
+		failures.append("(9) PREMISE: could not produce the first newer-save fixture")
+		return
+	_load(parent)
+	_expect_kept(failures, "(9 first)", kept_path, future_version, SEED_FUTURE)
+	# A second newer save lands in the same slot — a different seed, so which
+	# of the two survived is decidable rather than a matter of timestamps.
+	if not _write_future_save(parent, SEED_FRESH_1):
+		failures.append("(9) PREMISE: could not produce the second newer-save fixture")
+		return
+	_load(parent)
+	_expect_kept(failures, "(9 second)", kept_path, future_version, SEED_FRESH_1)
 
 # ---------- helpers ----------
 

@@ -137,14 +137,49 @@ func to_array() -> Array:
 		out.append([s.item_type, s.count])
 	return out
 
-func load_array(arr: Array) -> void:
+## Rebuild this inventory from `to_array()` output. Returns the number of rows
+## that could not be read and were dropped.
+##
+## THE RETURN VALUE IS NOT DECORATION. It is the only way the caller learns that
+## slots went missing, and `SaveSystem.load_game` folds it into
+## `LoadResult.skipped_entries` so `main.gd`'s toast says so.
+##
+## Why each row is guarded rather than trusted. `arr` is player-authored data —
+## saves "may have been hand-edited, partially corrupted" (CONVENTIONS.md) — and
+## an unguarded `entry[1]` here does NOT fail the load. A GDScript runtime error
+## aborts only the INNERMOST function, so it killed `load_array` alone and
+## `load_game` carried on to `result.success = true`: every slot from the bad
+## row onward was silently never written, the player was told the world loaded
+## cleanly, and the next F5 wrote the truncated inventory over the only save
+## slot. That is quieter and worse than a crash, which is why the fix is a guard
+## plus a count rather than a guard alone.
+##
+## The `slots[i].clear()` is load-bearing on the NO-RESIZE path. When `arr.size()`
+## already equals `capacity` the slots are reused in place, so a row skipped
+## without clearing would leave whatever the live inventory held there — and
+## `main.gd`'s F9 quick-load passes the standing `player_inventory`, so that is
+## the player's CURRENT item surviving into a slot the save could not describe.
+## An unreadable row means "this slot is unknown", so it is emptied.
+##
+## `int(entry[0])` on a partially-readable row is not a middle ground worth
+## taking: a one-element `[7]` would leave item id 7 with count 0, and a String
+## row leaves id 0, both of which read as real item ids to everything downstream.
+## A row is taken whole or dropped whole.
+func load_array(arr: Array) -> int:
 	# Resize if needed.
 	if arr.size() != capacity:
 		capacity = arr.size()
 		slots = []
 		for i in capacity:
 			slots.append(ItemStack.new())
+	var skipped: int = 0
 	for i in capacity:
 		var entry = arr[i]
+		if not (entry is Array and entry.size() >= 2):
+			push_warning("Inventory.load_array: skipping malformed slot %d: %s" % [i, str(entry)])
+			slots[i].clear()
+			skipped += 1
+			continue
 		slots[i].item_type = int(entry[0])
 		slots[i].count = int(entry[1])
+	return skipped
