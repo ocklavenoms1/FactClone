@@ -501,8 +501,35 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			OS.alert(msg, "Save incompatible")
 		return result
 
-	var player_pos: Array = data.get("player", [0, 0])
-	player.global_position = Vector2(float(player_pos[0]), float(player_pos[1]))
+	# ---- SHAPE VALIDATION (audit finding #11) ------------------------------
+	# Everything below this point reads player-authored data by index. Saves
+	# "may have been hand-edited, partially corrupted" (CONVENTIONS.md), and an
+	# out-of-bounds index does not fail the load — it ABORTS load_game, so the
+	# caller receives null rather than a LoadResult, main.gd's `result.success`
+	# dereferences null, and the documented corrupt-save → fresh-world
+	# fallthrough never runs. Every boot then repeats it until someone deletes
+	# the file by hand. Validating shape is what keeps a bad save recoverable.
+	var mistyped: String = _first_mistyped_array_field(data)
+	if mistyped != "":
+		result.error_message = "Save field '%s' has the wrong type: expected a list, found %s." % [mistyped, type_string(typeof(data[mistyped]))]
+		push_error(result.error_message)
+		return result
+
+	# Entries dropped for being unreadable. Reported on the result so the player
+	# is told; see LoadResult.skipped_entries for why silence is worse.
+	var skipped: int = 0
+
+	# Untyped on purpose. A typed `var player_pos: Array = ...` raises a runtime
+	# type error on the ASSIGNMENT for a non-Array field — before any guard here
+	# could run — which is one of the two crashes this finding is about.
+	var player_pos = data.get("player", [0, 0])
+	if player_pos is Array and player_pos.size() >= 2:
+		player.global_position = Vector2(float(player_pos[0]), float(player_pos[1]))
+	else:
+		# Keep the default spawn and carry on: an unreadable position is one
+		# field, not a reason to throw away a world full of buildings.
+		push_warning("SaveSystem.load_game: 'player' is not a 2-element list (%s) — keeping the default spawn." % str(player_pos))
+		skipped += 1
 
 	grid_world.buildings.clear()
 	grid_world.occupied.clear()
@@ -519,6 +546,11 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# Also sync resource_state: if a modification cleared the resource_node,
 	# erase any stale richness state; otherwise leave (richness regenerated).
 	for entry in data.get("tile_modifications", []):
+		# 4 = highest index read unconditionally (entry[3]) + 1. entry[4] keeps
+		# its own inline guard: it arrived at v8 and is genuinely optional.
+		if not _entry_ok(entry, 4, "tile_modifications"):
+			skipped += 1
+			continue
 		var pos := Vector2i(int(entry[0]), int(entry[1]))
 		var rnode: int = int(entry[4]) if entry.size() > 4 else ResourceNodes.DEFAULT
 		var modified := Tile.new(int(entry[2]), int(entry[3]), rnode)
@@ -536,6 +568,11 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	#                                already cleared by tile_modifications above)
 	grid_world.resource_state_modifications.clear()
 	for entry in data.get("resource_state_modifications", []):
+		# 2 = entry[1] + 1. entry[2] already had this file's one defensive read
+		# — the pattern every guard here mirrors.
+		if not _entry_ok(entry, 2, "resource_state_modifications"):
+			skipped += 1
+			continue
 		var rs_pos := Vector2i(int(entry[0]), int(entry[1]))
 		var rs_state: Dictionary = entry[2] if entry.size() > 2 and entry[2] is Dictionary else {}
 		# Store the modification as-is (defensive copy).
@@ -559,6 +596,9 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# (region-scoped) hard-fail at the version check above; no migration.
 	grid_world.tile_soil_modifications.clear()
 	for entry in data.get("tile_soil_modifications", []):
+		if not _entry_ok(entry, 3, "tile_soil_modifications"):   # entry[2] + 1
+			skipped += 1
+			continue
 		var soil_tile := Vector2i(int(entry[0]), int(entry[1]))
 		grid_world.tile_soil_modifications[soil_tile] = int(entry[2])
 
@@ -569,6 +609,9 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# check above.
 	grid_world.tile_fertilizer_state.clear()
 	for entry in data.get("tile_fertilizer_state", []):
+		if not _entry_ok(entry, 4, "tile_fertilizer_state"):   # entry[3] + 1
+			skipped += 1
+			continue
 		var fert_tile := Vector2i(int(entry[0]), int(entry[1]))
 		grid_world.tile_fertilizer_state[fert_tile] = {
 			"tier": int(entry[2]),
@@ -581,6 +624,9 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# saves hard-fail at version check above.
 	grid_world.tile_wasteland_state.clear()
 	for entry in data.get("tile_wasteland_state", []):
+		if not _entry_ok(entry, 4, "tile_wasteland_state"):   # entry[3] + 1
+			skipped += 1
+			continue
 		var ws_tile := Vector2i(int(entry[0]), int(entry[1]))
 		grid_world.tile_wasteland_state[ws_tile] = {
 			"scarred": bool(entry[2]),
@@ -592,9 +638,18 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# from the loaded player position).
 	grid_world.region_visibility.clear()
 	for entry in data.get("explored_regions", []):
+		if not _entry_ok(entry, 2, "explored_regions"):   # entry[1] + 1
+			skipped += 1
+			continue
 		grid_world.region_visibility[Vector2i(int(entry[0]), int(entry[1]))] = 1
 
 	for bdict in data.get("buildings", []):
+		# Dictionary entries, not Arrays — Building.from_dict takes a Dictionary
+		# and a non-Dictionary aborts the load at the call, not inside it.
+		if not (bdict is Dictionary):
+			push_warning("SaveSystem.load_game: skipping malformed 'buildings' entry: %s" % str(bdict))
+			skipped += 1
+			continue
 		var b: Building = Building.from_dict(bdict)
 		grid_world.buildings[b.anchor] = b
 		var fp: Vector2i = Buildings.footprint_of(b.type)
@@ -629,9 +684,18 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	grid_world.mark_fluid_network_dirty()
 
 	if data.has("player_inventory"):
+		# No `is Array` check needed here: the field is in ARRAY_FIELDS, so a
+		# non-Array already failed the load above. `load_array` is typed
+		# `(arr: Array)` and a non-Array aborts on the call itself.
 		player_inventory.load_array(data["player_inventory"])
 
 	result.player_progression = data.get("player_progression", {})
+	# Same convention as used_backup below: reported on success only. Set here
+	# rather than at each skip site so there is exactly one place where the
+	# count reaches the caller.
+	result.skipped_entries = skipped
+	if skipped > 0:
+		push_warning("SaveSystem.load_game: %d unreadable entr%s skipped." % [skipped, "y was" if skipped == 1 else "ies were"])
 	# Set here, not where the source was chosen: the convention is that
 	# used_backup is meaningful only on success, and every error branch above
 	# returns before this point rather than reporting a backup for a load that
@@ -639,6 +703,57 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	result.used_backup = used_backup
 	result.success = true
 	return result
+
+## Every top-level save field `load_game` iterates as an Array (audit #11).
+##
+## A field present with the WRONG TYPE — a String or Dictionary where a list
+## belongs — is a whole-collection failure, not a skippable entry: nothing in it
+## can be salvaged, and quietly loading an empty collection over a real save is
+## the same silent data loss the finding is about. It fails the load with a
+## named field so `main.gd` regenerates a fresh world and says why.
+##
+## Note the loops below iterate a String character-by-character and a Dictionary
+## key-by-key perfectly happily, so without this check a mistyped field does not
+## announce itself — it crashes several rows in, on a character.
+const ARRAY_FIELDS: Array = [
+	"tile_modifications",
+	"resource_state_modifications",
+	"tile_soil_modifications",
+	"tile_fertilizer_state",
+	"tile_wasteland_state",
+	"explored_regions",
+	"buildings",
+	"player_inventory",
+]
+
+## Name of the first ARRAY_FIELDS entry that is present but is not an Array, or
+## "" when every present field is well-typed. Absent fields are fine — every
+## loop uses `data.get(name, [])` and sparse collections are the norm.
+##
+## Checked BEFORE the first world mutation on purpose: a mistyped field found
+## half-way through would leave grid_world rebuilt from the seed with some
+## collections applied and others not, and the caller cannot tell that apart
+## from a successful load.
+static func _first_mistyped_array_field(data: Dictionary) -> String:
+	for field in ARRAY_FIELDS:
+		if data.has(field) and typeof(data[field]) != TYPE_ARRAY:
+			return field
+	return ""
+
+## True if `entry` is an Array long enough for the caller's highest direct
+## index. `min_size` is that index + 1, derived per collection at each call
+## site from the code immediately below it.
+##
+## A malformed row is SKIPPED rather than fatal: one hand-corrupted line should
+## cost the player that line, not the world. Callers increment their own counter
+## so the number reaches LoadResult; this only reports readability and warns.
+## Mirrors the one defensive read this file already had, at the
+## resource_state_modifications loop's `entry[2] is Dictionary` test.
+static func _entry_ok(entry, min_size: int, field: String) -> bool:
+	if entry is Array and entry.size() >= min_size:
+		return true
+	push_warning("SaveSystem.load_game: skipping malformed '%s' entry: %s" % [field, str(entry)])
+	return false
 
 ## True if there is anything to load. Counts the .bak sidecar (audit #12): a
 ## crash between save_game's two renames leaves save_path absent while .bak

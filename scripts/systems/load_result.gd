@@ -34,3 +34,20 @@ var player_progression: Dictionary = {}
 ## should tell the player that the newest save was lost so they know the state
 ## they are looking at is one save behind.
 var used_backup: bool = false
+
+## How many entries `load_game` could not read and dropped (audit finding #11).
+## Counts a malformed row in any of the save's collections, plus the `"player"`
+## field when it is too short or not an Array at all — in that case the player
+## keeps the default spawn, which is lost data the player would otherwise read
+## as the game teleporting them.
+##
+## Set on the SUCCESS path only, exactly like `used_backup` above, and for the
+## same reason: it describes a load that happened. A failed load reports through
+## `error_message` and this stays 0.
+##
+## Surfaced rather than merely counted. Skipping is the right response to one
+## corrupt row — it costs the player that row instead of the whole world — but a
+## load that silently drops forty buildings is a worse failure than one that
+## says so, because the player has no way to tell it from the game deleting
+## their base. Both `main.gd` load sites append the count to their toast.
+var skipped_entries: int = 0

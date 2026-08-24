@@ -343,9 +343,9 @@ func _ready() -> void:
 			# pressed F5 for, and would otherwise read the difference as the
 			# game losing their work at random.
 			if result.used_backup:
-				_show_toast("Last save was damaged — recovered the previous one (seed %d)" % grid_world.world_seed)
+				_show_toast("Last save was damaged — recovered the previous one (seed %d)%s" % [grid_world.world_seed, _skipped_suffix(result)])
 			else:
-				_show_toast("World loaded from save (seed %d)" % grid_world.world_seed)
+				_show_toast("World loaded from save (seed %d)%s" % [grid_world.world_seed, _skipped_suffix(result)])
 		else:
 			# Hotfix (post-3.5, NOTES.md "Schema-mismatch UX gap"): when load
 			# fails (schema mismatch, corrupt JSON, missing fields, etc.),
@@ -396,6 +396,19 @@ func _ready() -> void:
 		if arg == "--scenario=pole_gameplay":
 			_spawn_pole_gameplay_rig(grid_world.world_to_tile(player.global_position))
 			break
+
+## Toast suffix naming how many unreadable entries the load dropped (audit #11),
+## or "" when it dropped none — so a clean load reads exactly as it did before.
+##
+## Shared by BOTH load sites, the boot load and F9, for the same reason
+## `used_backup` is handled at both: a count reported at only one of them is a
+## count the player cannot rely on. Skipping a corrupt row is right — it costs
+## the player that row instead of the whole world — but saying nothing turns
+## "your save had 40 damaged buildings" into "the game deleted my base".
+func _skipped_suffix(result: LoadResult) -> String:
+	if result.skipped_entries <= 0:
+		return ""
+	return " · %d damaged entr%s skipped" % [result.skipped_entries, "y" if result.skipped_entries == 1 else "ies"]
 
 ## Apply a loaded progression dict to runtime state. Missing keys keep the
 ## defaults that main.gd's `player_progression` was initialized with — this
@@ -759,8 +772,10 @@ func _process(delta: float) -> void:
 		var result: LoadResult = SaveSystem.load_game(grid_world, player, player_inventory)
 		if result.success:
 			_apply_loaded_progression(result.player_progression)
-			# Same backup notice as the boot-time load above (audit #12).
-			_show_toast("Loaded the previous save — the newest one was damaged" if result.used_backup else "Loaded")
+			# Same backup notice as the boot-time load above (audit #12), and the
+			# same skipped-entry notice (audit #11).
+			var loaded_msg: String = "Loaded the previous save — the newest one was damaged" if result.used_backup else "Loaded"
+			_show_toast(loaded_msg + _skipped_suffix(result))
 		else:
 			_show_toast(result.error_message if result.error_message != "" else "Nothing to load")
 
