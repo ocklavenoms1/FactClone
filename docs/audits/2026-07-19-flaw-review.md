@@ -160,24 +160,24 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 |---|---|---|
 | 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
 | 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
-| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1598-1606` (bad check `:1602`) |
+| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1731-1741` (bad check `:1736`) — **was cited `:1598-1606`, which now lands on #30's terrain loop**. Interlocks with #38: #38's headline symptom *is* this bug |
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
 | 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `smelter.gd:117-125` |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 22 | one Esc press performs two actions | `map_panel.gd:243-245`, `console.gd:180-182`, `main.gd:611-622` |
+| 22 | one Esc press performs two actions | `map_panel.gd:274-276` (was `:243-245`), `console.gd:180-182` (accurate), `main.gd:691-703` (was `:611-622`). One unit with #58 + #59 |
 | 23 | console `place` paves anchor only; leaves stray STONE on failure | `console.gd:625-639` |
 | 24 | unbounded radius in `deplete_area` / `tile` | `console.gd:550-562, 743-744, 782-812` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
 | 27 | bag-cap phases assert an in-test mirror of production logic | `test_bag_cap.gd:20-21, 108-115` |
 | 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `test_smelter.gd:153-171` |
-| 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1330-1356` (early-out at `:1337` never fires) |
-| 30 | `_draw` walks every tile and building per frame | `grid_world.gd:1103, 1464-1469, 1554-1563` |
+| 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1470-1490` (early-out at `:1471`) — was cited `:1330-1356`. **Partly closed by #31's migration**; fix #31 first or fix both as one unit |
+| 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
-| 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | `grid_world.gd:1128-1149, 1183-1186` |
+| 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | active-tiles rebuild `grid_world.gd:1223-1232`, keys snapshot `:1239`, call site `:1190` — **was cited `:1128-1149`, which now lands on `wood_yield_for_tree`**. Partly closed by #31; same unit as #29 |
 | 33 | per-tick transient allocations in processor pull/push | `processor.gd:101-102, 119, 126`; `buildings.gd:936-956` |
-| 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is 812 lines |
+| 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is 812 lines. **Same edit as #80** — both resolve to `NOTES.md:773` + `:777`, at different severities. Fix as one; see R3's pattern note |
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
 
@@ -185,8 +185,8 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 37 | `tile_regen_progress` not cleared on load | `save_system.gd:550-579` — re-derived at `233467f` |
-| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:515-516` — re-derived at `233467f` |
+| 37 | `tile_regen_progress` not cleared on load | sibling clears at `save_system.gd:724, 737, 752, 766`; **`tile_regen_progress.clear()` appears nowhere in the file** — was cited `:550-579` |
+| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:663-664` — was cited `:515-516`. Its headline symptom *is* #16; fix #16 first, then re-scope |
 | 39 | Harvester reassigns `b.state["buffer"]` instead of mutating | `harvester.gd:123, 163` |
 | 40 | drill pulls fuel from all 4 edges | `mining_drill.gd:119` |
 | 41 | composter recipes comment claims non-rotatable | `recipes.gd:207-208` |
@@ -194,23 +194,23 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 43 | `try_pull_fuel` docstring says inserters pass -1 | `burner.gd:56` |
 | 44 | composter header claims non-rotatable (dup #41) | `composter.gd:15, 69` |
 | 45 | fallback-lake exclusion tests only the anchor | `world_generator.gd:448` |
-| 46 | regen accumulators bleed on load (dup #37) | `save_system.gd:550-579` — re-derived at `233467f` |
+| 46 | regen accumulators bleed on load (dup #37) | same site as #37 — was cited `:550-579` |
 | 47 | `set_soil` doesn't clear wasteland | `console.gd:527-531` |
 | 48 | `deplete_planter_area` writes out-of-world tiles | `grid_world.gd:703-710, 734-741` |
 | 49 | `_neighbor_falloff_cost` floors at 1 | `grid_world.gd:719-720` |
-| 50 | spawn sort lacks a tie-break | `main.gd:460-462` |
+| 50 | spawn sort lacks a tie-break | `main.gd:540-543` — was cited `:460-462` |
 | 51 | `try_apply_fertilizer` accepts water / OOB / paved tiles | `grid_world.gd:769-795` |
 | 52 | panel keeps a stale ref after console destroy | `building_panel.gd:78-83` |
 | 53 | chest swap capacity ignores the outgoing stack | `chest_panel.gd:235-253` |
 | 54 | hotbar keys not gated by modals | `hotbar.gd:266` |
 | 55 | drill panel overflows its 280px top area | `drill_panel.gd:54, 57, 180` |
 | 57 | chest capacity label hardcodes 2400 | `chest_panel.gd:56` |
-| 58 | duplicate unconditional `close_info_panel` handler | `main.gd:721-722` |
-| 59 | backtick cannot close the console | `main.gd:802-805`; `console.gd:162-180` |
-| 60 | F11 demo writes tiles bypassing `tile_modifications` | `main.gd:1463-1464` |
+| 58 | duplicate unconditional `close_info_panel` handler | `main.gd:801-802` — **was cited `:721-722`; `:802` now lands in #59's neighbourhood**. One unit with #22 + #59 |
+| 59 | backtick cannot close the console | `main.gd:878-881` (was `:802-805`); `console.gd:162-180`. One unit with #22 + #58 |
+| 60 | F11 demo writes tiles bypassing `tile_modifications` | `main.gd:1547` — was cited `:1463-1464` |
 | 61 | `on_impassable` escape valve permits free water walking | `player.gd:82` |
 | 62 | `tick_speed` reads "was" after assignment | `console.gd:707-708` |
-| 63 | runner restores neither `save_path` nor tick rate | `test_runner.gd:80-83` |
+| 63 | runner restores neither `save_path` nor tick rate | **no restoration exists** — `SaveSystem.save_path` appears in `test_runner.gd` only in comments (`:121-124`, `:167-168`), and `tick_rate_multiplier` not at all. Was cited `:80-83`. Scope is **21** suites overriding `save_path`, not the 10 the body claims |
 | 64 | hotbar cycling / disabled-slot / map / minimap have zero coverage | `hotbar.gd:277, 374` |
 | 65 | cursor backward-compat test is a tautology | `test_building_ui.gd:278-283` |
 | 66 | seed-uniqueness tests fabricate seeds | `test_random_seed_save_roundtrip.gd:25` |
@@ -219,17 +219,17 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 69 | ui_2 frees a world without `_disconnect` | `test_building_ui_2.gd:145` |
 | 70 | ambient trees sample noise for all 262k tiles — **deferred pending profiling** | `world_generator.gd:423-429` |
 | 71 | port indicators re-resolve recipes per frame — **deferred pending profiling** | `buildings.gd:1228-1277` |
-| 72 | `_is_tile_actively_farmed` scans all buildings per frame | `grid_world.gd:1261-1271` |
-| 73 | `_all_building_panels` allocates a fresh 22-array per call | `main.gd:1095-1103` |
+| 72 | `_is_tile_actively_farmed` scans all buildings per frame | `grid_world.gd:1395-1405` — was cited `:1261-1271` |
+| 73 | `_all_building_panels` allocates a fresh 22-array per call | `main.gd:1178-1188` — was cited `:1095-1103` |
 | 74 | post-tick pass iterates all buildings for belt-only logic | `grid_world.gd:654` |
 | 75 | `class_name DevConsole` lives in `console.gd` | `console.gd:1` |
 | 76 | soil arc says "migration framework still queued" | `NOTES.md:841` vs `:793` |
 | 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `INVENTORY_UI_PLAN.md:7` |
 | 78 | CONVENTIONS layout lists `assets/`, omits `tools/` + `addons/` | `CONVENTIONS.md:65` |
 | 79 | console.gd header says 12 commands; registry has 13 | `console.gd:19-20` vs `:344-407` |
-| 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | `NOTES.md:767, 769, 773` |
-| 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:998, 1000, 1039` |
-| 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1007` vs `:834` |
+| 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | `NOTES.md:767, 769, 773`. **Same edit as #34** (MEDIUM) — duplicate at different severities. Also pairs with #79: same command count, two files |
+| 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:1139` — was cited `:998, 1000, 1039`. **21 is correct** (26 `*_panel.gd` minus 5 non-building-specific); see the baselines block |
+| 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1146` (was `:1007`) vs `:834`. **Understated by one, not two** — the real count is 12; the baselines block briefly said 13 and was wrong |
 | 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
 
 ### Scoping note — #21 was closed NARROWER than it was written
@@ -364,17 +364,26 @@ parse, never what the writer emits.
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **54** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **55** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
 | `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
-| **13** ProcessorPanel subclasses | `grep -rc 'extends ProcessorPanel' scripts/ui/*.gd \| grep -v ':0'` |
+| **12** ProcessorPanel subclasses | `grep -rlc '^extends ProcessorPanel' scripts/ui/*.gd \| wc -l` |
+| **21** building-specific panels | `ls scripts/ui/*_panel.gd \| wc -l` = 26, minus the 5 that are not building-specific: `building_panel`, `processor_panel` (base classes), `info_panel`, `inventory_panel`, `map_panel` |
 
-Two notes on the numbers this replaces. **ProcessorPanel consumers read 12 and are
-now 13**, so finding #82 (`NOTES.md` says 11) is understated by two, not one — fix
-the count when closing it rather than copying the audit's figure. **"21 specialized
-panels" is dropped**: `scripts/ui/*_panel.gd` is 26 files and the document never
-said which five it excluded, so the number was never checkable. Any finding that
-cited it needs its own derivation.
+**Correction, 2026-08-24 — this block was wrong when written, in both rows.** It is
+recorded rather than quietly fixed, because a block whose whole purpose is stopping
+count drift becoming the source of count drift is worth being able to point at.
+
+**The ProcessorPanel row said 13 and instructed a reader to "fix #82's count to 13
+rather than copying the audit's figure."** The unanchored `grep -rc` matched a
+**doc comment** at `processor_panel.gd:24` — the base class describing itself with
+the words ​`just \`extends ProcessorPanel\``. The real count is **12**, which
+`NOTES.md:834` ("12th ProcessorPanel consumer") had said all along. **#82 is
+understated by one, not two.** The command is now anchored to `^extends`.
+
+**"21 specialized panels" was dropped as uncheckable. It is checkable** — the five
+excluded files are identifiable by inspection and named above, and 26 − 5 = 21. The
+original figure was right; dropping it was the error. Finding #81's "21 real" stands.
 
 ### Deferred by prior decision, still valid
 
@@ -478,6 +487,56 @@ silently defaults a missing `"t"` to type 0 rather than dropping the entry, and 
 a hand-edit can). Neither aborts the load; both are uncounted.
 
 ---
+
+### R3. A malformed inventory row silently truncated the save — and #11 described it as a crash
+
+**Found:** 2026-08-23, by the review of the #11/#13/#21 fixes. **FIXED at `7a86195`.**
+Recorded as its own entry rather than folded into #11's closure note, because what
+matters here is not the bug — it is that **the finding's stated consequence and its
+actual consequence were different, and the stated one was the less dangerous of the two.**
+
+#11 said a malformed save "crashes load". For every shape it enumerated, that was
+right. For `player_inventory` it was wrong in the direction that hurts: `Inventory.load_array`
+indexed `entry[0]`/`entry[1]` per slot with no guard, and a GDScript runtime error
+aborts only the **innermost** function — so `load_array` died, `load_game` carried
+straight on, and `result.success` was set to `true`.
+
+**Measured**, corrupting row 2 of a well-typed 16-slot inventory with a marker stack at row 5:
+
+```
+(PROBE-TRUNC) success=true skipped=0 flour(row0)=23 wheat(row5)=0
+SCRIPT ERROR: Invalid access of index '1' on a base object of type: 'Array'.
+   at: Inventory.load_array (res://scripts/world/inventory.gd:150)
+```
+
+Row 0 loaded; rows 2-15 were never written. Five corruption shapes (`[7]`, `7`, `"xy"`,
+`{"a":1}`, `[]`) all gave `success=true, skipped=0`. **The `"xy"` shape emitted no
+SCRIPT ERROR at all** — `int("x")` is 0, so the loss was entirely undiagnosed.
+
+The aggravating detail: the boot toast read `"World loaded from save (seed N)"` with no
+suffix, because `skipped_entries` was **0**. The load did not merely fail to notice the
+loss — it affirmatively reported that nothing had been skipped. Next F5 wrote the
+truncated inventory over the only save.
+
+#### The pattern, which is the reason this is its own entry
+
+**This is the second time in one session that a finding was real but the wrong shape.**
+
+- **#8/#9** were closed as NOT-A-BUG: the audit had misread render-scratch and
+  single-type buffers, and the item-destruction it described could not occur. Wrong
+  in the direction of alarm.
+- **R3** is the mirror: the audit described a loud crash and the reality was silent
+  data loss with a counter asserting cleanliness. Wrong in the direction of comfort.
+
+Both survived adversarial verification by 1-2 independent skeptics instructed to
+refute. Verification confirms that *something* is there; it does not confirm the
+*shape*, and shape determines both severity and whether a fix is complete. #11 was
+marked CLOSED on a fix that addressed every mechanism its title named while its
+stated consequence stayed reachable — see #11's row, which now cites two commits.
+
+**Practical rule this earns:** when closing a finding, reproduce the described
+consequence, not just the described mechanism. If the reproduction does not match the
+description, the mismatch is the finding — record it before fixing it.
 
 ## HIGH -- player-visible breakage or item loss  (10 findings)
 

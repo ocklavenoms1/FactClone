@@ -124,8 +124,15 @@ finding.
 (design Q5), so neither representation assumes a clock.
 
 **Cost goes down, not up.** Three sparse-dict walks per frame become three per
-tick — a 3× reduction at 60 fps. Findings #30/#32 (per-frame rebuild costs)
-would partly close as a side effect.
+tick — a 3× reduction at 60 fps. Findings **#29 and #32** (per-frame rebuild costs
+inside `_tick_regrowth` and `_tick_soil_regen`) would partly close as a side effect.
+
+**Correction, 2026-08-24:** this paragraph originally named **#30**, which is wrong
+and would have caused a false partial closure — exactly what this document's header
+warns about. #30 is `_draw` walking `tiles` (`grid_world.gd:1598`) and `buildings`
+(`:1688`), driven by `queue_redraw()` at `:1191`. **`queue_redraw()` stays in
+`_process` under every proposed fix for #31**, including #31's own fix text. A tick
+migration changes nothing about #30. #29 is the one it partly closes.
 
 ---
 
