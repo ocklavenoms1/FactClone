@@ -144,6 +144,12 @@ static func _is_test_fixture_path(path: String) -> bool:
 const TMP_SUFFIX: String = ".tmp"
 const BAK_SUFFIX: String = ".bak"
 
+## Suffix for the copy `load_game` sets aside when it refuses a save written by
+## a NEWER build than this one (audit finding #21). Distinct from BAK_SUFFIX on
+## purpose — see `_preserve_incompatible` for why the rotation slot cannot be
+## reused for this, and `save_exists` for why this suffix is not counted there.
+const INCOMPAT_SUFFIX: String = ".incompatible"
+
 ## TEST-ONLY fault injection for `save_game`. Set to a stage name to make
 ## save_game return false at that exact point, leaving on disk precisely what
 ## a process kill at that moment would leave. Production never sets this; it
@@ -405,6 +411,56 @@ static func save_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		return false
 	return true
 
+## A `user://` path rewritten as something the player can paste into a file
+## manager. Backslashes on Windows because `globalize_path` returns forward
+## slashes there and a mixed-separator path is not one a player can act on.
+##
+## Only ever used inside dialog text — never to open a file. Every read and
+## write in this file goes through `save_path` and its suffixes.
+static func _native_path(path: String) -> String:
+	var native: String = ProjectSettings.globalize_path(path)
+	if OS.get_name() == "Windows":
+		native = native.replace("/", "\\")
+	return native
+
+## Copy a save this build refuses to load somewhere `save_game` never writes,
+## and return that path ("" if the copy could not be made).
+##
+## NOT `.bak`. That is the atomic write's ROTATION slot: it holds whatever the
+## live save was one F5 ago, so a file left there survives exactly one more save.
+## The forward-incompat save has to outlive an unbounded number of them, because
+## the player is being asked to go and update the game while the fresh world they
+## were dropped into keeps saving over the slot.
+##
+## A byte copy, not a re-serialisation of the parsed Dictionary. The point of the
+## file is that a NEWER build can read it, and this build cannot know what in it
+## matters — round-tripping through `JSON.stringify` would silently renormalise
+## number formatting and key order for a schema this build does not implement.
+## What gets preserved must be what was on disk.
+##
+## The destination is keyed to `save_path` even when the source is the `.bak`
+## sidecar: one preservation slot per save slot, holding the most recent save
+## this build had to refuse.
+##
+## Deliberately NOT counted by `save_exists`. Counting it would make every
+## subsequent boot find "a save", hand `load_game` a file it has already refused,
+## and re-run the alert forever instead of loading the fresh world the player has
+## been playing since. Pinned by sub-case 7 of
+## scripts/tests/test_forward_incompat_save.gd.
+static func _preserve_incompatible(source_path: String) -> String:
+	var dest: String = save_path + INCOMPAT_SUFFIX
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(source_path)
+	if bytes.is_empty():
+		push_error("SaveSystem: could not read %s to set it aside; it has NOT been preserved." % source_path)
+		return ""
+	var f := FileAccess.open(dest, FileAccess.WRITE)
+	if f == null:
+		push_error("SaveSystem: could not write the preserved copy at %s (error %d); the save has NOT been preserved." % [dest, FileAccess.get_open_error()])
+		return ""
+	f.store_buffer(bytes)
+	f.close()
+	return dest
+
 ## Open `path` and parse it as a save Dictionary. Returns the Dictionary, or
 ## null if the file cannot be opened, is not valid JSON, or parses to
 ## something other than a Dictionary — i.e. every shape an interrupted write
@@ -440,6 +496,11 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 		return result   # silent failure; treat as "fresh start"
 
 	var used_backup: bool = false
+	# Which file the data actually came from. The failure paths below quote a
+	# path back to the player and one of them copies that file aside, and both
+	# are wrong if they assume the primary: reaching this function through the
+	# backup is a supported, ordinary outcome (finding #12).
+	var source_path: String = save_path
 	var candidate = _read_save_dict(save_path) if primary_exists else null
 	if candidate == null:
 		candidate = _read_save_dict(bak_path) if backup_exists else null
@@ -452,6 +513,7 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			push_error(result.error_message)
 			return result
 		used_backup = true
+		source_path = bak_path
 		push_warning("SaveSystem.load_game: %s is missing or unreadable; recovering from %s." % [save_path, bak_path])
 
 	var data: Dictionary = candidate
@@ -476,10 +538,30 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	elif version > SAVE_VERSION:
 		# Forward-incompat: save is from a newer game binary than what's
 		# running. Migration framework only walks forward; can't downgrade.
-		var native_path: String = ProjectSettings.globalize_path(save_path)
-		if OS.get_name() == "Windows":
-			native_path = native_path.replace("/", "\\")
-		var msg: String = "Save is v%d; this game is v%d.\n\nUpdate the game to load this save, or delete to start fresh:\n%s" % [version, SAVE_VERSION, native_path]
+		#
+		# Audit finding #21. This branch tells the player their save is
+		# RECOVERABLE — update the game and it loads — and then returns the same
+		# `success = false` that main.gd's post-3.5 hotfix turns into a playable
+		# fresh world. The player is standing in a world that saves over the file
+		# the dialog just told them to keep.
+		#
+		# The atomic write (finding #12) softened this without closing it: the
+		# first F5 MOVES the newer save to `.bak` rather than destroying it. But
+		# `.bak` is a rotating slot — the second F5 moves the fresh world onto it
+		# and the newer save is gone. Two keypresses, not one. So the copy goes
+		# to a suffix `save_game` never writes, and the dialog says where.
+		#
+		# Deliberately NOT a `success = true`, and deliberately no blocking of
+		# the fresh world: CONVENTIONS.md keeps this a hard failure ("Forward
+		# incompatibility ... hard-fails with a clear 'update the game' message.
+		# Backward migration is out of scope"). Preserving the file and telling
+		# the truth about the overwrite is the whole fix.
+		var preserved: String = _preserve_incompatible(source_path)
+		var msg: String = "Save is v%d; this game is v%d.\n\nUpdate the game to load this save:\n%s" % [version, SAVE_VERSION, _native_path(source_path)]
+		if preserved != "":
+			msg += "\n\nA fresh world will be generated. That save will be overwritten on next F5, so a copy has been kept at:\n%s" % _native_path(preserved)
+		else:
+			msg += "\n\nA fresh world will be generated and that save will be overwritten on next F5. A copy could NOT be made — move the file somewhere safe before playing on."
 		result.error_message = "Save is from a newer game (v%d vs v%d)." % [version, SAVE_VERSION]
 		push_error(msg)
 		if not _is_test_fixture_path(save_path):
@@ -491,10 +573,13 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 	# modifications onto a different terrain would silently corrupt the save.
 	var saved_worldgen_version: int = int(data.get("worldgen_version", 0))
 	if saved_worldgen_version != WorldGenerator.VERSION:
-		var native_path: String = ProjectSettings.globalize_path(save_path)
-		if OS.get_name() == "Windows":
-			native_path = native_path.replace("/", "\\")
-		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, native_path]
+		# NOT preserved, unlike the forward-incompat branch above, and that is the
+		# deliberate scope of audit #21. A worldgen mismatch is not recoverable by
+		# any build — the terrain the save's positions refer to cannot be
+		# regenerated — so there is nothing to keep the file for, and
+		# CONVENTIONS.md sanctions this fallthrough outright: "Better to surface
+		# the failure and let the post-3.5 hotfix regenerate fresh."
+		var msg: String = "Save was generated with worldgen v%d; current version is v%d.\n\nProcgen logic changed; old saves cannot be regenerated correctly. Delete the file to start fresh:\n%s" % [saved_worldgen_version, WorldGenerator.VERSION, _native_path(save_path)]
 		result.error_message = "Worldgen version mismatch (v%d vs v%d) — see dialog." % [saved_worldgen_version, WorldGenerator.VERSION]
 		push_error(msg)
 		if not _is_test_fixture_path(save_path):

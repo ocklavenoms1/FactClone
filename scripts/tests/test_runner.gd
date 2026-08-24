@@ -64,6 +64,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_save_atomicity.gd"),
 	preload("res://scripts/tests/test_load_malformed_save.gd"),
 	preload("res://scripts/tests/test_quick_load_refresh.gd"),
+	preload("res://scripts/tests/test_forward_incompat_save.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
@@ -110,9 +111,13 @@ func _ready() -> void:
 	print("\n%d passed, %d failed\n" % [passed, failed])
 	get_tree().quit(0 if failed == 0 else 1)
 
-## Delete the `.tmp` / `.bak` sidecars of every save fixture (audit #12 follow-up).
+## Delete the `.tmp` / `.bak` / `.incompatible` sidecars of every save fixture
+## (audit #12 follow-up; `.incompatible` joined at audit #21).
 ##
 ## `save_game` writes `<save_path>.tmp` and moves the live save to `<save_path>.bak`.
+## `load_game` writes `<save_path>.incompatible` when it refuses a save from a
+## newer build — and that one is never rotated away by design, so a stranded copy
+## would persist across runs rather than being overwritten by the next save.
 ## Every save-using suite deletes its primary fixture and nothing else, so the
 ## sidecars belong to nobody. Nothing leaks today, but only incidentally: each
 ## existing suite happens to delete its primary before it saves to that path a
@@ -136,7 +141,7 @@ func _scrub_fixture_sidecars() -> void:
 		if dir == null:
 			continue
 		for file_name in dir.get_files():
-			if not (file_name.ends_with(SaveSystem.TMP_SUFFIX) or file_name.ends_with(SaveSystem.BAK_SUFFIX)):
+			if not (file_name.ends_with(SaveSystem.TMP_SUFFIX) or file_name.ends_with(SaveSystem.BAK_SUFFIX) or file_name.ends_with(SaveSystem.INCOMPAT_SUFFIX)):
 				continue
 			var full_path: String = dir_path + file_name
 			if not SaveSystem._is_test_fixture_path(full_path):
