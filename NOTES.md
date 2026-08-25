@@ -1630,16 +1630,32 @@ whose state has no `"bag"` key. `state.get("bag", [])` returns the *default lite
 append lands in a temporary and the item is discarded. Closed incidentally by delegating to
 `Chest.try_insert`, which repairs the shape through `Chest._bag`.)
 
-### A partly-applied fix can be worse than the defect
+### ⚠ FIXES ARE NOT MONOTONE — the intermediate state can be worse than either endpoint
 
-Same finding, mutation M1: delegate to `Chest.try_insert` **but keep `return true`**. Result
-— conservation breaks, **2450 → 2441, nine items destroyed**. The unfixed code merely
-overfilled; the half-fixed code silently deletes.
+Same finding, mutation M1: delegate to `Chest.try_insert` **but keep `return true`**.
+Measured: conservation breaks, **2450 → 2441, nine items destroyed**.
 
-Fixes are not monotone. "Some of the fix" is not "some of the benefit", and a partial
-application can move a defect from harmless-but-wrong into the class the finding only claimed
-it was in. Land the whole change or none of it, and mutation-test the halves — M1 exists
-precisely because the half-state is reachable by a plausible edit.
+Read the three states in order. **Unfixed:** the chest overfills, every item still exists.
+**Half-fixed:** `try_insert` refuses at capacity and returns false, but the caller reports
+success anyway, so the arm clears a held item that was never stored — **silent deletion**.
+**Fixed:** the refusal propagates, the arm blocks, nothing is lost.
+
+The midpoint is worse than the start. "Some of the fix" is not "some of the benefit", and a
+partial application moved this defect *into* the destruction class the finding wrongly
+claimed it was already in.
+
+**This changes what a mutation pass is for.** The habitual question is "does removing this
+line redden something" — a check that the guard is load-bearing. That is necessary and not
+sufficient. The other question is **"is every intermediate state of this change safe?"**,
+because the half-states are reachable: by an interrupted edit, by a partial revert, by a
+merge that takes one hunk of two, by a future reader who deletes what looks like a redundant
+line.
+
+So mutate **toward** the fix as well as away from it. For any change with more than one
+moving part, construct the partial applications and check them — M1 exists precisely because
+that half-state is one plausible edit away, and nothing else in the suite would have caught
+it. Where a partial state is genuinely unsafe, say so in the retention comment: "these two
+lines land together" is information a future editor cannot derive.
 
 ### Findings carry stale COSTS as well as stale citations — re-derive both
 

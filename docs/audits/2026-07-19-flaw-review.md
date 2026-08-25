@@ -44,6 +44,37 @@
 >   `Overlay.NONE`-accepting buildings after the audit ran, and Session 2 added
 >   two more again.
 >
+> ### ⚠ THE ARITHMETIC IS A CONSISTENCY CHECK, NOT A CURRENCY CHECK
+>
+> `CLOSED + HIGH + MEDIUM + LOW == 84`, and each header matching its row count, prove
+> exactly one thing: **no row was lost, duplicated, or double-counted.** They prove
+> nothing whatever about whether any row is still *true*.
+>
+> Measured 2026-08-25: the reconciliation line replaced that day read `28 + 0 + 16 + 40`
+> and **summed correctly to 84 while three of its four terms were stale.** A correct total
+> is not evidence the addends are current. It never was; it was being read as though it
+> were.
+>
+> **What actually verifies currency — the whole list:**
+>
+> - **Status:** `git merge-base --is-ancestor <sha> main` for each CLOSED row's cited
+>   commit. This is the STATUS RULE above, and it is mechanisable.
+> - **Baselines:** the count-baselines block carries an executable command per row.
+>   **That block is the only self-verifying part of this document**, and only because
+>   running the command re-derives the value from the source rather than comparing it to
+>   another number.
+> - **Citations:** partially — the file exists, the line is in range, the named symbol is
+>   still there. Whether the line still means what the row says is prose, and no check
+>   reaches it. Re-derive at dispatch time. #16's citation drifted **44 lines in three
+>   days**.
+> - **Severity and cost:** nothing verifies these. Both are claims about consequences,
+>   written by an author who did not run the code, and both have been measured wrong this
+>   session (#19's rating, #34's estimate).
+>
+> **The generalisation:** a number compared against another number is *consistency*. Only
+> a check that executes against the source is *currency*. This document contains far more
+> of the former than the latter, and the former is the one that feels like verification.
+>
 > Treat every finding below as a **hypothesis with a citation**, not a defect
 > report. Grep for the asserted behavior, confirm the current line numbers, and
 > write a failing test before scoping any fix.
