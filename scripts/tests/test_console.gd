@@ -106,6 +106,16 @@ static func run(parent: Node) -> Dictionary:
 		"tick_speed 2 should succeed, got '%s'" % ts_ok)
 	_check(failures, abs(TickSystem.tick_rate_multiplier - 2.0) < 0.001,
 		"tick_speed 2 should set TickSystem.tick_rate_multiplier to 2.0, got %f" % TickSystem.tick_rate_multiplier)
+	# The "(was N×)" half of the message. It used to format
+	# TickSystem.tick_rate_multiplier AFTER assigning it, so both arguments
+	# resolved to the new value and the report always read "→ N× (was N×)".
+	# The multiplier is 2.0 here (set two lines above), so a correct message says
+	# "was 2.00" and the bug says "was 4.00".
+	var ts_was: String = console.execute("tick_speed 4")
+	_check(failures, ts_was.find("(was 2.00x)") >= 0,
+		"tick_speed 4 from 2.0 should report the PREVIOUS multiplier, got '%s'" % ts_was)
+	_check(failures, ts_was.find("→ 4.00×") >= 0,
+		"tick_speed 4 should report the new multiplier, got '%s'" % ts_was)
 	# Reset for cleanliness.
 	console.execute("tick_speed 1")
 

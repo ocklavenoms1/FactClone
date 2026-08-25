@@ -827,8 +827,14 @@ func _cmd_tick_speed(args: Array) -> String:
 	var m: float = m_parsed[1]
 	if m < TICK_SPEED_MIN or m > TICK_SPEED_MAX:
 		return "tick_speed must be between %.1f and %.1f (got %s). Multipliers above %dx may break tick-dependent systems." % [TICK_SPEED_MIN, TICK_SPEED_MAX, args[0], int(TICK_SPEED_MAX)]
+	# CAPTURED BEFORE THE ASSIGNMENT. This used to read
+	# `TickSystem.tick_rate_multiplier = m` followed by
+	# `% [m, TickSystem.tick_rate_multiplier]`, so both arguments resolved to `m`
+	# and every run of this command reported "→ N× (was N×)" — the one number the
+	# message exists to tell you was always the number you just typed.
+	var was: float = TickSystem.tick_rate_multiplier
 	TickSystem.tick_rate_multiplier = m
-	return "Tick speed → %.2f× (was %.2fx)." % [m, TickSystem.tick_rate_multiplier]
+	return "Tick speed → %.2f× (was %.2fx)." % [m, was]
 
 func _cmd_wasteland(args: Array) -> String:
 	if args.size() != 2:
