@@ -1575,21 +1575,55 @@ whether a fix is complete — and it is the half that goes unchecked.
 Both passed 1-2 independent skeptic passes instructed to REFUTE. **Adversarial verification
 confirms that something is there. It does not confirm what shape it is.**
 
-**⚠ The prescribed fix is a hypothesis, not a spec — verify it runs in THIS environment
-before implementing it.** Cluster H, #22: the audit prescribes recording
-`Engine.get_process_frames()` to suppress the double-action. **`get_process_frames()`
-returns 0 for an entire headless run**, so a stamp of 0 compares equal forever and the guard
-would have wedged the Esc chain shut for every subsequent press — **a worse bug than the
-finding it closes**, shipped under the audit's authority.
+**⚠ THE PRESCRIBED FIX IS THE LEAST-VERIFIED PART OF ANY FINDING.** Not "a hypothesis to
+sanity-check" — the *weakest* section of the entry, and the one most likely to do harm.
 
-The fix texts were written by reading, not by running. None was executed against this
-engine, this Godot version, or this harness. ~57 findings remain, every one carrying a
-prescription with that provenance, and this session has now departed from prescribed fixes
-in #7, #12, #21, #33 and #22 — five of the ones actually attempted.
+Rank the parts of a finding by how close their author stood to the code. The **evidence
+block** is quoted source. The **verification notes** were written by a skeptic trying to
+refute. The **description** is one author's reading. The **fix text** is the furthest out:
+prose about code that does not exist yet, written by someone who **never executed any of
+it** — not against this engine, this Godot version, or this harness.
 
-Treat a fix text as a well-informed suggestion from someone who could not run the code:
-read it, check its assumptions against the environment, and **record the departure loudly
-enough that a future reader does not "restore" the prescription.**
+**Two prescriptions this session would have shipped a bug worse than the finding:**
+
+- **#22** prescribed recording `Engine.get_process_frames()` to suppress a double-action.
+  `get_process_frames()` returns **0 for an entire headless run**, so a stamp of 0 compares
+  equal forever and the guard would have **wedged the Esc chain shut permanently**.
+- **#35** prescribed deleting NOTES entries once the work ships. That would have silently
+  removed live forward-looking tails — including **#34's own split trigger**, which lives
+  inside a section headed "Dev Console — SHIPPED", and the `MIGRATIONS` split trigger inside
+  "Schema-mismatch UX — both fixes SHIPPED". Obeyed as written, it would have deleted the
+  trigger that #34 exists to report as breached.
+
+Both were prescribed by the audit. Both were worse than the defect they closed. Neither was
+detectable by reading — only by checking the prescription's assumptions against the running
+system.
+
+**So: treat the fix text as one hypothesis among several, never as the spec.** Read it for
+what its author noticed, then decide the fix yourself from the evidence. This session has
+departed from the prescription in **#7, #12, #21, #22, #33 and #35** — six of the ones
+actually attempted. Departure is the norm here, not the exception, and **~54 findings remain,
+each carrying a prescription with the same provenance**. Record every departure loudly
+enough that a future reader does not "restore" it.
+
+### Findings carry stale COSTS as well as stale citations — re-derive both
+
+**#34 is the worked example, and it is the shape that commits a session to work it never
+scoped.** Its fix text estimates *"~30-min refactor when triggered"* for splitting
+`console.gd`. That number was written when the file was **657 lines**. It is now **1127**.
+
+Worse, the estimate measures only the mechanical move, and the prescribed two-file cut
+**is not achievable as written**: `execute` dispatches via `Callable(self, entry["fn"])`, so
+every `_cmd_*` must live on the same object as the registry — a plain `RefCounted` helper
+cannot hold them. Four things straddle the seam the plan does not mention, and 20 static
+call sites across three test files move with it.
+
+A finding that *looks* cheap and is not is more dangerous than one that looks expensive,
+because it gets picked up as filler at the end of a session and then cannot be put down
+cleanly. **Re-derive the cost the way you re-derive the citation** — before committing to a
+batch size, not after. Cheapness is a claim in the entry, and it ages exactly like a line
+number.
+
 
 **⚠ A reproduction must be verified to exercise the mechanism before its result is
 trusted.** A repro that produces nothing is indistinguishable from a fixed bug — the same
