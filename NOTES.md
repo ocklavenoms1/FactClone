@@ -1292,6 +1292,11 @@ went on to commit that exact failure:
    implementer measured the alpha distribution instead of reading the rule back and
    agreeing with it.
 
+5. **The `pre_overlay` rollback was read back and agreed with — one session after
+   recording the practice against exactly that.** Cluster G's #23 was pre-derived as
+   MIS-SHAPED on the grounds that a rollback call existed and dated to the original
+   console commit. It existed; it had never once worked. See "Age as evidence" below.
+
 **Why it keeps happening:** writing a rule creates the feeling of having handled the
 problem, and that feeling substitutes for checking. The rule is the newest, least-tested
 artefact in the repo at the moment it is written, and it is the one thing nobody thinks
@@ -1305,6 +1310,30 @@ silhouette), with nothing between 5 and 17. For a count, re-derive it from the s
 a status claim, run the command in the row.
 
 A rule you have only read is a rule you have only hoped for.
+
+### Age as evidence: a long-lived guard nothing exercises is the likeliest to be broken
+
+Cluster G, finding #23. `_cmd_place` captures `pre_overlay`, paints an overlay to retry a
+placement, and restores `pre_overlay` on failure — with a comment saying so. The rollback
+call dates to `42e46f0`, the original Dev Console commit. That age was read as evidence the
+finding was stale.
+
+**It was evidence the defect was old.** `pre_overlay` is `Overlay.NONE` on bare grass, and
+`Terrain.can_place_overlay` returns false for NONE (`terrain.gd:85-86`, "use clear path,
+not paint"). So `set_overlay(pos, NONE)` returns false and changes nothing: the rollback
+had been a silent no-op for its entire life, leaving stray Stone in the save-persisted
+`tile_modifications` dict every time a console placement failed on grass.
+
+**The inversion:** age reads as battle-tested and means unexamined. A guard that has
+survived years without a test has not been *proven*; it has been *unquestioned*, and the
+longer it sits the more confidently it gets skipped. Nothing had exercised this one, so
+nothing had ever contradicted it.
+
+This is the same family as silent compensation, one level up: **the signal that suggests
+safety is the signal that should prompt the check.** A `# this is handled` comment, a guard
+with a reassuring name, a line old enough to feel load-bearing — each is a reason to
+construct the failing case, not a reason to skip it. Applies with particular force to
+inherited defect reports: "the code already handles that" is a hypothesis.
 
 ### Corollary: `passed,` alone is not a safe signal
 
@@ -1341,6 +1370,22 @@ whether a fix is complete — and it is the half that goes unchecked.
 
 Both passed 1-2 independent skeptic passes instructed to REFUTE. **Adversarial verification
 confirms that something is there. It does not confirm what shape it is.**
+
+**⚠ A reproduction must be verified to exercise the mechanism before its result is
+trusted.** A repro that produces nothing is indistinguishable from a fixed bug — the same
+absence-equals-success shape, relocated into the verification step itself.
+
+Cluster G, #23, measured: the building proposed for the repro was SMELTER, chosen because
+it is 2×2. But `SMELTER`'s `requires_overlay` includes `Terrain.Overlay.NONE`, so it
+places on bare grass directly and **the auto-overlay code path never runs**. Following that
+brief would have produced silence, and the silence would have read as "the finding is
+closed". The buildings that actually exercise it are MIXER / OVEN / PROOFER / PACKAGER —
+2×2 *and* overlay-requiring. With MIXER both halves of the finding reproduce and compound.
+
+So the check has two steps, not one: **first confirm the case reaches the code, then read
+what it does.** Print from inside the branch, assert a precondition, or mutate the
+mechanism and watch the repro change — a repro whose result does not move when you break
+the thing it targets was never testing it.
 
 **In practice:** before closing an inherited finding, construct the failure the finding
 describes and watch it happen. If the reproduction does not match the description, *the
