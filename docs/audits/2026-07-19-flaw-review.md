@@ -86,9 +86,14 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #22 + #58 + #59 (cluster H — one Esc/input-routing unit across three files) at `dd0493b` | **27 closed / 57 live** |
 | 2026-08-25 | #80 (cluster J). **#34, #35, #36 and #77 all stay LIVE**, deliberately: #34's and #35's titles each carry a clause the edit does not reach, and #36/#77 prescribe file deletions, which are the user's call. One doc edit closed one finding and advanced four | **28 closed / 56 live** |
 | 2026-08-25 | #36 + #77 | **30 closed / 54 live** — two root plan files deleted after lifting their live tails |
+| 2026-08-25 | #19 (rating RE-CONFIRMED as MEDIUM, against this document's own mis-rating note — see the rating note below) | **31 closed / 53 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 28 + LIVE—HIGH 0 + LIVE—MEDIUM 16 + LIVE—LOW 40 = **84**.
+incrementing: CLOSED 31 + LIVE—HIGH 0 + LIVE—MEDIUM 14 + LIVE—LOW 39 = **84**.
+
+The line above this one used to read `28 + 0 + 16 + 40`, which also summed to 84 and
+was two clusters out of date in three of its four terms. **A total that still adds up
+is not evidence the addends are current** — re-count the rows, do not check the sum.
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -106,7 +111,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (30)
+### CLOSED (31)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -140,6 +145,7 @@ is closed at all.
 | 59 | backtick cannot close the console | `dd0493b` — `KEY_QUOTELEFT` arm added to `console.gd`'s `_input` match, as prescribed | `test_console_backtick_toggle.gd` (3 sub-cases) — backtick opens, backtick closes, **and the command field is still empty afterwards**; the stray `` ` `` is asserted separately because a console that closed but still typed the character would be half-fixed |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `2026-08-25` — **file deleted**, user-approved. Live tails lifted to `NOTES.md` first ("two live tails lifted"): zoom-level persistence, verified absent from `save_system.gd`. `PROJECT_LOG.md` references left intact as historical record | doc-only; no test |
 | 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `2026-08-25` — **file deleted**, user-approved. Live tails lifted first: right-click half-stack + drag-and-drop, both verified absent (`MOUSE_BUTTON_RIGHT` = 0 across the three slot files). Dangling citation at `buildings.gd:1297` rewritten | doc-only; no test |
+| 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` | `f154b88` — the prescribed delegation, taken as written (rare here); the **rating** departs from this document's mis-rating note and stays MEDIUM on measured evidence — see the rating note below | `test_inserter_chest_overfill.gd` (7 cases) — a reachability case so the overfill case's silence means something; the behavioural full-chest repro; **an item-conservation case that is the severity evidence, not a regression guard**; unit accept/refuse either side of the cap; a retention case pinning the per-stack waiver the removed comment claimed; and a chest whose state has no `"bag"` key |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -179,13 +185,12 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (15)
+### LIVE — MEDIUM (14)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1731-1741` (bad check `:1736`) — **was cited `:1598-1606`, which now lands on #30's terrain loop**. Interlocks with #38: #38's headline symptom *is* this bug |
+| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1768-1779` (bad check `:1775`), `can_place_building` at `:417-458` — **re-derived 2026-08-25 and drifted 44 lines in three days**; the row said `:1731-1741` / `:1736` on 2026-08-22 and `:1598-1606` before that, which now lands on #30's terrain loop. Interlocks with #38: #38's headline symptom *is* this bug — **both measured, see the cost note below** |
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
-| 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
@@ -204,7 +209,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | # | Finding | Today's citation |
 |---|---|---|
 | 37 | `tile_regen_progress` not cleared on load | sibling clears at `save_system.gd:724, 737, 752, 766`; **`tile_regen_progress.clear()` appears nowhere in the file** — was cited `:550-579` |
-| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:663-664` — was cited `:515-516`. Its headline symptom *is* #16; fix #16 first, then re-scope |
+| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:663-664` — was cited `:515-516`; the collapse sites it mirrors are `grid_world.gd:1092-1094` (chop_tree, was `:921-923`), `:1046-1048` (deplete_resource, was `:875-877`), `:387-388` (clear_tile). Its headline symptom *is* #16 — **confirmed by measurement, not by reading**; fix #16 first, then re-scope to dict growth. See the cost note below |
 | 39 | Harvester reassigns `b.state["buffer"]` instead of mutating | `harvester.gd:123, 163` |
 | 40 | drill pulls fuel from all 4 edges | `mining_drill.gd:119` |
 | 41 | composter recipes comment claims non-rotatable | `recipes.gd:207-208` |
@@ -335,17 +340,176 @@ the paths those messages are about; the `.bak`-recovery `push_warning` names bot
 deliberately. `_native_path` is used at exactly three sites, all dialog text, matching
 its docstring.
 
-### Severity note — #19 is arguably mis-rated
+### Rating note — #19 was RE-CONFIRMED as MEDIUM. The mis-rating note was wrong, and it was wrong in the direction of alarm
 
-`_drop_to_chest` survived the entire Inserter Arc rework **byte-shape-identical** and
-remains the only path in the game that bypasses `Chest.TOTAL_CAPACITY` — every other
-producer goes through `Chest.try_insert` (`chest.gd:77-81`), which enforces it. That
-now includes the electric tier.
+**Do not re-rate #19 to HIGH on the strength of the note this section replaces, and do
+not restore that note.** It is kept in outline below because the argument it made will
+be made again about some other finding, and because the way it failed is instructive:
+it reasoned from a consequence nobody had measured.
 
-It is rated MEDIUM, but the outcome is item duplication or destruction depending on
-which side of the bypass you land on, and `BLOCKED_AT_DEST` never fires for chests as
-a result. That is HIGH-shaped. Re-rate when fixing rather than inheriting the
-severity from a document that also claimed it was fixed.
+**What the old note said.** `_drop_to_chest` survived the entire Inserter Arc rework
+byte-shape-identical and was the only path in the game bypassing `Chest.TOTAL_CAPACITY`
+— every other producer goes through `Chest.try_insert` (`chest.gd:77-81`). Both halves
+of that are TRUE and were re-verified at closure: the sole-bypass claim holds against
+`processor.gd:345/360`, `harvester.gd:83`, `mining_drill.gd:252`, and every player path
+in `chest_panel.gd` (`:182`, `:212`, `:235`) gates on `Chest.free_capacity`. So does
+`Chest.tick` (`chest.gd:86`). The inserter really was the only writer that never asked.
+
+It then concluded: *"the outcome is item duplication or destruction depending on which
+side of the bypass you land on … That is HIGH-shaped."* **That sentence is the error.**
+Neither outcome occurs. Measured at closure with an item-accounting case
+(`test_inserter_chest_overfill.gd` case 3): 2450 items before a 200-tick run into a
+chest already at 2400, 2450 after — 2409 in the destination, 40 in the source, 1 on the
+arm. One item leaves the source, one arrives. **Nothing is duplicated and nothing is
+destroyed; the items are stored past a soft cap.** Those are three different severities
+and the finding asserted the first two without showing which.
+
+**Against this document's own taxonomy, that lands on MEDIUM and not HIGH:**
+
+- HIGH is *player-visible breakage or item loss*. There is no item loss — the
+  conservation case is what rules it out, and it is retained in the suite for exactly
+  that reason even though it passes on both sides of the fix. Nor is anything broken:
+  no wedge, no crash, and `Chest.drain_into` still returns every item to the player.
+- MEDIUM is *real defects, edge-case or workflow-level*. The broken invariant is real
+  and the codebase leans on it in three places (`ChestPanel`'s deposit gates, the fill
+  bar, `Chest.tick`'s early-out). It is workflow-level: an inserter-fed chest is an
+  infinite sink, so the backpressure a factory build depends on — inserter stalls,
+  upstream belt backs up — never arrives. And it is edge-case: 2400 items must first
+  reach one chest through an inserter.
+- LOW is *minor bugs, conventions, perf, doc drift*. None of those describe it.
+
+**One correction to the finding's own symptom claim.** It says the overfill is
+invisible because "the fill bar clamps at 100% while the real count keeps climbing".
+Half right, and the half that is wrong matters to anyone re-deriving severity: the
+in-world sprite's fill bar does clamp (`chest.gd:155`, `clamp(..., 0.0, 1.0)`), but
+**both text readouts print the raw total** — `Chest.info_lines` (`chest.gd:129`) and
+`ChestPanel`'s capacity header (`chest_panel.gd:56`) would show `2409 / 2400`. The
+overfill is hidden on the map and plainly visible in the panel.
+
+**Where anything WAS destroyed — and the audit did not find it.** Not on the overfill
+path at all: on a chest whose `state` carries no `"bag"` key. `state.get("bag", [])`
+returns the *default literal*, so the old body appended into a temporary, returned
+true, and the caller's `_clear_held` discarded the item. Reachable through
+`Building.from_dict` (`building.gd:49-58`), which passes a save's `"s"` dictionary
+through unchanged whenever it is a Dictionary — `#11`/`R3` territory. The delegation
+closes it incidentally, because `try_insert` reaches the bag through `Chest._bag`,
+which repairs the shape. Pinned as case 7.
+
+**The general lesson, which is why this note is as long as it is.** The mis-rating note
+was itself written by a pass standing further from the code than the finding it
+critiqued, and it inherited the finding's unmeasured consequence while sounding more
+certain than the finding did. **A severity claim is a claim about a consequence, so it
+carries exactly the provenance problem the fix text does** — see the "reproduce the
+described consequence" protocol in `NOTES.md`. Re-rating on evidence was the right
+instruction; the note's own answer was not evidence.
+
+### Coverage note — `Chest.try_insert`'s capacity guard was untested until #19 closed
+
+Worth recording separately, because it explains how a bypass survives four sessions of
+rework. Mutating `chest.gd:78` from `if free_capacity(b) < count:` to `if false:`
+reddens **only** `test_inserter_chest_overfill.gd` — all 66 pre-existing suites stay
+green. The aggregate cap that three producers and every panel path rely on had no test
+anywhere in the tree; the finding's own verification notes said as much for the
+inserter side and it was true of the enforcement point too.
+
+The converse mutation is the useful one for anyone touching this again. Making
+`_drop_to_chest` `return false` unconditionally reddens **three** pre-existing suites —
+`test_inserter.gd`, `test_electric_inserter.gd`, `test_electric_rig.gd`. So the suite
+did depend on this function returning true *when the chest has room*, which the fix
+preserves; nothing depended on it returning true *when the chest is full*, which is why
+closing this changed no existing expectation. Those are different halves of "always
+true" and only one of them was load-bearing.
+
+**And the mutation that would have shipped a worse bug than the finding**, recorded
+because it is the shape the fix text invites: keeping the cap check but discarding its
+answer — `Chest.try_insert(chest, item, 1)` followed by `return true` — reddens the
+conservation case with **2450 before, 2441 after**. Nine items destroyed outright. A
+half-applied version of this fix is strictly worse than the defect it replaces, and the
+only assertion that catches it is the one that looks redundant.
+
+### Cost note — #16 and #38 priced 2026-08-25, both still reproduce, neither implemented
+
+Scoped only. **Both were RUN, not read**: a throwaway probe suite built a seeded world,
+evaluated the hover predicate at `grid_world.gd:1775` and `can_place_building` over the
+same cells, chopped a tree, and round-tripped through `save_game` + `load_game`. The
+probe was deleted afterwards; its numbers are below so nobody has to rebuild it.
+
+**#16 reproduces in BOTH directions the title claims.** Measured:
+
+```
+stone overlay (5,5), BELT   : preview_blocked=true   can_place=true    <- legal, previews RED
+bare grass    (7,5), BELT   : preview_blocked=false  can_place=false   <- illegal, previews WHITE
+                              ("Belt needs: Stone, Path, Tilled Soil")
+bare grass    (7,5), INSERTER: preview_blocked=false can_place=true    <- agrees (accepts Overlay.NONE)
+```
+
+Only buildings that accept `Overlay.NONE` ever agree with the preview, and only on
+unprepared ground. Everything a player builds on paved ground previews red and places
+fine.
+
+**⚠ The real cost of #16 is not the delegation — it is that the predicate is not
+testable where it lives, and the fix text does not mention this.** The loop sits inline
+inside `GridWorld._draw`, and `NOTES.md` records that no `CanvasItem` can be
+render-tested headless. The prescribed three-line swap is therefore **unverifiable as
+prescribed**: it would ship green with no test able to touch it, which is this project's
+named silent-compensation shape. Honest shape of the work: extract the predicate to a
+named method (`hover_preview_blocked(t, pos)`), have `_draw` call it, delegate its body
+to `can_place_building`, then test the method. Roughly **-9 / +6 lines in `grid_world.gd`
+plus a new suite**, not a one-line swap.
+
+Two secondary points, both checked:
+
+- The prescription's `last_building_place_error` save/restore is **defensive, not
+  required**. `_draw` would clobber the string every frame, but both readers consume it
+  synchronously in the same call as the failed placement (`main.gd:1021-1022`,
+  `console.gd:830-831` / `:857-858`), so no frame intervenes. Keep it anyway — it costs
+  two lines and it stops a future asynchronous reader from becoming a mystery.
+- Per-frame cost is real but small: `can_place_building` allocates via
+  `_footprint_cells` (`:405-411`) and `Buildings.requires_overlay`, once per frame while
+  holding a building. Against `_draw`'s existing 14,606-iteration terrain loop
+  (`:1619`, finding #30) it does not register.
+
+**#38's headline symptom is #16's bug, and the interlock claim HOLDS.** Measured on one
+chopped tree at (197, -107):
+
+```
+LIVE            : tiles.has=false  preview_blocked=false  can_place=true   <- agree
+after F5 + F9   : tiles.has=true   preview_blocked=TRUE   can_place=true   <- diverge
+rehydrated tile : base=0 overlay=0 resource=0  (== DEFAULT_BASE / DEFAULT_OVERLAY / DEFAULT)
+```
+
+`can_place_building` returns true on both sides, so once the preview delegates to it the
+red footprint disappears and **#38's stated symptom dissolves entirely**. Confirmed that
+nothing else observable depends on the rehydrated entry: the other bare `tiles.has()`
+readers (`main.gd:1118`, `:1151`, `:1195`) each follow with a `resource_node` test that a
+default tile fails harmlessly.
+
+**What is left of #38 if #16 lands, and it is still worth a finding — barely, at LOW:**
+
+1. **Dict growth, measured at exactly +1 per collapsed tile** (live `tiles` 14,606 →
+   post-load 14,607, with 1 pure-default `tile_modifications` entry). Permanent for ore,
+   and it feeds `grid_world.gd:1619` — the per-frame `_draw` loop of finding #30. Every
+   chopped-to-default tile buys one wasted iteration per frame, forever, rendering a
+   grass tile identical to the one the default would have drawn.
+2. **The title's own claim** — post-load state is not identical to the equivalent live
+   session — stays literally true and is unpinned by any test. That is the durable half;
+   the preview was only its most visible symptom.
+
+**#38's fix is genuinely small and the prescription is correct**, which is rare enough
+here to record. Three lines at `save_system.gd:663-665`: keep the
+`tile_modifications[pos]` write unconditional, and branch the `tiles[pos]` write into an
+`erase` when the tile collapses to all three defaults. **The prescription is right that
+an `erase` is required rather than skipping the insert** — `WorldGenerator.generate` has
+already written the canonical `TREE` tile at that position, so a bare skip would restore
+every chopped tree on load, a strictly worse bug. Checked separately, and the fix text
+does not mention it: tree **regrowth is unaffected**, because `_restore_tree`
+(`grid_world.gd:1113`) *assigns* `tiles[pos]` rather than mutating an existing entry, so
+an erased key is not a null dereference waiting to happen.
+
+**Ordering:** #16 first — it is the one with a player-facing symptom and it dissolves
+#38's. Do not batch them as one unit; they share a symptom, not a mechanism, and #38's
+remaining argument is a perf/state-identity one that should be re-scoped against #30
+rather than against #16.
 
 ### Verification note — #23's rollback was nearly closed as "never true"
 
