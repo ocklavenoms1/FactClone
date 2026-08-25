@@ -43,9 +43,8 @@ code ran and which branch it took; it cannot prove what appeared on screen.**
 `:101` for both when this pass was written; four suites added on 2026-08-24
 moved them, and they were never one line to begin with.) `_ready` *can* be a coroutine in Godot 4, so the loop
 could `await`. The obstacle is not structural; it is that awaiting a
-non-coroutine emits a warning, and this project treats warnings as errors (see
-below), so `await test_class.run(...)` across all 57 existing synchronous suites
-would need care. An opt-in second entry point (`run_async`, dispatched only when
+non-coroutine emits a warning, so `await test_class.run(...)` across every existing
+synchronous suite would need care. An opt-in second entry point (`run_async`, dispatched only when
 `test_class.has_method("run_async")`) sidesteps that without touching 57 files.
 
 ### The recording-canvas route is CLOSED, and that is worth knowing
@@ -59,14 +58,24 @@ class "CanvasItem". This won't be called by the engine and may not work as
 expected. (Warning treated as error.)
 ```
 
-A `Node2D` subclass cannot shadow `draw_rect`/`draw_texture_rect` under this
-project's warnings-as-errors setting. And `Buildings.draw_one(b, canvas: CanvasItem,
-…)` types the parameter, so a plain `RefCounted` recorder cannot be substituted
-either.
+A `Node2D` subclass cannot shadow `draw_rect`/`draw_texture_rect`. And
+`Buildings.draw_one(b, canvas: CanvasItem, …)` types the parameter, so a plain
+`RefCounted` recorder cannot be substituted either.
 
-**Do not spend a session discovering this.** Loosening the parameter type purely
-for testability is a real option, but it is a production change made for a test,
-and it should be a conscious decision rather than a side effect.
+**⚠ CORRECTED 2026-08-24 — this was originally attributed to "this project's
+warnings-as-errors setting". That setting does not exist.** `project.godot` contains
+no `debug/gdscript/warnings/*` block at all; verified by grep, and an unused local
+produces neither an error nor a printed warning. What actually happens is that Godot 4
+defaults the **`NATIVE_METHOD_OVERRIDE`** warning specifically to *error* level.
+
+That distinction matters, because it makes this route **less foreclosed than recorded**:
+an engine default can be relaxed per-file with `@warning_ignore`, where a project-wide
+policy could not be. Anyone costing route B or D should confirm the current behaviour
+rather than inherit "it is impossible" from this document.
+
+**Do not spend a session re-deriving this.** Loosening the parameter type purely
+for testability is still a real option, and still a production change made for a test
+— a conscious decision rather than a side effect.
 
 ---
 
