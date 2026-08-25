@@ -78,6 +78,11 @@ const TESTS: Array = [
 	# renders, so a broken asset otherwise looks like a working game.
 	preload("res://scripts/tests/test_sprite_anchor.gd"),
 	preload("res://scripts/tests/test_sprite_manifest.gd"),
+	# Pure-data assertions about things that are only ever seen, never computed
+	# with: the per-tier body colours, and the state→string map behind the
+	# inserter panel's status line. Neither needs a frame — see
+	# docs/scoping/visual-verification.md, route A.
+	preload("res://scripts/tests/test_inserter_body_colours.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
