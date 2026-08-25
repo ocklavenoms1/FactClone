@@ -78,6 +78,11 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-23 | #11 | **14 closed / 70 live** |
 | 2026-08-23 | #13 | **15 closed / 69 live** |
 | 2026-08-23 | #21 (narrowed — see below) | **16 closed / 68 live** |
+| 2026-08-25 | #62 (closed at `26f5066` on 2026-08-24; recorded here a day late) | **17 closed / 67 live** |
+| 2026-08-25 | #23 + #24 + #47 + #79 (cluster G, one file) | **21 closed / 63 live** |
+
+Arithmetic for the row above, re-derived by counting table rows rather than by
+incrementing: CLOSED 21 + LIVE—HIGH 0 + LIVE—MEDIUM 20 + LIVE—LOW 43 = **84**.
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -95,7 +100,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (16)
+### CLOSED (21)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -115,6 +120,11 @@ is closed at all.
 | 11 | load_game indexes save arrays without shape validation | `61de9ee` + `7a86195` | `test_load_malformed_save.gd` (10 sub-cases). **Two commits, deliberately.** `61de9ee` closed the *mechanism* the title names — unguarded array indexing. But the title also names a *consequence*, "crashes load instead of triggering the fresh-world fallthrough", and that stayed reachable through two non-array shapes (`player_progression` as a non-Dictionary; a building whose `"s"` is a String) until `7a86195`. Marking this CLOSED at `61de9ee` alone was premature — see R2. |
 | 13 | F9 quick-load leaves vision and the map stale | `9508d3f` — the fix text's optional shared helper taken as mandatory; see the entry below | `test_quick_load_refresh.gd` (3 sub-cases) |
 | 21 | forward-incompat save armed for destruction | `1198233` — **scoped down to one of the three cases it named**; see the scoping note below | `test_forward_incompat_save.gd` (9 sub-cases) |
+| 62 | `tick_speed` reads "was" after assignment | `26f5066` — **closed 2026-08-24; this table did not say so until 2026-08-25.** The #83 pattern again: fixed on main, not recorded | `test_console.gd:110-116` — asserts `(was 2.00x)` after setting 2.0 then 4.0, so a message that echoes the new value reads "was 4.00" and reddens |
+| 23 | console `place` paves anchor only; leaves stray STONE on failure | `dafd174` — **both halves were real; see the note below on the derivation that nearly closed the second one unfixed** | `test_console_guards.gd` — `place mixer 5 5` must succeed on bare grass, and a failed `place pump 10 10` must leave overlay NONE and no `tile_modifications` record |
+| 24 | unbounded radius in `deplete_area` / `tile` | `dafd174` — MEDIUM rating re-confirmed rather than inherited; see the rating note below | `test_console_guards.gd` — a radius-6000 sweep must finish inside 2 s, an int64-max radius must still report the whole world, and `tile 0 0 17` must be refused |
+| 47 | `set_soil` doesn't clear wasteland | `dafd174` | `test_console_guards.gd` — after `wasteland 3 3` + `set_soil 3 3 100` the tile must not be wasteland, LOW compost must be accepted, and a planter on it must grow |
+| 79 | console.gd header says 12 commands; registry has 13 | `dafd174` — the count was **14**, not 13; the finding understated it by one | `test_console_guards.gd` — parses the header and compares count AND names to `_register_commands()` |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -154,7 +164,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (22)
+### LIVE — MEDIUM (20)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -166,8 +176,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 22 | one Esc press performs two actions | `map_panel.gd:274-276` (was `:243-245`), `console.gd:180-182` (accurate), `main.gd:691-703` (was `:611-622`). One unit with #58 + #59 |
-| 23 | console `place` paves anchor only; leaves stray STONE on failure | `console.gd:625-639` |
-| 24 | unbounded radius in `deplete_area` / `tile` | `console.gd:550-562, 743-744, 782-812` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
 | 27 | bag-cap phases assert an in-test mirror of production logic | `test_bag_cap.gd:20-21, 108-115` |
@@ -177,11 +185,11 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
 | 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | active-tiles rebuild `grid_world.gd:1223-1232`, keys snapshot `:1239`, call site `:1190` — **was cited `:1128-1149`, which now lands on `wood_yield_for_tree`**. Partly closed by #31; same unit as #29 |
 | 33 | per-tick transient allocations in processor pull/push | `processor.gd:101-102, 119, 126`; `buildings.gd:936-956` |
-| 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is 812 lines. **Same edit as #80** — both resolve to `NOTES.md:773` + `:777`, at different severities. Fix as one; see R3's pattern note |
+| 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is **1068** lines as of 2026-08-25 — was 812 here, and cluster G's own fixes and comments are part of why it moved. Stays LIVE and is worse than the row said. **Same edit as #80** — both resolve to `NOTES.md:773` + `:777`, at different severities. Fix as one; see R3's pattern note |
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
 
-### LIVE — LOW (46)
+### LIVE — LOW (43)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -195,7 +203,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 44 | composter header claims non-rotatable (dup #41) | `composter.gd:15, 69` |
 | 45 | fallback-lake exclusion tests only the anchor | `world_generator.gd:448` |
 | 46 | regen accumulators bleed on load (dup #37) | same site as #37 — was cited `:550-579` |
-| 47 | `set_soil` doesn't clear wasteland | `console.gd:527-531` |
 | 48 | `deplete_planter_area` writes out-of-world tiles | `grid_world.gd:703-710, 734-741` |
 | 49 | `_neighbor_falloff_cost` floors at 1 | `grid_world.gd:719-720` |
 | 50 | spawn sort lacks a tie-break | `main.gd:540-543` — was cited `:460-462` |
@@ -209,7 +216,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 59 | backtick cannot close the console | `main.gd:878-881` (was `:802-805`); `console.gd:162-180`. One unit with #22 + #58 |
 | 60 | F11 demo writes tiles bypassing `tile_modifications` | `main.gd:1547` — was cited `:1463-1464` |
 | 61 | `on_impassable` escape valve permits free water walking | `player.gd:82` |
-| 62 | `tick_speed` reads "was" after assignment | `console.gd:707-708` |
 | 63 | runner restores neither `save_path` nor tick rate | **no restoration exists** — `SaveSystem.save_path` appears in `test_runner.gd` only in comments (`:121-124`, `:167-168`), and `tick_rate_multiplier` not at all. Was cited `:80-83`. Scope is **21** suites overriding `save_path`, not the 10 the body claims |
 | 64 | hotbar cycling / disabled-slot / map / minimap have zero coverage | `hotbar.gd:277, 374` |
 | 65 | cursor backward-compat test is a tautology | `test_building_ui.gd:278-283` |
@@ -226,7 +232,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 76 | soil arc says "migration framework still queued" | `NOTES.md:841` vs `:793` |
 | 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `INVENTORY_UI_PLAN.md:7` |
 | 78 | CONVENTIONS layout lists `assets/`, omits `tools/` + `addons/` | `CONVENTIONS.md:65` |
-| 79 | console.gd header says 12 commands; registry has 13 | `console.gd:19-20` vs `:344-407` |
 | 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | `NOTES.md:767, 769, 773`. **Same edit as #34** (MEDIUM) — duplicate at different severities. Also pairs with #79: same command count, two files |
 | 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:1139` — was cited `:998, 1000, 1039`. **21 is correct** (26 `*_panel.gd` minus 5 non-building-specific); see the baselines block |
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1146` (was `:1007`) vs `:834`. **Understated by one, not two** — the real count is 12; the baselines block briefly said 13 and was wrong |
@@ -336,6 +341,93 @@ which side of the bypass you land on, and `BLOCKED_AT_DEST` never fires for ches
 a result. That is HIGH-shaped. Re-rate when fixing rather than inheriting the
 severity from a document that also claimed it was fixed.
 
+### Verification note — #23's rollback was nearly closed as "never true"
+
+**Do not re-open #23's second half as a mistake, and do not restore
+`set_overlay(pos, pre_overlay)` as the rollback.** Both halves of #23 were real. This
+note exists because the second half was *nearly* dismissed, by a reading that is
+correct about the code and wrong about what it does.
+
+The reading went: the finding says a failed `place` "leaves stray STONE", but
+`pre_overlay` is captured before the paint and restored after, with the comment
+"Restore overlay; placement still fails for some other reason." `git log -S` on that
+comment returns `42e46f0`, the console's first commit. So the restore has existed
+since day one, and the finding was never true.
+
+Every sentence of that is accurate. The conclusion is wrong, because the restore
+never *ran*. `pre_overlay` is `Overlay.NONE` on bare grass, and
+`Terrain.can_place_overlay` returns false for NONE (`terrain.gd:85-86` — "use clear
+path, not paint"), so `set_overlay(pos, NONE)` returns false and changes nothing.
+Measured, on 2026-08-25, before any fix:
+
+```
+`place pump 10 10` (no water anywhere) -> Cannot place Pump at (10, 10): Pump needs: Stone, Path
+after : overlay(10,10)=Stone  has_building=false
+after : tile_modifications.has((10,10))=true  (this dict is save-persisted)
+set_overlay((10,10), NONE) returned false  last_place_error='Can't place (none) on Stone'
+```
+
+The age of the line was evidence *for* the defect, not against it: the restore had
+been failing silently for its whole life. This is the project's named
+silent-compensation shape — an absence indistinguishable from a success — and the
+only thing that separated the two readings was running it.
+
+Two smaller notes for whoever revisits this:
+
+- **`SMELTER` is the wrong building to reproduce it with.** It is 2×2, which makes it
+  look like the right choice for the anchor-only half, but its `requires_overlay`
+  includes `Overlay.NONE`, so it places on bare grass directly and the auto-overlay
+  path never runs. `MIXER` / `OVEN` / `PROOFER` / `PACKAGER` are the 2×2 buildings
+  that require an overlay. A repro attempt with SMELTER shows nothing happening and
+  reads exactly like a closed finding.
+- The console also reported the *pre-paint* failure reason after paving — telling you
+  the Pump "needs: Stone, Path" on a tile the console had just given Stone. Fixed in
+  the same commit and pinned by the same test; not a separate finding, and not
+  something to "restore" to its old message.
+
+### Rating note — #24 was re-confirmed as MEDIUM, not inherited
+
+The MEDIUM/LOW scoping pass flagged #24 as possibly over-rated because the console is
+debug-build-gated (`main.gd:877`, `OS.is_debug_build()`), so no shipped player build
+can reach it. That is true and it is the right question to have asked. The rating
+still stands, for a reason internal to this document's own taxonomy:
+
+- HIGH is defined here as *player-visible breakage or item loss*. The debug gate
+  removes #24 from HIGH — correctly, and that is the whole of what the gate buys.
+- MEDIUM is defined as *real defects, edge-case or **workflow-level***. #24 is
+  squarely workflow-level: a mistyped radius freezes the main thread for a measured
+  ~4.5 minutes at `9999` and ~755 hours at `999999` (0.17 µs/cell × (2r+1)² on this
+  machine), recoverable only by killing the process, which discards whatever
+  unsaved world the console was being used to set up. The console exists to build
+  throwaway state quickly; that state is precisely what is lost.
+- LOW is *minor bugs, conventions, perf, doc drift*. None of those describe it.
+
+So the gate moves it out of HIGH and does not move it out of MEDIUM. Recorded because
+"it's dev-only" is an argument that will be made again, and it is only half right.
+
+### Approach note — #79 was closed with a test, not a corrected number
+
+**Do not "simplify" `test_console_guards.gd`'s header check away, and do not delete
+the header's command list as unnecessary duplication.** Correcting "12" to "14" was
+the obvious fix and was rejected: the finding is not that the number was wrong, it is
+that nothing could tell. A corrected number drifts again on the next command, which
+is how it got to be wrong by two.
+
+The two candidate fixes were (a) delete the count and point at the registry as the
+single source of truth, and (b) keep the list and assert it against the registry.
+(a) makes being wrong impossible by removing the claim; (b) makes being wrong loud.
+(b) was chosen because it keeps the at-a-glance inventory that made the header worth
+having *and* because the loud option generalises — the same test now also catches a
+name added to one side and not the other, which (a) cannot do since it has nothing
+to compare.
+
+The guard was mutation-tested against its own failure mode, which for a
+comment-parsing test is finding nothing and agreeing with itself. Renaming the header
+from `COMMANDS (14):` to `Command list (14):` makes it fail with *"expected exactly
+one … header line … found 0"*, not pass. That check was not theoretical: the first
+version of the regex did not allow the header's `-` bullet, and the test caught its
+own parser before it caught anything else.
+
 ### Current baselines for count-type findings
 
 **Re-derive these before citing one. A bare number here is exactly the drift that
@@ -364,11 +456,24 @@ parse, never what the writer emits.
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **55** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
-| console **13** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
-| `console.gd` **812** lines | `wc -l < scripts/ui/console.gd` |
+| **61** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| console **14** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
+| `console.gd` **1068** lines | `wc -l < scripts/ui/console.gd` |
 | **12** ProcessorPanel subclasses | `grep -rlc '^extends ProcessorPanel' scripts/ui/*.gd \| wc -l` |
 | **21** building-specific panels | `ls scripts/ui/*_panel.gd \| wc -l` = 26, minus the 5 that are not building-specific: `building_panel`, `processor_panel` (base classes), `info_panel`, `inventory_panel`, `map_panel` |
+
+**Re-derived 2026-08-25 at cluster G, by running all three commands, not by
+incrementing.** Every row that touches `console.gd` or the runner had drifted, and two
+of the three were drifting in the same document that tracks drift:
+
+- test suites **55 → 61**. Fifty-five was five behind before this session added
+  `test_console_guards.gd`; the runner's own pass count (`61 passed`) equals the
+  number of registered files, so the two can be cross-checked in one line.
+- console commands **13 → 14**. This is finding #79's own number, and it was
+  understated here too — `sprites` and `wasteland` both post-dated it.
+- `console.gd` lines **812 → 1068**. That figure feeds finding #34's split trigger
+  (~800 lines), which is now breached by 268 rather than by 12. #34 stays LIVE and
+  is scoped harder than the number in it suggests.
 
 **Correction, 2026-08-24 — this block was wrong when written, in both rows.** It is
 recorded rather than quietly fixed, because a block whose whole purpose is stopping
