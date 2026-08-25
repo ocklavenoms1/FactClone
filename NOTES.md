@@ -1606,6 +1606,41 @@ actually attempted. Departure is the norm here, not the exception, and **~54 fin
 each carrying a prescription with the same provenance**. Record every departure loudly
 enough that a future reader does not "restore" it.
 
+### A severity claim is a claim about a consequence — and inherits the same provenance
+
+**#19 is the worked example, and the bad claim was one I wrote.** Early in the re-application
+session I recorded a mis-rating note in the tracker: #19 is rated MEDIUM but "the outcome is
+item duplication or destruction depending on which side of the bypass you land on", which is
+HIGH-shaped. I then repeated it in briefs as established fact.
+
+**Measured: neither happens.** Item accounting across a full-chest overfill is **2450 before,
+2450 after** — one leaves the source, one arrives at the destination. Nothing is duplicated
+and nothing is destroyed. The real behaviour is the third option nobody named: items are
+**stored past a soft cap**, so an inserter-fed chest becomes an infinite sink and backpressure
+never arrives. That is workflow-level, and **MEDIUM was right all along**.
+
+Severity is not metadata. **It is a compressed claim about a consequence**, and it comes from
+the same place a fix text does — someone reasoning about code they did not run. "Duplication
+or destruction" was written from the shape of the bypass, not from counting items. Re-rate by
+**measuring the outcome**, and when you overturn a rating, replace the old note rather than
+appending to it, so the next reader hits the correction before the claim.
+
+(The audit did miss one genuine destruction path here, in a place it never looked: a chest
+whose state has no `"bag"` key. `state.get("bag", [])` returns the *default literal*, so the
+append lands in a temporary and the item is discarded. Closed incidentally by delegating to
+`Chest.try_insert`, which repairs the shape through `Chest._bag`.)
+
+### A partly-applied fix can be worse than the defect
+
+Same finding, mutation M1: delegate to `Chest.try_insert` **but keep `return true`**. Result
+— conservation breaks, **2450 → 2441, nine items destroyed**. The unfixed code merely
+overfilled; the half-fixed code silently deletes.
+
+Fixes are not monotone. "Some of the fix" is not "some of the benefit", and a partial
+application can move a defect from harmless-but-wrong into the class the finding only claimed
+it was in. Land the whole change or none of it, and mutation-test the halves — M1 exists
+precisely because the half-state is reachable by a plausible edit.
+
 ### Findings carry stale COSTS as well as stale citations — re-derive both
 
 **#34 is the worked example, and it is the shape that commits a session to work it never
