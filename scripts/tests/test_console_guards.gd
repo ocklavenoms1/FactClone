@@ -52,7 +52,7 @@ extends RefCounted
 ## tile kept refusing planters and bouncing LOW/MID compost.
 ##
 ## ---------------------------------------------------------------------------
-## #79 — the header's command list
+## #79 / #80 — every prose copy of the command list must match the registry
 ## ---------------------------------------------------------------------------
 ## console.gd's header said "12 commands" and named twelve; the registry held
 ## fourteen. Correcting the number would have re-created the finding the next
@@ -60,13 +60,23 @@ extends RefCounted
 ## enough to have a name for it. So the header is parsed here and checked
 ## against `_register_commands()`, count AND names.
 ##
-## The parser fails LOUD, never open. If the header block is missing, appears
+## #80 is the same fact, third copy: `NOTES.md`'s Dev Console section carried its
+## own "12 commands" status line and its own twelve-name list, and was the one
+## copy nobody could check. Rather than guard console.gd and leave NOTES to drift
+## again, both prose copies are parsed by the same code below — see
+## `_command_inventory_sources()`. Adding a fourth copy means adding a row there;
+## that is the intended cost of writing the number down a fourth time.
+##
+## The parser fails LOUD, never open. If a header block is missing, appears
 ## twice, or is reformatted past recognition, this test fails rather than
-## finding nothing and agreeing with itself.
+## finding nothing and agreeing with itself. That failure mode is the one this
+## family of findings is actually about, so it is asserted rather than assumed:
+## each source is required to match EXACTLY once in its own file.
 
 const ConsoleScript = preload("res://scripts/ui/console.gd")
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const CONSOLE_PATH: String = "res://scripts/ui/console.gd"
+const NOTES_PATH: String = "res://NOTES.md"
 
 ## Wall-clock ceiling for the whole-world deplete_area sweep, in microseconds.
 ##
@@ -87,7 +97,7 @@ const SWEEP_RADIUS: int = 6000
 const TILE_GRID_RADIUS_MAX: int = 16
 
 static func test_name() -> String:
-	return "console guards (place footprint + rollback, radius bounds, set_soil wasteland, header inventory)"
+	return "console guards (place footprint + rollback, radius bounds, set_soil wasteland, command inventory in console.gd + NOTES.md)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -291,27 +301,78 @@ static func _test_set_soil_clears_wasteland(parent: Node, failures: Array) -> vo
 	_teardown(console, world)
 
 # ---------------------------------------------------------------------------
-# #79 — the header's command list must match the registry
+# #79 / #80 — every prose copy of the command list must match the registry
 # ---------------------------------------------------------------------------
 
-## Header shape this parses:
-##     ##   - COMMANDS (14): clear, deplete_area, destroy, fertilize, give,
-##     ##     help, place, ... wasteland.
-## The name list continues across `##` lines until one ends in a period.
+## Continuation lines a name list may wrap onto before the parser gives up and
+## fails. Only the console.gd form wraps; the NOTES.md form declares `cont` as
+## "" and must terminate on its own line.
 const HEADER_CONTINUATION_MAX: int = 6
 
+## The prose copies of the command inventory, one row each.
+##
+##   `path`  file to read
+##   `head`  regex with two groups: (1) the claimed count, (2) the first chunk
+##           of the name list
+##   `cont`  regex whose group 1 continues the name list onto the next line, or
+##           "" if the list must fit on one line
+##   `shape` human-readable form, quoted verbatim in the failure message so a
+##           reader who reformatted the line knows what the parser wanted
+##
+## Names are compared after stripping backticks, so the markdown copy can be
+## written the way markdown is normally written.
+static func _command_inventory_sources() -> Array:
+	return [
+		{
+			"path": CONSOLE_PATH,
+			"head": "^##\\s+-\\s+COMMANDS \\((\\d+)\\):\\s*(.*)$",
+			"cont": "^##\\s+(\\S.*)$",
+			"shape": "##   - COMMANDS (N): name, name, ... name.",
+		},
+		{
+			"path": NOTES_PATH,
+			"head": "^\\*\\*Commands \\((\\d+)\\):\\*\\*\\s*(.*)$",
+			"cont": "",
+			"shape": "**Commands (N):** `name`, `name`, ... `name`.",
+		},
+	]
+
 static func _test_header_inventory(failures: Array) -> void:
-	var f = FileAccess.open(CONSOLE_PATH, FileAccess.READ)
+	var console = ConsoleScript.new()
+	console._register_commands()
+	var actual_names: Array = console._commands.keys()
+	actual_names.sort()
+	console.free()
+
+	# Asserted, not assumed: if the registry itself came back empty, every
+	# comparison below would be against nothing and a doc that claimed nothing
+	# would pass. The count is not hardcoded here — only its non-emptiness — so
+	# this stays true when a command lands.
+	_check(failures, actual_names.size() > 0,
+		"_register_commands() produced no commands — every doc check below would be vacuous")
+	if actual_names.is_empty():
+		return
+
+	for source in _command_inventory_sources():
+		_check_command_inventory(source, actual_names, failures)
+
+static func _check_command_inventory(source: Dictionary, actual_names: Array, failures: Array) -> void:
+	var path: String = String(source["path"])
+	var shape: String = String(source["shape"])
+
+	var f = FileAccess.open(path, FileAccess.READ)
 	if f == null:
-		failures.append("could not open %s to check the header inventory" % CONSOLE_PATH)
+		failures.append("could not open %s to check its command inventory" % path)
 		return
 	var lines: PackedStringArray = f.get_as_text().split("\n")
 	f.close()
 
 	var head := RegEx.new()
-	head.compile("^##\\s+-\\s+COMMANDS \\((\\d+)\\):\\s*(.*)$")
+	head.compile(String(source["head"]))
+	var cont_pattern: String = String(source["cont"])
 	var cont := RegEx.new()
-	cont.compile("^##\\s+(\\S.*)$")
+	if cont_pattern != "":
+		cont.compile(cont_pattern)
 
 	var matches: Array = []
 	for i in range(lines.size()):
@@ -321,14 +382,14 @@ static func _test_header_inventory(failures: Array) -> void:
 	# Loud on absence and on ambiguity. A parser that finds nothing and reports
 	# success is the failure this whole finding is about.
 	if matches.size() != 1:
-		failures.append("expected exactly one '##   - COMMANDS (N): ...' header line in %s, found %d — if the header was reformatted, update this parser rather than deleting the claim" % [CONSOLE_PATH, matches.size()])
+		failures.append("expected exactly one '%s' line in %s, found %d — if the line was reformatted, update this parser rather than deleting the claim" % [shape, path, matches.size()])
 		return
 
 	var start: int = int(matches[0][0])
 	var claimed_count: int = int(matches[0][1])
 	var text: String = String(matches[0][2]).strip_edges()
 	var consumed: int = 0
-	while not text.ends_with(".") and consumed < HEADER_CONTINUATION_MAX:
+	while cont_pattern != "" and not text.ends_with(".") and consumed < HEADER_CONTINUATION_MAX:
 		consumed += 1
 		var idx: int = start + consumed
 		if idx >= lines.size():
@@ -338,28 +399,22 @@ static func _test_header_inventory(failures: Array) -> void:
 			break
 		text += " " + String(cm.get_string(1)).strip_edges()
 	if not text.ends_with("."):
-		failures.append("the COMMANDS header name list did not terminate in a period within %d continuation lines; got '%s'" % [HEADER_CONTINUATION_MAX, text])
+		failures.append("%s: the command name list did not terminate in a period (expected '%s'); got '%s'" % [path, shape, text])
 		return
 
 	var claimed_names: Array = []
 	for raw in text.substr(0, text.length() - 1).split(","):
-		var n: String = String(raw).strip_edges()
+		var n: String = String(raw).replace("`", "").strip_edges()
 		if n != "":
 			claimed_names.append(n)
 	claimed_names.sort()
 
-	var console = ConsoleScript.new()
-	console._register_commands()
-	var actual_names: Array = console._commands.keys()
-	actual_names.sort()
-
 	_check(failures, claimed_count == actual_names.size(),
-		"console.gd header claims %d commands; _register_commands() has %d" % [claimed_count, actual_names.size()])
+		"%s claims %d commands; _register_commands() has %d" % [path, claimed_count, actual_names.size()])
 	_check(failures, claimed_count == claimed_names.size(),
-		"console.gd header claims %d commands but names %d of them" % [claimed_count, claimed_names.size()])
+		"%s claims %d commands but names %d of them" % [path, claimed_count, claimed_names.size()])
 	_check(failures, claimed_names == actual_names,
-		"console.gd header names %s; the registry has %s" % [str(claimed_names), str(actual_names)])
-	console.free()
+		"%s names %s; the registry has %s" % [path, str(claimed_names), str(actual_names)])
 
 # ---------------------------------------------------------------------------
 # helpers

@@ -2,7 +2,25 @@
 
 Forward-looking design plans that aren't yet implemented. Each entry should answer: what's the goal, what hooks exist today, what blocks it, what's the target session.
 
-Move entries to `CHANGELOG.md` (or just delete them) once the corresponding work ships.
+**Lifecycle:** delete an entry once nothing in it is still forward-looking. `PROJECT_LOG.md`
+and git history are this project's shipped-work record. **There is no `CHANGELOG.md` and one
+should not be created** — this line named one from the file's first commit to 2026-08-25, and
+`git log --all --diff-filter=A -- '**/CHANGELOG*'` returns nothing: the destination half of
+the rule was never reachable, so "move it" always meant "leave it here" (audit #35).
+
+**Delete the entry, not the section it sits in.** Shipped sections here carry live tails, and
+a blanket delete-on-ship loses them silently — the `console.gd` split trigger under "Dev
+Console" (audit **#34**, still owed) and the `MIGRATIONS` per-file split under
+"Schema-mismatch UX" are both live triggers inside sections marked SHIPPED. Extract the tail
+into its own entry first, then delete the rest.
+
+**Why this is worth enforcing rather than restating:** a retained SHIPPED narrative keeps its
+numbers, and its numbers are written in the present tense. Audit findings **#80** (Dev
+Console), **#81** and **#82** (both in "Building Interaction UI — multi-session arc COMPLETE")
+are all stale counts sitting inside sections marked SHIPPED / COMPLETE. That is not a
+coincidence about those three sections; it is the failure mode this rule exists to prevent,
+measured. Sections are named rather than cited by line here on purpose — a rule against stale
+facts should not carry two line numbers that go stale on the next insert.
 
 ---
 
@@ -764,17 +782,27 @@ nothing clamps `fuel_buffer` on write — so the table must be consulted there. 
 
 ## Dev Console — SHIPPED (session-dev-console)
 
-**Status:** SHIPPED. 12 commands, debug-build-only, in-memory history, 29/29 tests passing. Manual smoke deferred to first real-use session per session-end decision.
+**Status:** SHIPPED. Debug-build-only, in-memory history. Manual smoke deferred to first real-use session per session-end decision.
 
-**Commands:** `help`, `seed`, `tile [radius]`, `give`, `place`, `destroy`, `tp`, `set_soil`, `deplete_area`, `fertilize`, `clear`, `tick_speed`. See PROJECT_LOG entry for full table + design rationale.
+**Commands (14):** `clear`, `deplete_area`, `destroy`, `fertilize`, `give`, `help`, `place`, `seed`, `set_soil`, `sprites`, `tick_speed`, `tile`, `tp`, `wasteland`.
+
+That count and that list are **checked, not decorative**: `scripts/tests/test_console_guards.gd` parses this line out of `NOTES.md` and compares it against `console.gd`'s `_register_commands()`, the same way it already does for `console.gd`'s own header (audit #79). Three copies of one fact existed — the registry, the file header, and this line — and this was the unguarded one. See PROJECT_LOG entry for the full command table + design rationale.
+
+**What this line said before, and why the fix is not just a bigger number** (audit #80): it read "12 commands ... 29/29 tests passing" and named twelve, omitting `sprites` and `wasteland` for two sessions. The `29` was never console coverage — PROJECT_LOG's session entry reads "**Tests: 28 → 29 passing**", i.e. the whole runner's suite count on the day the console shipped. Updating 29 to today's runner figure would have preserved a sentence that misleads about what it counts, so the figure is gone from this status line instead: runner-wide totals live in the audit's baselines block beside the command that produces them, and the console's own suites are `test_console.gd`, `test_console_error_classifier.gd`, `test_console_guards.gd` and `test_console_backtick_toggle.gd`.
 
 **Manual-smoke-at-first-use note:** ✅ **COMPLETED at session-soil-exhaustion-4 PAUSE 1.** First real-use was the wasteland session, exactly as anticipated. Caught 2 real bugs (Bug 1: `tile` command displayed raw enum ints; Bug 2 CRITICAL: Premium Compost hotbar slot was missing — wasteland recovery path unreachable via hand-apply). Both fixed before that session's commit. The "ship tooling without exhaustive UI testing, surface bugs on first real use" pattern paid off — UI bugs surfaced in a low-stakes context (one session's PAUSE) rather than blocking gameplay forever. **Validated this protocol for future tooling sessions.**
 
-**File-size finding:** `console.gd` ended up at 657 lines vs the 300–400 design-pass estimate. Two underestimates:
+**File-size finding:** `console.gd` **shipped at** 657 lines vs the 300–400 design-pass estimate. That is a dated fact about the ship commit, not a description of the file today — see the trigger below for the live figure. Two underestimates:
 - **UI layer underestimated** (~80 lines for Godot Control / RichTextLabel / LineEdit setup — anchors, theme overrides, signal wiring, color-bbcode helpers).
 - **Command bodies averaged 22 lines, not 10** (validation discipline non-negotiable: 2–4 arg checks + 2–3 error returns + the operation per command).
 
-If `console.gd` grows beyond ~800 lines (e.g., adding more commands or richer UI), split into `console.gd` (UI + activation) + `console_commands.gd` (parser + command implementations). ~30-min refactor when triggered. Today the single-file shape is more convenient for adding commands; defer the split.
+**SPLIT TRIGGER — FIRED, AND THE SPLIT IS OWED.** If `console.gd` grows beyond ~800 lines (e.g., adding more commands or richer UI), split into `console.gd` (UI + activation) + `console_commands.gd` (parser + command implementations). It did.
+
+**Run `wc -l < scripts/ui/console.gd` rather than reading a number here.** No current figure is pinned in this paragraph on purpose: every session that has touched this file has moved it, and each pinned figure in turn — 657, then 812, then 1068 — went stale inside a cluster or two. At the 2026-08-25 measurement it stood at **1127**, i.e. **327 over** a "~800" trigger, up from 268 over one cluster earlier. It has only ever grown, and it grows whenever this file is touched, which is itself the argument for scheduling the split rather than re-measuring it.
+
+**"Defer the split" is no longer the standing decision.** It was written when the file was under the trigger. Nothing has been waived and the trigger has not been raised: this is a recorded acknowledgement that a documented trigger fired and the action has not been taken. Audit finding **#34** stays LIVE and the split is its remaining work — correcting the line count closes the paragraph, not the finding.
+
+**The "~30-min refactor" estimate is the design pass's, made at 657 lines.** It has not been re-derived at 1127 and should not be quoted as if it had; the audit's cluster-J entry carries a measured seam assessment (what moves, what is shared, how many external citations point into this file). Read that before scheduling.
 
 **Strategic value receipt:** Session 4 (wasteland) and save migration framework both unblocked by console. Replaces 5–10 min "build a chain to test" loops with 3-line console state setup. Cost recovered within 2–3 future sessions.
 
