@@ -99,6 +99,9 @@ const TESTS: Array = [
 	# Audit cluster C, #15/#18: the shared recipe-pin rule for Smelter and
 	# Composter — a pin may stay only while it is resolvable AND startable.
 	preload("res://scripts/tests/test_recipe_pin_release.gd"),
+	# Audit cluster C, #14: a processor must never push its output onto a belt
+	# that feeds it — measured, the feeder saturates and the input line dies.
+	preload("res://scripts/tests/test_processor_feeder_push.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

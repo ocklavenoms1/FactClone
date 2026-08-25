@@ -286,8 +286,40 @@ static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) ->
 					if _try_push_belt_to_cell(b, world, item_type, cell):
 						return
 
+## True when `belt` carries items INTO building `b` — that is, the cell the
+## belt points at is inside b's footprint. Such a belt is a FEEDER, and is
+## never a legal output sink (audit finding #14).
+##
+## Why it is never legal: `Belt.try_insert` drops the item in slot 0 and the
+## belt then carries it toward the machine that just made it. The machine will
+## not re-accept its own output — `_try_pull_inputs` accepts only the current
+## recipe's inputs — so the item reaches the front slot and parks there
+## forever. Repeat once per tick and the feeder saturates with output: the
+## supply line is dead and the items are stranded. MEASURED before this guard,
+## on a mill with one E-pointing belt on its W side: 400 ticks turned
+## [GRAIN,GRAIN,GRAIN,GRAIN] into four FLOUR and `Belt.try_insert(feeder,
+## GRAIN)` began returning false.
+##
+## Deliberately narrow. Only belts pointing INTO the footprint are refused; a
+## belt running PAST the building is a legitimate sink and still accepts.
+## test_processor_feeder_push.gd case (5) pins that distinction — a guard that
+## simply refused every belt would pass every other case in that file.
+##
+## Deterministic: a pure function of the belt's dir and anchor and the
+## building's type and anchor. No dict iteration, no build order.
+static func _belt_feeds_building(belt: Building, b: Building) -> bool:
+	var d: int = int(belt.state.get("dir", 0))
+	return Buildings.footprint_contains(b.type, b.anchor, belt.anchor + Belt.DIR_VECS[d])
+
 ## Try to push one `item_type` to whatever building is at `cell`. Accepts
 ## chests (direct insert) and belts (try_insert). Returns true on success.
+##
+## This is the STRICT (prefer_dir) path. It needs the feeder guard just as
+## much as the no-preference sweep does: a recipe's declared output edge is
+## wherever the player put a belt, and nothing stops that belt pointing back
+## into the machine. Finding #14 cited only the no-preference branch; the
+## defect is in both, and test_processor_feeder_push.gd case (4) reproduced it
+## here on the composter's canonical-E compost port.
 static func _try_push_to_cell(b: Building, world: Node2D, item_type: int, cell: Vector2i) -> bool:
 	if not world.has_building_at(cell):
 		return false
@@ -298,6 +330,8 @@ static func _try_push_to_cell(b: Building, world: Node2D, item_type: int, cell: 
 	if neighbor.type == Buildings.Type.CHEST:
 		pushed = Chest.try_insert(neighbor, item_type, 1)
 	elif neighbor.type == Buildings.Type.BELT:
+		if _belt_feeds_building(neighbor, b):
+			return false
 		pushed = Belt.try_insert(neighbor, item_type)
 	if pushed:
 		_buffer_remove(b.state["out_buffer"], item_type, 1)
@@ -320,6 +354,8 @@ static func _try_push_belt_to_cell(b: Building, world: Node2D, item_type: int, c
 	var neighbor: Building = world.building_at(cell)
 	if neighbor == null or neighbor.type != Buildings.Type.BELT:
 		return false
+	if _belt_feeds_building(neighbor, b):
+		return false      # #14: a belt pointing into us is an input, not a sink
 	if Belt.try_insert(neighbor, item_type):
 		_buffer_remove(b.state["out_buffer"], item_type, 1)
 		return true

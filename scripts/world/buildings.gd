@@ -955,6 +955,14 @@ static func edge_cells(t: int, anchor: Vector2i, dir: int) -> Array:
 				cells.append(Vector2i(anchor.x + dx, y))
 	return cells
 
+## True when `cell` lies INSIDE the footprint of type `t` anchored at `anchor`.
+## The complement of edge_cells' "immediately outside" — used to ask whether a
+## neighbouring belt is pointing AT this building (i.e. feeding it).
+static func footprint_contains(t: int, anchor: Vector2i, cell: Vector2i) -> bool:
+	var size: Vector2i = footprint_of(t)
+	return cell.x >= anchor.x and cell.x < anchor.x + size.x \
+		and cell.y >= anchor.y and cell.y < anchor.y + size.y
+
 ## All cells immediately outside the footprint, all 4 edges. Useful for
 ## "scan all neighbors of this building" when no edge is specified.
 static func all_edge_cells(t: int, anchor: Vector2i) -> Array:
