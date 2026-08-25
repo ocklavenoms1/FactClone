@@ -92,6 +92,10 @@ const TESTS: Array = [
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
 	preload("res://scripts/tests/test_registration_completeness.gd"),
+	# The four console guards from audit cluster G: place's footprint paving and
+	# its rollback, the radius bounds on deplete_area / tile, set_soil's
+	# wasteland clear, and the header-vs-registry command inventory.
+	preload("res://scripts/tests/test_console_guards.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

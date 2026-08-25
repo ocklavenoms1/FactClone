@@ -16,8 +16,14 @@ extends Control
 ##     token = command name, rest = String args. Each command is a
 ##     method that takes Array[String] and returns String (output or
 ##     error).
-##   - 12 commands: help, seed, tile, give, place, destroy, tp, set_soil,
-##     deplete_area, fertilize, clear, tick_speed.
+##   - COMMANDS (14): clear, deplete_area, destroy, fertilize, give, help,
+##     place, seed, set_soil, sprites, tick_speed, tile, tp, wasteland.
+##     This line is checked, not decorative: `test_console_guards.gd` parses it
+##     and asserts the count AND the names against `_register_commands()`. It
+##     said "12 commands" and omitted `sprites` and `wasteland` for two whole
+##     sessions, because a comment nobody can check is indistinguishable from a
+##     comment that is right (audit #79). Correcting the number alone would have
+##     re-created the finding on the next command that landed.
 ##   - In-memory history (up/down arrow); not persisted across sessions.
 ##   - Scrollback buffer ~200 lines, ~30 visible.
 
@@ -38,6 +44,10 @@ const PANEL_HEIGHT_FRACTION: float = 0.40   # bottom 40% of viewport
 # Tick speed clamp (per design Q3 addition).
 const TICK_SPEED_MIN: float = 0.1
 const TICK_SPEED_MAX: float = 10.0
+
+## Largest radius `tile <x> <y> <radius>` will render a soil grid for.
+## `test_console_guards.gd` pins the same number — see the note at the check.
+const TILE_GRID_RADIUS_MAX: int = 16
 
 # Wire references to game state — set by main.gd at _ready.
 var grid_world: Node2D = null
@@ -630,6 +640,18 @@ func _cmd_set_soil(args: Array) -> String:
 	if v >= GridWorld.TILE_SOIL_FULL:
 		grid_world.tile_soil_modifications.erase(pos)
 		grid_world.tile_regen_progress.erase(pos)
+		# AND the scar. This erased two of the three per-tile dicts and left
+		# `tile_wasteland_state` alone, so `set_soil x y 100` on a scarred tile
+		# produced a tile that read "Soil: 100 / 100" and "Wasteland: SCARRED"
+		# in the same four-line dump — and went on refusing planters and
+		# bouncing LOW/MID compost, because every one of those gates asks
+		# `is_wasteland_at`, not the soil value (audit #47).
+		#
+		# Only the FULL restore clears it. Below full the scar stays: soil
+		# damage and scarring are two axes, `set_soil 3 3 50` is a request about
+		# one of them, and grace-period (non-scarred) entries clear themselves
+		# on the next tick anyway.
+		grid_world.tile_wasteland_state.erase(pos)
 	else:
 		grid_world.tile_soil_modifications[pos] = v
 	return "Tile %s soil → %d." % [str(pos), v]
@@ -652,11 +674,38 @@ func _cmd_deplete_area(args: Array) -> String:
 	var radius: int = r_parsed[1]
 	if radius < 0:
 		return "Radius must be >= 0 (got %d)." % radius
+	# The center has to be a real tile, like it does for tp / set_soil /
+	# fertilize / destroy. This command was the one coordinate-taking command
+	# that skipped the check, and it did not fail on a bad center — it swept a
+	# region containing no world and reported "Depleted 0 tiles", which reads
+	# like an answer. It is also what makes the radius clamp below exact.
+	if not _in_world_bounds(center):
+		return "Tile %s is outside world bounds." % str(center)
 	if grid_world == null:
 		return "Cannot deplete — grid_world not wired."
+	# THE ONE-LINE BOUND. The loop below is the original; the only change is that
+	# it runs on `r`, not on `radius`.
+	#
+	# `deplete_area 0 0 999999` used to visit (2r+1)² ≈ 4.0e12 cells — the
+	# in-bounds `continue` skips the WORK but not the VISIT — at ~0.17 µs each,
+	# about 755 hours of frozen main thread. `9999` for `999` is four and a half
+	# minutes (audit #24).
+	#
+	# A radius wider than the world cannot reach a tile a world-wide radius
+	# misses, so clamping to the world span changes no result: the center is
+	# in-bounds by the check above, so center ± 512 already spans [-256, 256)
+	# on both axes whatever the center. That is why the check above is load-
+	# bearing and not tidiness — without it, a center outside the world with a
+	# radius long enough to reach back would be clamped away from the tiles it
+	# should have hit.
+	#
+	# Clamping BEFORE the arithmetic also keeps `center.x + dx` from overflowing
+	# on a 19-digit argument, which `_parse_int` accepts without complaint. A
+	# bound a bigger typo walks straight through is not a bound.
+	var r: int = min(radius, WorldGenerator.WORLD_MAX - WorldGenerator.WORLD_MIN)
 	var n: int = 0
-	for dx in range(-radius, radius + 1):
-		for dy in range(-radius, radius + 1):
+	for dx in range(-r, r + 1):
+		for dy in range(-r, r + 1):
 			var pos: Vector2i = Vector2i(center.x + dx, center.y + dy)
 			if not _in_world_bounds(pos):
 				continue
@@ -725,7 +774,6 @@ func _cmd_place(args: Array) -> String:
 		# requires_overlay list. Buildings differ — Planter wants
 		# SOIL_TILLED, Mill wants STONE/PATH, etc. Try the building's
 		# own preferred overlay rather than blanket STONE.
-		var pre_overlay: int = grid_world.overlay_at(pos)
 		var data: Dictionary = Buildings.DATA.get(btype, {})
 		var requires_overlay: Array = data.get("requires_overlay", [])
 		var picked_overlay: int = -1
@@ -734,13 +782,80 @@ func _cmd_place(args: Array) -> String:
 				picked_overlay = int(ov)
 				break
 		if picked_overlay >= 0:
-			grid_world.set_overlay(pos, picked_overlay)
-			if grid_world.place_building(btype, pos, dir):
+			# THE WHOLE FOOTPRINT, not the anchor. can_place_building checks
+			# requires_overlay on every footprint cell, so paving only the
+			# anchor meant no 2×2 overlay-requiring building (Mixer, Oven,
+			# Proofer, Packager) could ever be console-placed on grass — the
+			# retry failed on the three cells nobody painted, and `help place`
+			# went on claiming "Bypasses overlay check" (audit #23).
+			var painted: Array = _paint_footprint(btype, pos, picked_overlay, requires_overlay)
+			if painted[0] and grid_world.place_building(btype, pos, dir):
 				return "Placed %s at %s (auto-set %s overlay)." % [Buildings.name_of(btype), str(pos), Terrain.overlay_name(picked_overlay)]
-			# Restore overlay; placement still fails for some other reason.
-			grid_world.set_overlay(pos, pre_overlay)
+			# Placement still fails. Report the reason it failed THIS time —
+			# the pre-paint `err` names the overlay the console has since
+			# supplied, so surfacing it sends the reader after a problem that
+			# no longer exists.
+			if grid_world.last_building_place_error != "":
+				err = grid_world.last_building_place_error
+			_unpaint_footprint(painted[1])
 		return "Cannot place %s at %s: %s" % [Buildings.name_of(btype), str(pos), err]
 	return "Placed %s at %s (dir %s)." % [Buildings.name_of(btype), str(pos), Belt.DIR_NAMES[dir]]
+
+## Paint `overlay` across every footprint cell of `btype` anchored at `pos` that
+## does not already carry an acceptable overlay.
+##
+## Returns [all_painted: bool, undo: Array]. `undo` records one
+## [cell, prior_overlay, had_modification] row per cell actually changed, newest
+## last, and is valid to hand to `_unpaint_footprint` whether or not every cell
+## succeeded — a cell can refuse the paint (a deposit, a tree, another
+## building's tile) and the ones already painted still have to come back.
+func _paint_footprint(btype: int, pos: Vector2i, overlay: int, allowed: Array) -> Array:
+	var fp: Vector2i = Buildings.footprint_of(btype)
+	var undo: Array = []
+	for dx in fp.x:
+		for dy in fp.y:
+			var cell: Vector2i = Vector2i(pos.x + dx, pos.y + dy)
+			if grid_world.overlay_at(cell) in allowed:
+				continue   # already fine — leave the player's terrain alone
+			var prior: int = grid_world.overlay_at(cell)
+			var had_mod: bool = grid_world.tile_modifications.has(cell)
+			if not grid_world.set_overlay(cell, overlay):
+				return [false, undo]
+			undo.append([cell, prior, had_mod])
+	return [true, undo]
+
+## Put back exactly what `_paint_footprint` changed.
+##
+## THE PART THAT LOOKS REDUNDANT AND IS NOT. `set_overlay(cell, Overlay.NONE)`
+## does nothing at all: `Terrain.can_place_overlay` returns false for NONE
+## ("use clear path, not paint", terrain.gd:85-86). The old rollback was exactly
+## that call, so from the console's first commit onward a failed `place` on bare
+## grass left its scratch overlay behind — permanently, since the paint had
+## already written `tile_modifications`, which is save-persisted. The restore was
+## in the source the whole time; it had simply never run. `clear_tile` is the
+## documented path back to NONE.
+##
+## Erasing the modification record too, when the cell had none before, is what
+## makes this a restore rather than a second edit: `clear_tile` deliberately
+## KEEPS a record so a save remembers a player's deliberate clear, and the
+## console's scratch paint was never that.
+##
+## `clear_tile` also removes a building standing on the cell, which is safe here
+## only because no painted cell can have one: `set_overlay` refuses to paint
+## under a building, and `place_building` mutates nothing on the path that
+## returns false. Both halves of that have to hold for this to stay safe.
+func _unpaint_footprint(undo: Array) -> void:
+	for i in range(undo.size() - 1, -1, -1):
+		var row: Array = undo[i]
+		var cell: Vector2i = row[0]
+		var prior: int = int(row[1])
+		var had_mod: bool = bool(row[2])
+		if prior == Terrain.Overlay.NONE:
+			grid_world.clear_tile(cell)
+		else:
+			grid_world.set_overlay(cell, prior)
+		if not had_mod:
+			grid_world.tile_modifications.erase(cell)
 
 func _cmd_destroy(args: Array) -> String:
 	if args.size() != 2:
@@ -871,6 +986,18 @@ func _cmd_tile(args: Array) -> String:
 		radius = r_parsed[1]
 	if radius < 0:
 		return "Radius must be >= 0 (got %d)." % radius
+	# A CAP, where deplete_area got a clip. The two commands are bounded
+	# differently on purpose: deplete_area's cost is iteration over a fixed
+	# world, so clipping to the world bounds it for free. This command's cost is
+	# the string it builds — ~4 chars per cell, so `tile 0 0 99999` assembles on
+	# the order of 1.6e11 characters and dies of memory long before it prints
+	# (audit #24). Clipping would not help; the output is the expense.
+	#
+	# 16 is not arbitrary: a radius-16 grid is 33 rows of 33 cells, ~140 chars
+	# wide, which is the largest square that still fits the 30-line visible
+	# scrollback and reads without wrapping.
+	if radius > TILE_GRID_RADIUS_MAX:
+		return "Radius must be <= %d for grid mode (got %d) — a bigger grid would not fit the scrollback." % [TILE_GRID_RADIUS_MAX, radius]
 	if grid_world == null:
 		return "Cannot query — grid_world not wired."
 	var center: Vector2i = Vector2i(x_parsed[1], y_parsed[1])
