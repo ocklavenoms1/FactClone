@@ -31,8 +31,8 @@ extends RefCounted
 ## LIMITATION, STATED RATHER THAN HIDDEN: this is ΔE*76, the 1976 CIE formula.
 ## It is a plain Euclidean distance in L*a*b*, which is far better than sRGB but
 ## still over-weights differences among saturated blues. Every pair here clears
-## the floor by at least 26%, so the formula's error cannot flip a verdict at
-## today's values. If a future pair ever lands within ~15% of the floor, upgrade
+## the floor by at least 26% (the tightest is 31.61 against a floor of 25), so
+## the formula's error cannot flip a verdict at today's values. If a future pair ever lands within ~15% of the floor, upgrade
 ## this to CIEDE2000 rather than arguing about the margin.
 ##
 ## Godot `Color` components are treated as sRGB (non-linear) throughout the 2D
@@ -48,13 +48,13 @@ extends RefCounted
 ## bar is "obviously a different machine", not "technically a different colour".
 ##
 ## 25 is chosen against the measurement, not picked round:
-##   - It is ~11x the JND, which is the "different colour at a glance" region.
-##   - The tightest shipped pair is 31.61 (the two warm browns, bronze vs rust).
-##     A floor of 25 leaves 21% of headroom, so an intentional retune of those
-##     two does not redden this file on the first nudge — but halving their
-##     separation does.
-##   - Sub-case (3) proves the floor bites: two tiers set 0.02 apart in one
-##     channel land at ΔE ≈ 1 and are rejected by name.
+##   - It is ~11x the JND (25 / 2.3 = 10.9), which is the "different colour at
+##     a glance" region rather than the "tell them apart if you look" one.
+##   - The tightest shipped pair is ΔE 31.61 (the two warm browns, bronze vs
+##     rust), 26% above the floor. An intentional retune of those two does not
+##     redden this file on the first nudge — but halving their separation does.
+##   - Sub-case (3) proves the floor bites: two colours 0.02 apart in one channel
+##     measure ΔE 2.86 and are rejected by name.
 ##
 ## ---------------------------------------------------------------------------
 ## `BODY_COLOR_DEFAULT` IS AN INTENTIONAL ALIAS, AND THE CODE SAYS SO
@@ -154,7 +154,7 @@ static func _pair_count() -> int:
 #
 # Returns [name_a, name_b, dE] for the TIGHTEST live pair, which goes into the
 # result message so the margin travels with the verdict rather than having to be
-# recomputed by hand. ⚠ `test_runner.gd:150` prints only the suite NAME on PASS
+# recomputed by hand. ⚠ `test_runner.gd:155` prints only the suite NAME on PASS
 # — the message surfaces on FAIL. So this is documentation for whoever is
 # already reading a red run, not a green-run readout.
 # ===========================================================================

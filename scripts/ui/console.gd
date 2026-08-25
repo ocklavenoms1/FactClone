@@ -333,8 +333,8 @@ func _submit_line(line: String) -> void:
 # writes. The shape of the bug is the DEFAULT, not the coverage:
 #
 #   - The two sides do not grow alike. Refusals are open-ended prose, one per
-#     validation branch, and there are ~54 of them; every new guard clause adds
-#     one. Successes are a closed set of past-tense reports emitted by the code
+#     validation branch, and 66 of the 84 are refusals; every new guard clause
+#     adds one. Successes are a closed set of past-tense reports emitted by the code
 #     that did the work — Added / Placed / Removed / Cleared / Depleted /
 #     Player → / soil → / fertilized / → WASTELAND / Tick speed → / World seed,
 #     plus three info dumps. Eighteen, and they move only when a command changes
@@ -349,7 +349,7 @@ func _submit_line(line: String) -> void:
 #
 # ⚠ WHAT THIS IS NOT. It is still prose matching, and a fully structural fix —
 # a typed result, or every refusal returning through a `_refuse()` wrapper that
-# tags it — would remove the guessing entirely. That is ~54 call sites in this
+# tags it — would remove the guessing entirely. That is 66 call sites in this
 # file and disproportionate to a LOW finding, so it is not done here. The
 # residual exposure is narrowed to rewording a SUCCESS message, and
 # `test_console_error_classifier.gd` reddens on exactly that: it scans this

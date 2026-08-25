@@ -1256,7 +1256,7 @@ count goes 0 → 1 after one `await get_tree().process_frame`, and rises again a
 
 The accurate statement: **headless can prove that draw code ran and which branch it took; it
 cannot prove what appeared on screen.** The runner does not do this today only because its
-loop is synchronous (`test_runner.gd:101`), not because the engine forbids it — an opt-in
+loop is synchronous (`test_runner.gd:111`, dispatching at `:134`), not because the engine forbids it — an opt-in
 `run_async` dispatched via `has_method` would sidestep the warnings-as-errors problem without
 touching 57 synchronous suites.
 

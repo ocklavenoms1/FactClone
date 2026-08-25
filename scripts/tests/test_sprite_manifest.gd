@@ -28,9 +28,9 @@ extends RefCounted
 ## fallback. The failure message names the file and the two numbers that
 ## disagree, so a mid-write collision is a one-line diagnosis, not a mystery.
 ##
-## Sub-cases (2)-(11) touch no real asset at all. They write synthetic assets
-## into `user://` — the only way to exercise corruption without writing into
-## the read-only art tree.
+## Sub-cases (2)-(11) and (14) touch no real asset at all. They write synthetic
+## assets into `user://` — the only way to exercise corruption without writing
+## into the read-only art tree.
 
 const TMP: String = "user://sprite_probe_fixtures"
 const ConsoleScript = preload("res://scripts/ui/console.gd")
@@ -460,7 +460,7 @@ static func _case_12_flag_is_off_by_default(failures: Array) -> void:
 	# uncovered.
 	#
 	# ⚠ THIS IS A SOURCE-TEXT PIN, NOT AN EXECUTION PIN, and the difference
-	# matters. `test_runner.gd` calls each suite synchronously (`:124`) and
+	# matters. `test_runner.gd` calls each suite synchronously (`:134`) and
 	# never yields a frame, so no CanvasItem in this project ever receives
 	# NOTIFICATION_DRAW during a headless run: the suite structurally cannot
 	# execute a draw path. The executed check is the windowed capture harness,

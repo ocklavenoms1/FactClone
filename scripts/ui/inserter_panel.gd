@@ -53,9 +53,9 @@ const STATUS_UNKNOWN_TEXT: String = "Status: ?"
 ## The panel's state → status-line mapping. PURE, and static, so it can be
 ## asserted without a font, a frame or a window — `test_inserter_status_strings.gd`
 ## is the assertion. It used to live inline in `_draw_building_specific`, where
-## nothing in 57 suites could reach it: `test_runner.gd` calls suites
-## synchronously and never yields a frame, so no CanvasItem in this project
-## receives NOTIFICATION_DRAW during a headless run. See
+## no suite in this project could reach it: `test_runner.gd` calls suites
+## synchronously and never yields a frame, so no CanvasItem here receives
+## NOTIFICATION_DRAW during a headless run. See
 ## `docs/scoping/visual-verification.md` — this is route A, and lifting the map
 ## out of the draw call is the whole of what route A needs.
 ##

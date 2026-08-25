@@ -38,8 +38,10 @@ code ran and which branch it took; it cannot prove what appeared on screen.**
 
 ### Why the runner does not do this today
 
-`test_runner.gd:101` is `for test_class in TESTS: var raw = test_class.run(self)` —
-synchronous, inside `_ready`. `_ready` *can* be a coroutine in Godot 4, so the loop
+`test_runner.gd:111` is `for test_class in TESTS:` and `:134` is
+`var raw = test_class.run(self)` — synchronous, inside `_ready`. (Recorded as
+`:101` for both when this pass was written; four suites added on 2026-08-24
+moved them, and they were never one line to begin with.) `_ready` *can* be a coroutine in Godot 4, so the loop
 could `await`. The obstacle is not structural; it is that awaiting a
 non-coroutine emits a warning, and this project treats warnings as errors (see
 below), so `await test_class.run(...)` across all 57 existing synchronous suites
