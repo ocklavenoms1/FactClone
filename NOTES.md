@@ -1095,6 +1095,28 @@ place.
 `art/sprites/*` as loose files. Costs: no import-time compression, no mipmaps, no texture
 streaming; every sprite is decoded at runtime (measured 1.4 ms/asset cold, ~28 ms at twenty).
 
+### Decisions taken 2026-08-24
+
+**`.import` — option (a), separate source from shipped. DECIDED.** `art/` stays
+Blender-owned; `art/build.ps1` gains a copy step into a game-facing directory Godot imports
+normally. Rationale: it resolves the ownership conflict rather than papering over it, the
+importer does its job (compression, mipmaps, platform variants) instead of runtime
+`Image.load()`, and the export gap closes as a side effect. The extra hop is trivial next to
+maintaining a runtime loading path forever. **Not yet implemented.**
+
+**`ground_contact_px` — zero-padding mandate, not a schema field. DECIDED.** Sprites must
+have no transparent bottom padding, so `anchor_px.y == sprite_h` is also the contact row. The
+loader enforces it: **the bottom row must contain at least one non-zero alpha pixel, fail
+loud otherwise.** Rationale: a schema field nobody can verify is worse than a constraint the
+loader checks. Note all three current assets **violate** this today (8 empty bottom rows
+each), so adopting it means a re-export, not just a rule. **Not yet implemented.**
+
+**Tan pad — OPEN DESIGN ITEM, not a defect.** Depleted soil reading through under buildings
+is a design question. For: visible soil state without opening a panel. Against: buildings
+that look seated rather than floating on a coloured pad. Not blocking; decide when it
+matters. Explicitly **not** an art-side fix — the shadow layers were measured clean across
+the whole alpha ramp.
+
 **Recommendation — (a), with a build step that resolves the ownership conflict.** Separate
 source from shipped: `art/` stays Blender-owned working directory, and `art/build.ps1`
 (which already exists) copies finished sprites into a game-facing directory Godot imports
@@ -1184,12 +1206,28 @@ calls suites synchronously and never yields a frame, so **no `CanvasItem` in thi
 receive `NOTIFICATION_DRAW` during a headless run**. Nothing in the suite has ever executed a
 `_draw()`.
 
-This is a hard limit on what the test suite can cover, and it is worth naming beside silent
-compensation because it has the same consequence: **rendering defects cannot redden a
-headless run, so a green suite carries no information about what the game looks like.** The
-executed check for the sprite path is a windowed flag-on/flag-off pixel differential, run by
-hand. Any future render work inherits this ceiling — plan for a windowed capture step rather
-than assuming a suite can guard it.
+**⚠ CORRECTED 2026-08-24, and I had it wrong by not testing it.** `_draw()` **does** execute
+under `--headless` if something yields a frame. Measured in a scratch project: draw-call
+count goes 0 → 1 after one `await get_tree().process_frame`, and rises again after a further
+`queue_redraw()`. What is genuinely absent is **pixels** —
+`get_viewport().get_texture().get_image()` returns **null** headless.
+
+The accurate statement: **headless can prove that draw code ran and which branch it took; it
+cannot prove what appeared on screen.** The runner does not do this today only because its
+loop is synchronous (`test_runner.gd:101`), not because the engine forbids it — an opt-in
+`run_async` dispatched via `has_method` would sidestep the warnings-as-errors problem without
+touching 57 synchronous suites.
+
+Also measured, and it closes the obvious workaround: **a recording-canvas double does not
+compile here.** Shadowing `draw_rect` on a `Node2D` subclass is `Parse Error: The method
+"draw_rect()" overrides a method from native class "CanvasItem" … (Warning treated as
+error.)`, and `Buildings.draw_one`'s `canvas` parameter is typed `CanvasItem`, so a plain
+`RefCounted` recorder cannot be substituted either.
+
+The consequence that survives the correction: **rendering *appearance* defects still cannot
+redden a headless run, so a green suite carries no information about what the game looks
+like.** The executed check for the sprite path remains a windowed flag-on/flag-off pixel
+differential. Full re-scope in `docs/scoping/visual-verification.md`.
 
 ### Corollary: `passed,` alone is not a safe signal
 
