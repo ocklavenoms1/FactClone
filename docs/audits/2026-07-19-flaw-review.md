@@ -85,6 +85,7 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #33 — **NOT closed.** Measured, partly fixed, and NARROWED; stays LIVE—MEDIUM. See its row | **24 closed / 60 live** |
 | 2026-08-25 | #22 + #58 + #59 (cluster H — one Esc/input-routing unit across three files) at `dd0493b` | **27 closed / 57 live** |
 | 2026-08-25 | #80 (cluster J). **#34, #35, #36 and #77 all stay LIVE**, deliberately: #34's and #35's titles each carry a clause the edit does not reach, and #36/#77 prescribe file deletions, which are the user's call. One doc edit closed one finding and advanced four | **28 closed / 56 live** |
+| 2026-08-25 | #36 + #77 | **30 closed / 54 live** — two root plan files deleted after lifting their live tails |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
 incrementing: CLOSED 28 + LIVE—HIGH 0 + LIVE—MEDIUM 16 + LIVE—LOW 40 = **84**.
@@ -105,7 +106,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (28)
+### CLOSED (30)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -137,6 +138,8 @@ is closed at all.
 | 58 | duplicate unconditional `close_info_panel` handler | `dd0493b` — deleted as prescribed | `test_esc_duplicate_handler.gd` (3 sub-cases) — Esc that closes the inventory grid must leave the info-panel target standing, plus a structural check pinning `main.gd` at exactly ONE poll of that action |
 | 80 | NOTES Dev Console: 12 cmds / 29 tests / 657 lines | cluster J — **all three numbers were wrong in three different ways, and only one of them was fixed by writing a bigger number.** Commands 12 → **14**; `console.gd` 657 lines → deliberately unpinned, see #34; and the "29/29 tests" figure was **deleted rather than updated** — PROJECT_LOG's own entry reads "Tests: 28 → 29 passing", so 29 was the whole runner's suite count on the console's ship day, never console coverage. Refreshing it to 66 would have kept a sentence that misleads about what it counts | `test_console_guards.gd` — the #79 header parser now runs over **both** prose copies (`console.gd`'s header and `NOTES.md`'s `**Commands (N):**` line) against `_register_commands()`. Mutation-verified in both files, including the guard's own failure mode: reformatting the NOTES line out of recognition fails with "found 0", it does not pass quietly |
 | 59 | backtick cannot close the console | `dd0493b` — `KEY_QUOTELEFT` arm added to `console.gd`'s `_input` match, as prescribed | `test_console_backtick_toggle.gd` (3 sub-cases) — backtick opens, backtick closes, **and the command field is still empty afterwards**; the stray `` ` `` is asserted separately because a console that closed but still typed the character would be half-fixed |
+| 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `2026-08-25` — **file deleted**, user-approved. Live tails lifted to `NOTES.md` first ("two live tails lifted"): zoom-level persistence, verified absent from `save_system.gd`. `PROJECT_LOG.md` references left intact as historical record | doc-only; no test |
+| 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `2026-08-25` — **file deleted**, user-approved. Live tails lifted first: right-click half-stack + drag-and-drop, both verified absent (`MOUSE_BUTTON_RIGHT` = 0 across the three slot files). Dangling citation at `buildings.gd:1297` rewritten | doc-only; no test |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -176,7 +179,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (16)
+### LIVE — MEDIUM (15)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -195,9 +198,8 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 33 | per-tick transient allocations in processor pull/push — **MEASURED and NARROWED 2026-08-25; the caching fix is declined, one free part taken at `6083ff8`** | `processor.gd:158-159` (the `[]`/`{}` pair — **0.9% of a processor tick, not worth touching**), `processor.gd:176, 183` (pull sweep, deliberately left alone), `processor.gd:295` (push sweep, now hoisted to one `all_edge_cells` call); `buildings.gd:936-956` (`edge_cells`, **the actual cost — the finding's own last citation, and the only one that mattered**). See the profiling note below |
 | 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:795, 799-805`. **The stale number is fixed; the finding is not.** The title's claim is the *breached trigger*, and the split has not been done — correcting 657 closes the paragraph and leaves the title true, so this stays LIVE with the split as its remaining work. **No figure is pinned in the NOTES paragraph any more**; it names `wc -l < scripts/ui/console.gd` instead, because 657 → 812 → 1068 → **1127** each went stale within a cluster or two. Measured 2026-08-25: 1127, i.e. 327 over "~800", up from 268 one cluster ago — it grows every time the file is touched. `console_commands.gd` does not exist (`ls scripts/ui/console_commands.gd`). The prescribed "~30-min refactor" was estimated at 657 lines and is **not** credible at 1127 — see the cluster J split assessment below. **#80 was the same two lines at LOW and is now CLOSED**; it was fixed in the same edit |
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5-23` — **rewritten; the second half of the title is still open.** Verified never existed: `git log --all --diff-filter=A -- '**/CHANGELOG*'` returns nothing, so the destination half of the rule was unreachable for the file's whole life and "move it" always meant "leave it here". The new rule names `PROJECT_LOG.md` + git history, says explicitly that no `CHANGELOG.md` should be created (so nobody "restores" it), and **departs from the prescribed "delete once shipped"**: a blanket delete-on-ship is the silent-compensation shape — #34's split trigger is a live tail inside a section marked SHIPPED, and the prescription would have deleted it. The rule now requires extracting live tails first. The title's other clause — "8+ SHIPPED sections never moved or deleted" — is untouched: **that prune is bundled into the #36/#77 lifecycle decision for the user**, see the cluster J note |
-| 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48`. **Case prepared, nothing deleted — deleting files is the user's call.** Re-verified 2026-08-25: `:7-8` "Save: v9 / Tests: 8 passing" vs `SAVE_VERSION` **18** and **66** suites; `:48`'s "Schema bump v9 → v10 only if…" predates the migration framework; every planned item shipped (`retter.gd`, `loom.gd`, `tailor.gd`, `test_bag_cap.gd`, `test_cloth_prefer_dir.gd`, `test_zoom_trigger_map.gd`). One inbound reference: `INVENTORY_UI_PLAN.md:3` names it as its structural parallel — deleting this file dangles that line, and #77 proposes deleting *that* file, so the two are one decision. See the cluster J note |
 
-### LIVE — LOW (40)
+### LIVE — LOW (39)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -236,7 +238,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 74 | post-tick pass iterates all buildings for belt-only logic | `grid_world.gd:654` |
 | 75 | `class_name DevConsole` lives in `console.gd` | `console.gd:1` |
 | 76 | soil arc says "migration framework still queued" | `NOTES.md:841` vs `:793` |
-| 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `INVENTORY_UI_PLAN.md:7` ("Save: v10. 9 tests passing." vs **18** / **66**). **Case prepared, nothing deleted.** Staler than the row says: `:80`'s *locked* click table binds shift-click to "transfer entire stack", and what shipped binds shift+LMB to **half-stack** take/drop (`slot_click_handler.gd:32, 67-96`, "spec §5.1") with ctrl+LMB opening a quantity picker the plan never mentions — so the locked interaction table describes a scheme that lost, not just stale counts. **The fix text's citation is wrong**: the `INVENTORY_UI_PLAN-style follow-up` comment is at `buildings.gd:1298`, not `:987`, and it is a *style* reference, not a template citation — its content descends from `SESSION_E_PLAN.md:69`'s port-dot hint. Live tails that would be lost: the v2 list at `:83` — right-click half-stack pickup and drag-and-drop are still unshipped. See the cluster J note |
 | 78 | CONVENTIONS layout lists `assets/`, omits `tools/` + `addons/` | `CONVENTIONS.md:65` |
 | 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:1139` — was cited `:998, 1000, 1039`. **21 is correct** (26 `*_panel.gd` minus 5 non-building-specific); see the baselines block |
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1146` (was `:1007`) vs `:834`. **Understated by one, not two** — the real count is 12; the baselines block briefly said 13 and was wrong |

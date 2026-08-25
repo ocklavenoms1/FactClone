@@ -1294,8 +1294,10 @@ static func _draw_port_dot(canvas: CanvasItem, cell: Vector2i, port_dir: int, ti
 	var nudge: Vector2 = -Vector2(Belt.DIR_VECS[port_dir]) * (tile_size * 0.40)
 	var dot_pos: Vector2 = center + nudge
 	# Radius and outline widths in world units — port dots scale with the
-	# tile they sit on. At low zoom the dots become small; flagged in
-	# INVENTORY_UI_PLAN-style follow-up if visibility becomes a real issue.
+	# tile they sit on. At low zoom the dots become small — a follow-up if
+	# visibility ever becomes a real issue. (This cited INVENTORY_UI_PLAN.md
+	# until that file was deleted 2026-08-25 as audit #77; what was still
+	# live in it is in NOTES.md under "two live tails lifted".)
 	if active:
 		canvas.draw_circle(dot_pos, _PORT_RADIUS, color)
 		canvas.draw_arc(dot_pos, _PORT_RADIUS, 0.0, TAU, 16, _PORT_OUTLINE, 1.0)

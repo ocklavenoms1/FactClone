@@ -1194,6 +1194,50 @@ normally. Nothing writes into `art/` from the engine, the export packs real reso
 the pipeline shape already matches — `art/renders` → `art/sprites` gains one more hop. This
 is a pipeline change, so it is a decision, not a cleanup.
 
+## Queued: two live tails lifted out of the root plan files before deleting them (2026-08-25)
+
+`SESSION_E_PLAN.md` and `INVENTORY_UI_PLAN.md` were deleted (audit #36 / #77). Both were
+stale hand-off briefs — v9/v10 schema snapshots against a live v18, 8-and-9-test counts
+against 66 — and `INVENTORY_UI_PLAN.md` was worse than its finding said: its "Locked design
+decisions" click table binds shift-click to *transfer entire stack*, while what actually
+shipped binds shift+LMB to **half-stack** (`slot_click_handler.gd:33-34`). A file headed
+"locked" describing the scheme that lost is worse than a stale version number.
+
+**Everything below was verified still-open before the files were removed.** This is the
+whole of what was worth keeping; the rest is in `PROJECT_LOG.md` and git history.
+
+### Camera zoom — zoom level is not persisted, and that question was never answered
+
+Zoom shipped (see "Camera zoom — shipped + polished" below). Its plan listed four open
+questions, and shipping settled some silently. **One is verifiably still open:**
+`grep -c zoom scripts/systems/save_system.gd` returns **0** — zoom level is not saved, so
+every load resets the player's chosen framing.
+
+The original note argued it "probably" should persist, as player-comfort state, but "not a
+save-shape change worth bumping the schema for — could go in a separate ui-prefs file."
+That framing is still the useful one: a UI-prefs file avoids a schema bump entirely.
+
+Three others were never explicitly resolved on the record and are worth *checking* rather
+than assuming: **pinch-zoom on touch** (no touch input layer exists), **zoom-to-cursor vs
+zoom-to-centre** (settled by whatever shipped, but not written down), and
+**wheel-while-modifier conflicts** (if shift+wheel or alt+wheel ever bind elsewhere, plain
+wheel must stay zoom — verify the InputMap).
+
+### Inventory slot grid — right-click half-stack and drag-and-drop are unshipped
+
+The plan's deferred "v2" list. Measured: `grep -c MOUSE_BUTTON_RIGHT` returns **0** across
+`inventory_grid.gd`, `chest_panel.gd` and `slot_click_handler.gd`, so both of these are
+genuinely not implemented:
+
+- **Right-click for half-stack pickup.** Note the collision to resolve first: half-stack is
+  already bound to **shift+LMB**, so this is now a question of which gesture owns it, not a
+  missing feature.
+- **Drag-and-drop for moving stacks** between slots, with drag-plus-modifier to split.
+
+The other two v2 items look superseded rather than pending — ctrl+LMB ships a quantity
+picker (`slot_click_handler.gd:13, 30`), which covers "transfer one" more generally. Confirm
+before scheduling either.
+
 ## Protocol: silent compensation — when absence is indistinguishable from success
 
 **Codified at the audit re-application session (2026-08-24)** after the third instance in
