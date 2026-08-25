@@ -998,6 +998,110 @@ in the audit; the finding's actual subject is untouched.
 
 ---
 
+## Art pipeline probe — four contract findings, one shipping blocker (2026-08-24)
+
+`session-art-probe-1`. Sprite path behind `SpriteLibrary.enabled`, off by default, three
+assets (chest, smelter, power_pole). Flag-off rendering proven byte-identical: six frames,
+three at `42f6758` and three after, all md5 `4a2f646cf8fe8f65cb987697f5e38fd7`, 0 of 921600
+pixels differing.
+
+### 1. The tan pad under sprites is the SOIL TINT, not the shadow layer
+
+A hard-edged, footprint-shaped tan pad appears under each sprite once the flag is on.
+Diagnosed by elimination, all four measured rather than reasoned:
+
+- **Not `draw_one`** — `grid_world.gd:1727-1731` is `if not drew_sprite:`, genuinely exclusive.
+- **Not `SpriteLibrary.draw_building`** — `sprite_library.gd:455-479` draws shadow + body only.
+- **Not body overflow** — the smelter is `sprite_px [64,96]` against `footprint Vector2i(2,2)`
+  = 64 px (`buildings.gd:520`). **Body width equals footprint width exactly**; there is no
+  horizontal overflow to spill.
+- **Not the shadow layer** — the tempting hypothesis was a tan tint baked into the *faint*
+  end of the shadow ramp, which would survive a high-alpha spot check. Sampled every
+  non-zero alpha pixel in all three shadow PNGs, bucketed by alpha in steps of 32:
+  **every bucket is mean RGB (0,0,0), max channel ≤ 1.** Pure black across the entire ramp.
+
+What remains, and what the pixels support: the buildings sit on tiles carrying a **soil
+tint** (`SOIL_TINT_DAMAGED/DYING/DEAD`, `grid_world.gd:1434-1436`). Sampled pad
+(138,126,101); `SOIL_TINT_DAMAGED` over grass composites to (116,114,75), closest of the
+three, with the residual explained by the shadow darkening part of the pad and by the base
+terrain colour under those tiles not being plain grass.
+
+**So this is not an art-side fix.** It is a pre-existing terrain behaviour that opaque
+rectangles concealed for the whole life of the project, and sprite transparency revealed.
+Decide whether depleted soil should read through under a building at all — that is a design
+question, not a bug.
+
+**Contract line worth adding anyway:** shadow layers are **pure black, alpha-only, no baked
+colour**. This is currently *true* of all three assets and now measured, so write it down as
+a requirement before asset four rather than discover it violated at asset nineteen.
+
+### 2. Z-order is placement-order dependent, and it PERSISTS THROUGH SAVE/LOAD
+
+**This is a correctness issue, not polish.** `grid_world.gd:1709` iterates `for anchor_key in
+buildings:` — Dictionary **insertion order**, i.e. the order the player built things — with
+only a footprint cull. No depth sort.
+
+While every building was a tile-bound opaque rectangle this was unobservable. Sprites
+overflow up to 64 px upward, so build order becomes visible: two identical factories on
+identical tiles render differently depending on what was placed first. Captured both ways —
+chest-first shows the pole's insulators over the chest; pole-first shows the chest
+decapitating the pole.
+
+**And the ordering round-trips.** `save_system.gd:291` iterates `grid_world.buildings` into
+an array; `:789` re-inserts with `grid_world.buildings[b.anchor] = b` in array order. So
+insertion order is serialized and restored — the wrong picture is *stable across sessions*,
+not a transient artifact.
+
+"Add a depth sort" reads as optional until you know the current behaviour is
+non-deterministic with respect to a factory's layout. It is. **Not built this session by
+instruction; recorded here so the next reader knows the severity.**
+
+### 3. `anchor_px` points at an empty row on all three assets — needs a contract line
+
+Every body sprite is **fully transparent in its bottom 8 rows** (`power_pole.png` and
+`smelter_idle.png` empty at y=88..95; `chest.png` at y=56..63). `anchor_px` is
+`[sprite_w/2, sprite_h]`, so the anchor names a row with no artwork in it. Geometrically
+self-consistent, but "sprite bottom edge" and "where the object visually meets the ground"
+are different rows and **nothing in the JSON says by how much**.
+
+At three assets it is invisible. At twenty, inconsistent bottom padding is per-asset
+vertical jitter with **no test that can catch it** — every sprite is "correctly placed" by
+the contract while sitting at a different apparent height.
+
+**Resolve before asset four**, either way:
+- add **`ground_contact_px`** to the JSON schema (the row where the object actually touches
+  ground) and draw against that, or
+- **mandate zero bottom padding** so `anchor_px.y == sprite_h` is also the contact row.
+
+The first is more honest about 3/4-view art; the second is cheaper and testable by a loader
+assertion (bottom row must contain at least one non-zero alpha pixel).
+
+### 4. ⚠ SHIPPING BLOCKER — no `.import` sidecars, so `load()` fails outright
+
+Measured: `ResourceLoader.exists("res://art/sprites/chest.png")` → **false**;
+`FileAccess.file_exists` on the same path → **true**; `load()` → `No loader found for
+resource`. `.godot/imported/` contains only `icon.svg`. The loader therefore uses
+`Image.load()` + `ImageTexture.create_from_image()` (`sprite_library.gd:19-38`).
+
+**An exported build will not pack unimported files.** This must resolve before any real art
+ships. Two honest options:
+
+**(a) Import them properly as Godot resources.** Costs: generating sidecars requires running
+the editor, which **writes into `art/`** — and `art/` is owned by a concurrent Blender
+session. That ownership conflict is what pushed the probe to `Image.load()` in the first
+place.
+
+**(b) Commit to runtime `Image.load()`** plus an explicit export-preset rule packing
+`art/sprites/*` as loose files. Costs: no import-time compression, no mipmaps, no texture
+streaming; every sprite is decoded at runtime (measured 1.4 ms/asset cold, ~28 ms at twenty).
+
+**Recommendation — (a), with a build step that resolves the ownership conflict.** Separate
+source from shipped: `art/` stays Blender-owned working directory, and `art/build.ps1`
+(which already exists) copies finished sprites into a game-facing directory Godot imports
+normally. Nothing writes into `art/` from the engine, the export packs real resources, and
+the pipeline shape already matches — `art/renders` → `art/sprites` gains one more hop. This
+is a pipeline change, so it is a decision, not a cleanup.
+
 ## Protocol: silent compensation — when absence is indistinguishable from success
 
 **Codified at the audit re-application session (2026-08-24)** after the third instance in
@@ -1059,6 +1163,44 @@ dispatches to every building type it should. That is the same shape one level do
 
 **When adding a system to any tick path, delete the call and run the suite before you
 consider it covered.** If nothing reddens, the coverage does not exist yet.
+
+### Fourth instance (2026-08-24): the sprite draw call site
+
+`SpriteLibrary.draw_building` was added to the building draw loop and **deleting the call
+site left the suite at `57 passed, 0 failed`** — the same shape as `Buildings.post_tick_one`
+before `test_tick_loop_wiring.gd`. Found by applying the rule above rather than by accident.
+
+The sprite path is doubly exposed to this: a sprite that fails to load falls back to
+`draw_one()`, so the building **still renders** and a broken asset looks like a working game.
+That is why the guards there are deliberately loud — a startup manifest line reporting
+loaded-vs-declared, a `push_error` when any declared sprite fails, and a magenta X painted
+over any building that fell back. Verified by moving `chest.png` aside and running it, not
+by assuming it would be obvious.
+
+### ⚠ A structural ceiling: no CanvasItem can be render-tested headless
+
+The sprite call site is now pinned **by source text, not by execution**. `test_runner.gd`
+calls suites synchronously and never yields a frame, so **no `CanvasItem` in this project can
+receive `NOTIFICATION_DRAW` during a headless run**. Nothing in the suite has ever executed a
+`_draw()`.
+
+This is a hard limit on what the test suite can cover, and it is worth naming beside silent
+compensation because it has the same consequence: **rendering defects cannot redden a
+headless run, so a green suite carries no information about what the game looks like.** The
+executed check for the sprite path is a windowed flag-on/flag-off pixel differential, run by
+hand. Any future render work inherits this ceiling — plan for a windowed capture step rather
+than assuming a suite can guard it.
+
+### Corollary: `passed,` alone is not a safe signal
+
+During the same session a genuine **Parse Error** was introduced and the runner still printed
+**`57 passed, 0 failed`** with **268 `SCRIPT ERROR` lines** above it. The summary line was
+truthful about the suites that ran and silent about the file that failed to compile — silent
+compensation in the test harness itself.
+
+The standing run protocol checks **all three** counts (`passed,` **and** `Parse Error` **and**
+`SCRIPT ERROR`) for exactly this reason. That protocol is load-bearing, not belt-and-braces;
+it is what caught this.
 
 ## Protocol: reproduce the described consequence, not just the described mechanism
 
