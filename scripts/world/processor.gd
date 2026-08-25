@@ -261,6 +261,21 @@ static func _emit_outputs(b: Building, recipe: Dictionary) -> void:
 ##
 ## Outputs processed in array order; first push that succeeds wins the
 ## tick. Two outputs preferring the same edge = first listed wins.
+##
+## The no-preference branch used to build its edge-cell list TWICE — once for
+## the chest sweep and again, identically, for the belt sweep. It is computed
+## once now and iterated twice (audit #33). `Buildings.all_edge_cells` appends
+## dir 0,1,2,3 in order and each dir's cells in order, so the iteration order
+## is byte-identical to the two `for dir in 4` loops it replaces — no change
+## to which neighbour wins a contested push, which CONVENTIONS.md's tick
+## determinism rule requires.
+##
+## MEASURED (debug headless build, 200 mills, 100 ticks): a no-preference
+## processor made 12.00 `edge_cells()` calls per building-tick — 4 in the pull
+## sweep, 8 here. At 0.569 us/call that was 6.83 us of an 18.45 us
+## building-tick, i.e. 37%. This change removes 3 of the 12. The pull sweep is
+## deliberately left alone: it scans once, so hoisting it into
+## `all_edge_cells` would allocate 5 arrays where it now allocates 4.
 static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) -> void:
 	for pair in recipe["outputs_solid"]:
 		var item_type: int = int(pair[0])
@@ -277,14 +292,13 @@ static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) ->
 			# Push failed — item waits.
 		else:
 			# No preference: chests first across all edges, then belts.
-			for dir in 4:
-				for cell in Buildings.edge_cells(b.type, b.anchor, dir):
-					if _try_push_chest_to_cell(b, world, item_type, cell):
-						return
-			for dir in 4:
-				for cell in Buildings.edge_cells(b.type, b.anchor, dir):
-					if _try_push_belt_to_cell(b, world, item_type, cell):
-						return
+			var cells: Array = Buildings.all_edge_cells(b.type, b.anchor)
+			for cell in cells:
+				if _try_push_chest_to_cell(b, world, item_type, cell):
+					return
+			for cell in cells:
+				if _try_push_belt_to_cell(b, world, item_type, cell):
+					return
 
 ## True when `belt` carries items INTO building `b` — that is, the cell the
 ## belt points at is inside b's footprint. Such a belt is a FEEDER, and is
