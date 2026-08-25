@@ -83,6 +83,7 @@ const TESTS: Array = [
 	# inserter panel's status line. Neither needs a frame — see
 	# docs/scoping/visual-verification.md, route A.
 	preload("res://scripts/tests/test_inserter_body_colours.gd"),
+	preload("res://scripts/tests/test_inserter_status_strings.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.

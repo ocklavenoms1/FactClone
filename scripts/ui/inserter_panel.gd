@@ -43,6 +43,56 @@ const COLOR_NO_FUEL: Color = Color(0.55, 0.70, 1.00)
 # a body colour, so an actual amber is available here.
 const COLOR_NO_POWER: Color = Color(1.00, 0.62, 0.25)
 const COLOR_IDLE: Color = Color(0.75, 0.75, 0.75)
+# Unrecognised state. Magenta for the same reason SpriteLibrary's fallback
+# marker is magenta: nothing else in the palette is, so it cannot be mistaken
+# for a real status. Reachable only via a STATE_* constant with no arm in
+# `status_line` — which `test_inserter_status_strings.gd` forbids.
+const COLOR_UNKNOWN: Color = Color(1.00, 0.00, 1.00)
+const STATUS_UNKNOWN_TEXT: String = "Status: ?"
+
+## The panel's state → status-line mapping. PURE, and static, so it can be
+## asserted without a font, a frame or a window — `test_inserter_status_strings.gd`
+## is the assertion. It used to live inline in `_draw_building_specific`, where
+## nothing in 57 suites could reach it: `test_runner.gd` calls suites
+## synchronously and never yields a frame, so no CanvasItem in this project
+## receives NOTIFICATION_DRAW during a headless run. See
+## `docs/scoping/visual-verification.md` — this is route A, and lifting the map
+## out of the draw call is the whole of what route A needs.
+##
+## Returns { "text": String, "color": Color }.
+##
+## ⚠ THE FALLBACK ARM IS LOAD-BEARING, and it is new. The inline `match` had no
+## default: an unrecognised state left `status_text` at "" and `status_color` at
+## the Color default, so the panel drew an EMPTY BLACK STRING and looked like a
+## panel with no status line rather than like a bug. That is the silent-
+## compensation shape NOTES.md names — absence indistinguishable from success.
+## "Status: ?" matches what `processor_panel.gd` and `mixer_panel.gd` already do
+## with an out-of-range state, and it gives the exhaustiveness test something to
+## assert against: no STATE_* constant may map to it.
+##
+## THE OTHER COPY: `Inserter.info_lines` carries a SECOND state→string map for
+## the hover info panel, deliberately worded differently — its rows are measured
+## against a 220 px panel and carry imperative fixes ("NO POWER — connect a
+## pole") that do not fit here. The two are not duplicates to be merged; they
+## are two audiences. What they must not do is diverge on WHICH states they can
+## tell apart, and that is what the test pins across both.
+static func status_line(state: int) -> Dictionary:
+	match state:
+		Inserter.STATE_IDLE:
+			return {"text": "Status: IDLE", "color": COLOR_IDLE}
+		Inserter.STATE_WORKING_OUT:
+			return {"text": "Status: WORKING (out)", "color": COLOR_WORKING}
+		Inserter.STATE_BLOCKED_AT_DEST:
+			return {"text": "Status: BLOCKED at destination", "color": COLOR_BLOCKED}
+		Inserter.STATE_WORKING_IN:
+			return {"text": "Status: WORKING (returning)", "color": COLOR_WORKING}
+		Inserter.STATE_NO_FUEL:
+			return {"text": "Status: NO FUEL", "color": COLOR_NO_FUEL}
+		Inserter.STATE_NO_POWER:
+			# Its own entry, not folded into NO_FUEL: distinct text and
+			# distinct colour are the entire point of the line.
+			return {"text": "Status: NO POWER", "color": COLOR_NO_POWER}
+	return {"text": STATUS_UNKNOWN_TEXT, "color": COLOR_UNKNOWN}
 
 func _top_area_height() -> int:
 	# Held item slot row (~70) + cycle bar row (~40) + source/dest text
@@ -98,31 +148,9 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 
 	# --- Status (top-right) ---
 	var s: int = int(building.state.get("state", Inserter.STATE_IDLE))
-	var status_text: String
-	var status_color: Color
-	match s:
-		Inserter.STATE_IDLE:
-			status_text = "Status: IDLE"
-			status_color = COLOR_IDLE
-		Inserter.STATE_WORKING_OUT:
-			status_text = "Status: WORKING (out)"
-			status_color = COLOR_WORKING
-		Inserter.STATE_BLOCKED_AT_DEST:
-			status_text = "Status: BLOCKED at destination"
-			status_color = COLOR_BLOCKED
-		Inserter.STATE_WORKING_IN:
-			status_text = "Status: WORKING (returning)"
-			status_color = COLOR_WORKING
-		Inserter.STATE_NO_FUEL:
-			status_text = "Status: NO FUEL"
-			status_color = COLOR_NO_FUEL
-		Inserter.STATE_NO_POWER:
-			# Its own entry, not folded into NO_FUEL: distinct text and
-			# distinct colour are the entire point of the line.
-			status_text = "Status: NO POWER"
-			status_color = COLOR_NO_POWER
+	var status: Dictionary = status_line(s)
 	draw_string(font, Vector2(label_x + 160, area.position.y + 30 + 16),
-		status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, status_color)
+		String(status["text"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, status["color"])
 
 	# --- Cycle progress bar ---
 	var bar_x: float = label_x
