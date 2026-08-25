@@ -124,7 +124,7 @@ static func _case_1_declared_assets_are_rejected_for_bottom_padding(failures: Ar
 	# in the JSON validation that runs before the texture step.
 	for f in failed:
 		var msg: String = str(f)
-		for needle in ["transparent bottom row", "re-export"]:
+		for needle in ["below the alpha-8 opacity threshold", "re-export"]:
 			if not msg.contains(needle):
 				failures.append("(1) a declared sprite failed for something OTHER than bottom padding — expected '%s' in \"%s\"" % [needle, msg])
 		# Every asset is named by its own file, not by a generic message.
@@ -547,7 +547,7 @@ static func _case_14_transparent_bottom_padding(failures: Array) -> void:
 	_write_png_padded("c14.png", 32, 64, 4, 255)
 	_write_text("c14.json", _json("c14", [1, 2], [32, 64], [16, 64], "c14.png"))
 	_expect_reject(failures, "(14a)", SpriteLibrary.load_asset(TMP, "c14", 1),
-		["c14.png", "4 fully transparent bottom rows", "re-export"])
+		["c14.png", "4 bottom rows below the alpha-8 opacity threshold", "re-export"])
 
 	# (b) clean body, padded shadow.
 	_write_png_padded("c14b.png", 32, 64, 0, 255)
@@ -555,7 +555,7 @@ static func _case_14_transparent_bottom_padding(failures: Array) -> void:
 	_write_text("c14b.json", _json("c14b", [1, 2], [32, 64], [16, 64], "c14b.png"))
 	_write_text("c14b_shadow.json", JSON.stringify({"anchor_px": [16, 64]}))
 	_expect_reject(failures, "(14b)", SpriteLibrary.load_asset(TMP, "c14b", 1),
-		["c14b_shadow.png", "3 fully transparent bottom rows"])
+		["c14b_shadow.png", "3 bottom rows below the alpha-8 opacity threshold"])
 
 	# (c) clean body, padded GLOW — must LOAD. The exemption, exercised.
 	_write_png_padded("c14c.png", 32, 64, 0, 255)

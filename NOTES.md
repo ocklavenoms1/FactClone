@@ -1271,6 +1271,41 @@ redden a headless run, so a green suite carries no information about what the ga
 like.** The executed check for the sprite path remains a windowed flag-on/flag-off pixel
 differential. Full re-scope in `docs/scoping/visual-verification.md`.
 
+### ⚠ Rule recursion: a rule against a failure shape is itself subject to that shape
+
+**This has now happened at least four times, which makes it a pattern rather than
+carelessness.** Each time, a rule was written to catch a specific failure, and the rule
+went on to commit that exact failure:
+
+1. **The audit tracker's anti-drift baseline block drifted.** Written to stop stale
+   counts; shipped with two wrong counts, and instructed readers to propagate one of
+   them ("correct #82 to 13" — the 13th match was a doc comment).
+2. **Finding #31 was re-filed as "R1, newly found"** — in the document whose entire
+   purpose is knowing what is already tracked.
+3. **`git checkout -- <path>` was used one command after writing the rule against it**,
+   reverting the very edit the rule existed to protect.
+4. **The zero-padding rule would have grandfathered the smelter.** The rule was adopted
+   specifically to close the silent-compensation shape, and as first specified — "the
+   bottom row must contain at least one non-zero alpha pixel" — both smelter masters
+   passed on a single stray pixel at **alpha 3 of 255**. Absence indistinguishable from
+   success, reappearing *inside* the rule written to close it. Caught only because the
+   implementer measured the alpha distribution instead of reading the rule back and
+   agreeing with it.
+
+**Why it keeps happening:** writing a rule creates the feeling of having handled the
+problem, and that feeling substitutes for checking. The rule is the newest, least-tested
+artefact in the repo at the moment it is written, and it is the one thing nobody thinks
+to test — because it is the test.
+
+**The practice:** **verify the rule by mutation, not by reading it back.** Construct the
+case the rule is supposed to reject and confirm it *is* rejected. For a threshold, derive
+it from measured data and check the distribution has a gap where you put it — the alpha-8
+figure survives because per-row maxima cluster at 1, 3, 4 (anti-aliasing) and 18+ (real
+silhouette), with nothing between 5 and 17. For a count, re-derive it from the source. For
+a status claim, run the command in the row.
+
+A rule you have only read is a rule you have only hoped for.
+
 ### Corollary: `passed,` alone is not a safe signal
 
 During the same session a genuine **Parse Error** was introduced and the runner still printed

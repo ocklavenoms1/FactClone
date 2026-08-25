@@ -429,8 +429,8 @@ static func _load_texture(path: String, expect_px: Vector2i, require_ground_cont
 	if require_ground_contact:
 		var empty: int = empty_bottom_rows(img)
 		if empty > 0:
-			return {"ok": false, "error": "%s has %d fully transparent bottom row%s (bottom row's strongest pixel is alpha %d of 255; at least one pixel at %d or more is required). anchor_px.y is the sprite's bottom edge AND its ground-contact row, so the silhouette must reach the bottom edge — re-export with no transparent bottom padding."
-				% [path, empty, "" if empty == 1 else "s", int(round(_row_max_alpha(img, got.y - 1) * 255.0)), int(round(BOTTOM_ROW_MIN_ALPHA * 255.0))], "texture": null}
+			return {"ok": false, "error": "%s has %d bottom row%s below the alpha-%d opacity threshold (bottom row's strongest pixel is alpha %d of 255). anchor_px.y is the sprite's bottom edge AND its ground-contact row, so the silhouette must reach the bottom edge — re-export with no transparent bottom padding."
+				% [path, empty, "" if empty == 1 else "s", int(round(BOTTOM_ROW_MIN_ALPHA * 255.0)), int(round(_row_max_alpha(img, got.y - 1) * 255.0))], "texture": null}
 	return {"ok": true, "error": "", "texture": ImageTexture.create_from_image(img)}
 
 ## How many rows at the bottom of `img` carry no pixel at or above

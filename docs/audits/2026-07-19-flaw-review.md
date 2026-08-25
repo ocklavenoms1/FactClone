@@ -538,6 +538,43 @@ stated consequence stayed reachable — see #11's row, which now cites two commi
 consequence, not just the described mechanism. If the reproduction does not match the
 description, the mismatch is the finding — record it before fixing it.
 
+### R4. `Inserter.info_lines` reports an unmapped state as "Idle"
+
+**Found:** 2026-08-24, while writing the state→string mapping test for the
+visual-verification session. **Pinned by test, NOT fixed** — out of that session's scope.
+
+`scripts/world/inserter.gd:794-798`:
+
+```gdscript
+static func info_lines(b: Building, world) -> Array:
+	var lines: Array = []
+	var s: int = int(b.state.get("state", STATE_IDLE))
+	var status: String = "Idle"
+	match s:
+		STATE_WORKING_OUT: ...
+```
+
+The initialiser is the IDLE text, and the `match` has **no `STATE_IDLE` arm**. So the
+default is doing double duty: it serves the real idle state *and* every state nobody
+wrote an arm for. Add a tier or a stall reason and forget the arm, and Q-inspect
+reports the inserter as **idle** — a plausible, calm, wrong answer.
+
+**Why it is worth a number rather than a test comment.** This is silent compensation
+**in the reporting layer itself**, which is the worst place for it: the reporting layer
+is what a player or a developer consults to find out whether something is wrong. A
+missing arm does not look like missing information, it looks like information. Compare
+the deliberate care two arms below, where `STATE_NO_POWER` was given its own entry
+specifically so the player can tell *which* stall they are looking at — the file already
+knows that conflating stall reasons is the bug to avoid.
+
+Verified live by mutation: adding `const STATE_STACKING: int = 6` and asserting reddens
+`(3) info_lines: STATE_IDLE and STATE_STACKING both read "Status: Idle"`.
+
+**Fix shape:** give `STATE_IDLE` its own arm and make the default loud — an explicit
+"unknown state N" string beats a comfortable wrong one. `InserterPanel.status_line` had
+the mirror-image hole (empty string, no default arm) and **was** fixed in the same
+session; this half was left deliberately so the change stayed in scope.
+
 ## HIGH -- player-visible breakage or item loss  (10 findings)
 
 ### 1. load_game replaces all buildings without invalidating the fluid-network cache — stale pipe/pump connectivity after F9 quick-load
