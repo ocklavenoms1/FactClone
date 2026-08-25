@@ -1335,6 +1335,27 @@ with a reassuring name, a line old enough to feel load-bearing — each is a rea
 construct the failing case, not a reason to skip it. Applies with particular force to
 inherited defect reports: "the code already handles that" is a hypothesis.
 
+### The mutation that did not apply: a green run is not a passing one
+
+Cluster C, measured: **three mutations silently no-op'd** — two `perl -0pi` and one `sed`,
+all defeated by CRLF line endings that the patterns did not account for. One of the three
+produced a **fully green suite**, which reads exactly like "this guard is not load-bearing"
+and would have been recorded as a false negative — a guard deleted from the record because
+the tool that was supposed to break it never did.
+
+This is silent compensation in the *verification tooling*, and it is the most dangerous
+place yet for it, because a mutation pass is what this project uses to decide whether
+anything else is real. A mutation that does not apply produces the same green as a
+mutation that applies and is survived.
+
+**This is why the standing rule is to echo the mutated line back from disk, not to trust
+that the substitution ran.** All three were caught by the echo and by nothing else. On this
+repo specifically: files are CRLF, so any pattern anchored to `$` or `
+` needs `?`, and
+a substitution that reports success without changing the file is the normal failure, not
+the exotic one. Assert the file changed — compare a hash, or count matches before and
+after — rather than assuming a zero exit code means a zero-diff edit did something.
+
 ### Corollary: `passed,` alone is not a safe signal
 
 During the same session a genuine **Parse Error** was introduced and the runner still printed
@@ -1386,6 +1407,20 @@ So the check has two steps, not one: **first confirm the case reaches the code, 
 what it does.** Print from inside the branch, assert a precondition, or mutate the
 mechanism and watch the repro change — a repro whose result does not move when you break
 the thing it targets was never testing it.
+
+**⚠ Read the fix text as well as the description — it can name a route the description
+does not.** Cluster C, #18. Its title is "`STATE_NO_FUEL` has no fallback — smelter wedges
+with fuel available". The *description* points at the NO_FUEL arm, which re-checks and
+restarts correctly; on that basis the finding was nearly written off as false. But its
+**fix text** names a third route: `SMELTER`'s `slot_layout` binds an `"input"` slot to
+`in_buffer`, so `BuildingPanel._take_from_slot` can empty a stalled smelter from the panel.
+Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
+"NO FUEL" — the title, word for word, by a mechanism the description never mentions.
+
+The audit's sections were written by different passes and do not always agree about what
+the defect *is*. Treat the whole entry — title, description, evidence, fix text and
+verification notes — as one document with possibly-divergent claims, and reproduce the
+**title**, not just the paragraph under it.
 
 **In practice:** before closing an inherited finding, construct the failure the finding
 describes and watch it happen. If the reproduction does not match the description, *the
