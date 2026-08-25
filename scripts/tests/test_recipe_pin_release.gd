@@ -61,6 +61,8 @@ static func run(parent: Node) -> Dictionary:
 	_case_f_no_fuel_still_recovers(parent, failures)
 	_case_g_fresh_machine_unaffected(parent, failures)
 	_case_h_stalled_crop_is_named(parent, failures)
+	_case_i_no_fuel_survives_input_removal(parent, failures)
+	_case_j_no_fuel_narrowness(parent, failures)
 	if failures.is_empty():
 		return { "ok": true, "message": "" }
 	return { "ok": false, "message": " | ".join(failures) }
@@ -251,6 +253,110 @@ static func _case_g_fresh_machine_unaffected(parent: Node, failures: Array) -> v
 	_check(failures, mid > 0,
 		"(G) fresh belt-fed composter produced no compost: recipe='%s' in=%s out=%s"
 			% [str(comp.state["recipe_id"]), str(comp.state["in_buffer"]), str(comp.state["out_buffer"])])
+	_cleanup(world)
+
+## (I) The THIRD wedge route, and the only one reachable without a save file.
+##
+## STATE_NO_FUEL means "I have inputs and room, but no fuel". Take the inputs away
+## and that state is a lie, and nothing restored the truth: the NO_FUEL arm needs
+## `_has_all_inputs` to fire, selection is gated on IDLE, and `_try_pull_inputs`
+## filters belt pulls by the still-pinned recipe. So a smelter stalled on iron whose
+## ore is removed accepts iron and nothing else, forever.
+##
+## Reachable in ordinary play: SMELTER's slot_layout declares an "input" slot bound
+## to in_buffer (buildings.gd), and BuildingPanel._take_from_slot handles kind
+## "input" by removing the entry outright. Emptying a stuck smelter from its panel
+## is a reasonable thing for a player to do.
+##
+## This is the one part of #18 that is genuinely smelter-specific, and the reason is
+## structural rather than incidental: the composter's non-IDLE states (RUNNING,
+## BLOCKED_OUTPUT) do not depend on in_buffer — RUNNING has already consumed its
+## inputs and completes regardless, BLOCKED_OUTPUT re-checks room and drains via the
+## push. NO_FUEL is the only input-dependent non-IDLE state in either machine.
+static func _case_i_no_fuel_survives_input_removal(parent: Node, failures: Array) -> void:
+	var world = GridWorldScript.new()
+	parent.add_child(world)
+	for x in range(0, 4):
+		for y in range(0, 4):
+			world.set_overlay(Vector2i(x, y), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.SMELTER, Vector2i(1, 1), Belt.DIR_E)
+	world.place_building(Buildings.Type.BELT, Vector2i(0, 1), Belt.DIR_E)   # W edge, into smelter
+	var sm: Building = world.building_at(Vector2i(1, 1))
+	var orebelt: Building = world.building_at(Vector2i(0, 1))
+
+	# Drive it into NO_FUEL on iron.
+	sm.state["in_buffer"] = [[Items.Type.IRON_ORE, 1]]
+	sm.state["fuel_buffer"] = 0
+	sm.state["recipe_id"] = ""
+	sm.state["state"] = Smelter.STATE_IDLE
+	for _t in 3:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	_check(failures, int(sm.state["state"]) == Smelter.STATE_NO_FUEL,
+		"(I) setup: expected NO_FUEL, got state=%d" % int(sm.state["state"]))
+	_check(failures, str(sm.state["recipe_id"]) == "smelt_iron",
+		"(I) setup: expected smelt_iron pinned, got '%s'" % str(sm.state["recipe_id"]))
+
+	# Player empties the input slot from the panel, then supplies fuel and COPPER.
+	sm.state["in_buffer"] = []
+	sm.state["fuel_buffer"] = 8
+	for i in Belt.SLOTS_PER_TILE:
+		orebelt.state["slots"][i] = Items.Type.COPPER_ORE
+
+	for _t in 400:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+
+	_check(failures, _bag_count(sm.state["out_buffer"], Items.Type.COPPER_INGOT) > 0,
+		"(I) NO_FUEL smelter wedged after its inputs were taken: 400 ticks, state=%d recipe='%s' in=%s out=%s fuel=%d belt=%s"
+			% [int(sm.state["state"]), str(sm.state["recipe_id"]), str(sm.state["in_buffer"]),
+			   str(sm.state["out_buffer"]), int(sm.state["fuel_buffer"]), str(orebelt.state["slots"])])
+	_cleanup(world)
+
+## (J) RETENTION, and the reason case (I)'s guard is an `elif` and not an `else`.
+##
+## The narrow guard leaves NO_FUEL only when NO_FUEL's own precondition — inputs
+## present — is violated. An unconditional `else` would also fire when inputs are
+## present but the OUTPUT buffer is full, reporting "Idle" for a machine that is in
+## fact short of fuel and short of a sink.
+##
+## This case exists because the rationale #18's fix text gave for preferring `elif`
+## — that `else` would "oscillate IDLE<->NO_FUEL every tick" — is false here, and
+## was measured false: the `else` binds to the outer `if inputs and room`, so with
+## inputs present it never runs. Swapping `elif` for `else` left the entire suite
+## green, which is exactly why this case had to be written rather than trusting the
+## inherited reasoning.
+static func _case_j_no_fuel_narrowness(parent: Node, failures: Array) -> void:
+	var world = GridWorldScript.new()
+	parent.add_child(world)
+	for dx in 2:
+		for dy in 2:
+			world.set_overlay(Vector2i(dx, dy), Terrain.Overlay.STONE)
+	world.place_building(Buildings.Type.SMELTER, Vector2i(0, 0), Belt.DIR_E)
+	var sm: Building = world.building_at(Vector2i(0, 0))
+	sm.state["in_buffer"] = [[Items.Type.IRON_ORE, 4]]
+	sm.state["fuel_buffer"] = 0
+	sm.state["recipe_id"] = ""
+	sm.state["state"] = Smelter.STATE_IDLE
+
+	for _t in 3:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+	_check(failures, int(sm.state["state"]) == Smelter.STATE_NO_FUEL,
+		"(J) setup: expected NO_FUEL, got state=%d" % int(sm.state["state"]))
+
+	# Now jam the output too. Inputs are still there, so NO_FUEL is still the
+	# honest state and must survive.
+	sm.state["out_buffer"] = [[Items.Type.IRON_INGOT, 8]]   # output_capacity is 8
+	for _t in 20:
+		TickSystem.current_tick += 1
+		TickSystem.tick.emit(TickSystem.current_tick)
+
+	_check(failures, int(sm.state["state"]) == Smelter.STATE_NO_FUEL,
+		"(J) a fuel-starved smelter with inputs reported state=%d once its output filled; NO_FUEL must survive a full output because inputs are still present"
+			% int(sm.state["state"]))
+	_check(failures, _bag_count(sm.state["in_buffer"], Items.Type.IRON_ORE) == 4,
+		"(J) inputs must be untouched, got %s" % str(sm.state["in_buffer"]))
 	_cleanup(world)
 
 ## (H) Selection branch (3): nothing startable AND no belt offering anything.

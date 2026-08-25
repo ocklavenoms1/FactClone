@@ -130,6 +130,38 @@ static func tick(b: Building, world) -> void:
 					Processor._consume_inputs(b, recipe)
 					b.state["progress"] = 1
 					b.state["state"] = STATE_SMELTING
+			elif not Processor._has_all_inputs(b, recipe):
+				# Inputs went away underneath us — the player emptied the input
+				# slot from the panel (SMELTER's slot_layout binds an "input"
+				# slot to in_buffer, and BuildingPanel._take_from_slot removes
+				# the entry outright). STATE_NO_FUEL asserts "inputs and room,
+				# just no fuel"; with the inputs gone that is a lie, and nothing
+				# else can undo it — this arm needs _has_all_inputs to fire,
+				# _maybe_select_recipe is gated on STATE_IDLE, and
+				# _try_pull_inputs filters belt pulls by the still-pinned
+				# recipe. So the machine would accept the pinned ore and nothing
+				# else, forever. Audit #18, measured: 400 ticks with fuel 8 and
+				# four copper ore on the W belt produced nothing.
+				#
+				# Deliberately an `elif` on missing INPUTS, not an unconditional
+				# `else`. #18's fix text justified the narrow form by saying an
+				# unconditional `else` would "oscillate IDLE<->NO_FUEL every
+				# tick" in the ordinary fuel-starved case. **That rationale is
+				# wrong for this code and was mutation-tested to be wrong**: the
+				# `else` would bind to the OUTER `if inputs and room`, not to
+				# the inner fuel check, so with inputs present it never runs and
+				# nothing oscillates. Swapping this `elif` for `else` keeps the
+				# whole suite green.
+				#
+				# The real difference, which case (J) pins: an unconditional
+				# `else` ALSO fires when inputs are present but the output
+				# buffer is full, reporting "Idle" for a machine that is
+				# actually short of fuel and short of a sink. The rule kept is
+				# the narrow one — leave a state only when that state's own
+				# precondition is violated. NO_FUEL claims "inputs and room, no
+				# fuel"; missing inputs falsifies it, a full output does not
+				# make "Idle" any truer and _try_push_outputs is draining it.
+				b.state["state"] = STATE_IDLE
 			# else: still stalled (input/output may have changed, re-check next tick).
 		STATE_BLOCKED_OUTPUT:
 			if Processor._has_room_for_outputs(b, recipe):
