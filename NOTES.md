@@ -1335,7 +1335,20 @@ with a reassuring name, a line old enough to feel load-bearing — each is a rea
 construct the failing case, not a reason to skip it. Applies with particular force to
 inherited defect reports: "the code already handles that" is a hypothesis.
 
-### The mutation that did not apply: a green run is not a passing one
+### A tier above rule recursion: the verification tooling reporting success while doing nothing
+
+**This is not a fifth instance of rule recursion — it is a level up.** The four instances
+above are *rules* that failed to catch what they targeted. This is the **mechanism that
+adjudicates every other claim** returning success while doing nothing.
+
+**A mutation that silently fails to apply produces a green suite indistinguishable from a
+guard that is not load-bearing** — and the recorded conclusion would be to strike a real
+guard from the record as unnecessary. Every other protocol in this file bottoms out in
+"mutate it and see". If the mutation is a no-op, all of them fail open at once, quietly,
+and in the direction of deleting protection.
+
+**The only check that catches it is echoing the mutated line back from disk.** Not the
+tool's exit code, not the absence of an error, not re-reading the command you typed.
 
 Cluster C, measured: **three mutations silently no-op'd** — two `perl -0pi` and one `sed`,
 all defeated by CRLF line endings that the patterns did not account for. One of the three
@@ -1351,7 +1364,8 @@ mutation that applies and is survived.
 **This is why the standing rule is to echo the mutated line back from disk, not to trust
 that the substitution ran.** All three were caught by the echo and by nothing else. On this
 repo specifically: files are CRLF, so any pattern anchored to `$` or `
-` needs `?`, and
+` needs `
+?`, and
 a substitution that reports success without changing the file is the normal failure, not
 the exotic one. Assert the file changed — compare a hash, or count matches before and
 after — rather than assuming a zero exit code means a zero-diff edit did something.
@@ -1408,19 +1422,21 @@ what it does.** Print from inside the branch, assert a precondition, or mutate t
 mechanism and watch the repro change — a repro whose result does not move when you break
 the thing it targets was never testing it.
 
-**⚠ Read the fix text as well as the description — it can name a route the description
-does not.** Cluster C, #18. Its title is "`STATE_NO_FUEL` has no fallback — smelter wedges
+**⚠ Reproduce the TITLE, not just the paragraph. The title is the claim; the paragraph is
+one author's account of it.** The audit's sections were written by different passes, and
+across ~60 remaining findings they carry this structure throughout — title, description,
+evidence, fix text and verification notes are five accounts that can disagree about what
+the defect is. A description that does not reproduce is evidence about *that account*, not
+about the finding. Read the whole entry, and hold the title as the thing to be shown true
+or false.
+
+Cluster C, #18 is the worked example. Its title is "`STATE_NO_FUEL` has no fallback — smelter wedges
 with fuel available". The *description* points at the NO_FUEL arm, which re-checks and
 restarts correctly; on that basis the finding was nearly written off as false. But its
 **fix text** names a third route: `SMELTER`'s `slot_layout` binds an `"input"` slot to
 `in_buffer`, so `BuildingPanel._take_from_slot` can empty a stalled smelter from the panel.
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
-
-The audit's sections were written by different passes and do not always agree about what
-the defect *is*. Treat the whole entry — title, description, evidence, fix text and
-verification notes — as one document with possibly-divergent claims, and reproduce the
-**title**, not just the paragraph under it.
 
 **In practice:** before closing an inherited finding, construct the failure the finding
 describes and watch it happen. If the reproduction does not match the description, *the
