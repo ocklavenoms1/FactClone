@@ -96,6 +96,9 @@ const TESTS: Array = [
 	# its rollback, the radius bounds on deplete_area / tile, set_soil's
 	# wasteland clear, and the header-vs-registry command inventory.
 	preload("res://scripts/tests/test_console_guards.gd"),
+	# Audit cluster C, #15/#18: the shared recipe-pin rule for Smelter and
+	# Composter — a pin may stay only while it is resolvable AND startable.
+	preload("res://scripts/tests/test_recipe_pin_release.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

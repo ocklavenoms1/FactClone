@@ -55,6 +55,11 @@ static func make(pos: Vector2i, dir: int = 0) -> Building:
 	return Building.new(Buildings.Type.COMPOSTER, pos, Processor.make_state("", dir))
 
 static func tick(b: Building, world) -> void:
+	# Pre-step 0: release a pin the registry can no longer resolve. Must run
+	# BEFORE the IDLE gate below, because the wedge it clears is precisely a
+	# NON-IDLE state holding a dead recipe_id — see audit #18 and
+	# Processor.release_unresolvable_recipe. Same call, same place, in Smelter.
+	Processor.release_unresolvable_recipe(b)
 	# Pre-step: when IDLE (no recipe in flight), auto-select based on what's
 	# in the buffer or coming down adjacent belts. Once RUNNING, recipe is
 	# pinned for that batch — same contract as Smelter.
@@ -65,16 +70,35 @@ static func tick(b: Building, world) -> void:
 ## Pick recipe_id at IDLE based on what crop is available.
 ##
 ## Order of precedence (mirrors Smelter):
-##   1. in_buffer first (FIFO — first-arrived item wins).
+##   1. in_buffer first (FIFO — first-arrived item wins) — but only entries
+##      that can actually START their recipe. See audit #15: every composter
+##      recipe except the loaf-pack one needs TWO of its input, so a lone crop
+##      used to pin a recipe that could never run, and because
+##      `Processor._try_pull_inputs` filters belt pulls by the PINNED recipe,
+##      a belt of anything else was never pulled and never even seen. Branch
+##      (2) below exists to notice that belt; branch (1)'s unconditional early
+##      return made it unreachable.
 ##   2. Port peek — scan ALL 4 adjacent belts (composter is non-rotatable
 ##      and has no prefer_dir, so any side counts).
-##   3. Otherwise leave recipe_id unchanged (will be "" on a fresh composter).
+##   3. Fall back to the first buffer match, so the panel still names what is
+##      waiting when nothing can start and no belt offers anything.
+##   4. Otherwise leave recipe_id unchanged (will be "" on a fresh composter).
+##
+## A partial stack is NOT abandoned when more of it is coming: branch (2) sees
+## the same crop on the belt and re-pins the same recipe. Falling through only
+## changes the outcome when something ELSE is available.
 static func _maybe_select_recipe(b: Building, world) -> void:
-	# (1) in_buffer.
+	# (1) in_buffer — startable entries only.
+	var first_match: String = ""
 	for entry in b.state.get("in_buffer", []):
 		var item_type: int = int(entry[0])
-		if int(entry[1]) > 0 and _INPUT_TO_RECIPE.has(item_type):
-			b.state["recipe_id"] = _INPUT_TO_RECIPE[item_type]
+		if int(entry[1]) <= 0 or not _INPUT_TO_RECIPE.has(item_type):
+			continue
+		var rid: String = _INPUT_TO_RECIPE[item_type]
+		if first_match == "":
+			first_match = rid
+		if Processor.can_start_from_buffer(b, Recipes.get_recipe(rid)):
+			b.state["recipe_id"] = rid
 			return
 	# (2) port peek — all 4 sides.
 	for d in [Belt.DIR_E, Belt.DIR_S, Belt.DIR_W, Belt.DIR_N]:
@@ -87,7 +111,11 @@ static func _maybe_select_recipe(b: Building, world) -> void:
 				if t >= 0 and _INPUT_TO_RECIPE.has(t):
 					b.state["recipe_id"] = _INPUT_TO_RECIPE[t]
 					return
-	# (3) leave recipe_id as-is (likely "" → Processor.tick early-returns).
+	# (3) nothing startable and no eligible belt — name the waiting crop anyway.
+	if first_match != "":
+		b.state["recipe_id"] = first_match
+		return
+	# (4) leave recipe_id as-is (likely "" → Processor.tick early-returns).
 
 # ---------- visual ----------
 

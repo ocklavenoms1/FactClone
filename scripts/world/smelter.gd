@@ -80,6 +80,14 @@ static func tick(b: Building, world) -> void:
 	# Step 1: fuel pull (S edge, rotated).  [BURNER LINE 2/N]
 	Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR))
 
+	# Step 1b: release a pin the registry can no longer resolve. Must run BEFORE
+	# the IDLE gate below AND before step 3's `recipe.is_empty(): return`,
+	# because the wedge it clears is precisely a NON-IDLE state holding a dead
+	# recipe_id — the bail fires first and selection never gets a turn. See
+	# audit #18 and Processor.release_unresolvable_recipe. Same call, same
+	# place, in Composter.
+	Processor.release_unresolvable_recipe(b)
+
 	# Step 2: maybe pick a recipe based on what's available.
 	if int(b.state.get("state", STATE_IDLE)) == STATE_IDLE:
 		_maybe_select_recipe(b, world)
@@ -135,22 +143,38 @@ static func tick(b: Building, world) -> void:
 ## Pick recipe_id at IDLE based on what ore is available.
 ##
 ## Order of precedence:
-##   1. in_buffer: if any item in the buffer matches a known recipe, pick
-##      THAT recipe (FIFO via array order — first item wins). This is the
-##      key "belt routing IS the recipe selector" contract: items pulled
-##      first get smelted first, even if a different ore arrives later.
-##   2. Input port peek: if buffer is empty, scan adjacent W-edge belts
-##      for any recipe-eligible ore. First found wins.
-##   3. Otherwise: leave recipe_id unchanged (will be "" on a fresh smelter).
+##   1. in_buffer: if any item in the buffer matches a known recipe AND that
+##      recipe can start from what is buffered, pick THAT recipe (FIFO via
+##      array order — first startable item wins). This is the key "belt
+##      routing IS the recipe selector" contract: items pulled first get
+##      smelted first, even if a different ore arrives later.
+##   2. Input port peek: scan adjacent W-edge belts for any recipe-eligible
+##      ore. First found wins.
+##   3. Fall back to the first buffer match, so the panel still names the ore
+##      that is waiting when nothing can start and no belt offers anything.
+##   4. Otherwise: leave recipe_id unchanged (will be "" on a fresh smelter).
 ##
 ## Recipe-switching only happens when the buffer is empty AT IDLE — once
 ## SMELTING, the recipe is pinned for the duration of that batch.
+##
+## The "can start" test in (1) is a NO-OP for every smelter recipe shipping
+## today, because all of them need exactly 1 ore. It is here anyway: this is
+## the same rule Composter runs (audit #15/#18 are one defect in two files),
+## and the first smelter recipe needing 2+ of an ore would otherwise wedge the
+## machine exactly as a lone wheat wedged the composter. Keeping the two
+## selectors identical is what stops them drifting apart again.
 static func _maybe_select_recipe(b: Building, world) -> void:
 	# (1) in_buffer first — FIFO ordering preserves first-arrived-wins.
+	var first_match: String = ""
 	for entry in b.state.get("in_buffer", []):
 		var item_type: int = int(entry[0])
-		if int(entry[1]) > 0 and _INPUT_TO_RECIPE.has(item_type):
-			b.state["recipe_id"] = _INPUT_TO_RECIPE[item_type]
+		if int(entry[1]) <= 0 or not _INPUT_TO_RECIPE.has(item_type):
+			continue
+		var rid: String = _INPUT_TO_RECIPE[item_type]
+		if first_match == "":
+			first_match = rid
+		if Processor.can_start_from_buffer(b, Recipes.get_recipe(rid)):
+			b.state["recipe_id"] = rid
 			return
 	# (2) port peek.
 	var ore_dir: int = Buildings.world_dir(b, Belt.DIR_W)
@@ -163,7 +187,11 @@ static func _maybe_select_recipe(b: Building, world) -> void:
 			if t >= 0 and _INPUT_TO_RECIPE.has(t):
 				b.state["recipe_id"] = _INPUT_TO_RECIPE[t]
 				return
-	# (3) leave recipe_id as-is.
+	# (3) nothing startable and no eligible belt — name the waiting ore anyway.
+	if first_match != "":
+		b.state["recipe_id"] = first_match
+		return
+	# (4) leave recipe_id as-is.
 
 # ---------- Q-inspect / info_lines ----------
 

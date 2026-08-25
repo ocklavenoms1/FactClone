@@ -80,6 +80,63 @@ static func tick(b: Building, world: Node2D) -> void:
 	# 3. PUSH: try to ship one output item onto any adjacent belt.
 	_try_push_outputs(b, world, recipe)
 
+# ---------- the recipe-pin rule (shared by Smelter and Composter) ----------
+#
+# Both multi-recipe machines pin `recipe_id` and re-run selection only while
+# IDLE. Audit findings #15 and #18 are the same defect in the two files: the
+# pin had no release path, so a bad pin was permanent. Two ways it goes bad,
+# one measured per file — see scripts/tests/test_recipe_pin_release.gd.
+#
+# THE RULE: a recipe_id may stay pinned only while it is RESOLVABLE and
+# STARTABLE. These two helpers are the single source of it; Smelter and
+# Composter both call both, so the files cannot drift apart again.
+
+## True when `recipe` could begin RIGHT NOW from what is already in in_buffer.
+##
+## Selection uses this so it does not pin a recipe the buffer cannot satisfy.
+## The composter is where this bites: every composter recipe but the loaf-pack
+## one needs TWO of its input, so a lone crop maps to a recipe that can never
+## start, and because `_try_pull_inputs` filters belt pulls by the PINNED
+## recipe, nothing else is ever pulled or even seen. All smelter recipes
+## currently need 1, which makes this a no-op there TODAY — not "optional
+## future-proofing". The first smelter recipe that needs two of an ore (steel,
+## an alloy) wedges exactly like the composter, and the rule is cheaper to
+## keep uniform than to re-derive.
+static func can_start_from_buffer(b: Building, recipe: Dictionary) -> bool:
+	if recipe.is_empty():
+		return false
+	return _has_all_inputs(b, recipe)
+
+## Release a pinned recipe_id the registry can no longer resolve, returning
+## the machine to IDLE so selection can run again. Returns true if it fired.
+##
+## `Recipes.get_recipe` returns {} for an unknown id and its own comment names
+## the cause: "if a save references a recipe ID that's been renamed/removed".
+## SaveSystem restores building state verbatim and never validates recipe_id,
+## so a machine saved mid-batch whose recipe is later renamed reloads NON-IDLE
+## with an unresolvable pin. Both tick functions then bail at
+## `if recipe.is_empty(): return` BEFORE their state machine, while selection
+## is gated on IDLE — no path back, and one push_warning per id, ever.
+##
+## recipe_id "" is NOT a dead pin: it is the documented "nothing selected yet"
+## sentinel a fresh Smelter/Composter is built with. Left alone deliberately.
+##
+## Any inputs already consumed into the in-flight batch are gone — the recipe
+## that said what to emit is gone with them. in_buffer is left untouched so
+## everything not yet consumed survives the release.
+static func release_unresolvable_recipe(b: Building) -> bool:
+	var id: String = str(b.state.get("recipe_id", ""))
+	if id == "":
+		return false
+	if not Recipes.get_recipe(id).is_empty():
+		return false
+	b.state["recipe_id"] = ""
+	# Processor.IDLE and Smelter.STATE_IDLE are separate enums that both == 0;
+	# this line is correct for either caller because of that coincidence.
+	b.state["state"] = IDLE
+	b.state["progress"] = 0
+	return true
+
 # ---------- helpers: inputs ----------
 
 ## Pull inputs from adjacent belts. Multi-tile aware: scans every cell
