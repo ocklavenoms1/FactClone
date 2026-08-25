@@ -1395,6 +1395,21 @@ and in the direction of deleting protection.
 **The only check that catches it is echoing the mutated line back from disk.** Not the
 tool's exit code, not the absence of an error, not re-reading the command you typed.
 
+**Second instance of the same tier, found in Cluster H: the *editing* tool silently
+rewrote two files wholesale from CRLF to LF.** `git autocrlf=true` normalised it back on
+the way into the index, so **the diff showed nothing** — and the change was invisible until
+a multi-line mutation anchor stopped matching mid-matrix. Same shape: a tool reported
+success, altered something it never mentioned, and the safety net that should have surfaced
+it (the diff) was the thing that hid it.
+
+Practical consequence on this repo: after any bulk edit, check line endings before trusting
+a mutation anchor — `python -c "d=open(F,'rb').read(); print(d.count(b'
+'), d.count(b'
+')-d.count(b'
+'))"`
+should report zero lone LFs. A mutation that stops matching is the *lucky* outcome; the
+unlucky one is a mutation that still matches and silently targets the wrong line.
+
 Cluster C, measured: **three mutations silently no-op'd** — two `perl -0pi` and one `sed`,
 all defeated by CRLF line endings that the patterns did not account for. One of the three
 produced a **fully green suite**, which reads exactly like "this guard is not load-bearing"
