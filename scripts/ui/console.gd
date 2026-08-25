@@ -60,6 +60,12 @@ var _scrollback: Array = []
 var _history: Array = []
 var _history_index: int = -1   # -1 = not navigating; >=0 = current pos in history
 
+# One-shot latch for the Esc press this console closed itself on (audit #22).
+# Set in the KEY_ESCAPE branch of _input, read-and-cleared by main.gd's _process
+# on the same frame. See `take_esc_consumed` for why it is a latch and not a
+# frame stamp.
+var _esc_consumed: bool = false
+
 # UI nodes (built in _ready).
 var _input_field: LineEdit = null
 var _output_label: RichTextLabel = null
@@ -136,6 +142,34 @@ func _draw() -> void:
 func is_open() -> bool:
 	return visible
 
+## Did this console already spend an Esc press closing itself? Returns the
+## answer ONCE and clears it (audit #22).
+##
+## WHY main.gd cannot just ask `is_open()`. It does, and that gate is what
+## fails: `_input` runs before `_process` in the same frame, so by the time
+## main polls, this console is already closed and its gate — and the Esc
+## chain's own steps — see a console that is not there. set_input_as_handled()
+## does not help, because it stops event propagation and the chain does not
+## read events; it polls `Input.is_action_just_pressed`, which the handled flag
+## never touches. One Esc closed the console AND ran a chain step.
+##
+## WHY A LATCH AND NOT A FRAME STAMP. The audit prescribed recording
+## `Engine.get_process_frames()` here and comparing it in main. That works in a
+## running game and is NOT verifiable in this project's test suite: the runner
+## never yields a frame, so `get_process_frames()` is 0 for an entire run, a
+## stamp of 0 compares equal forever, and the guard would wedge the chain shut
+## for every later press instead of just this one. A read-and-clear latch is
+## frame-independent, self-clearing by construction, and testable — which is
+## why the fix deviates from the audit text here. Deliberate, not an oversight.
+##
+## The caller must read it on EVERY frame, above any early return, so a latch
+## set on a frame whose _process bailed early cannot strand itself into a later
+## frame and swallow an unrelated Esc. main.gd does exactly that.
+func take_esc_consumed() -> bool:
+	var consumed: bool = _esc_consumed
+	_esc_consumed = false
+	return consumed
+
 func toggle() -> void:
 	if visible:
 		_close()
@@ -162,6 +196,7 @@ func _close() -> void:
 ##   - Intercept Tab for command-name completion (otherwise LineEdit
 ##     would treat Tab as a focus-cycle key).
 ##   - Handle Up/Down history navigation and Escape close.
+##   - Intercept the BACKTICK, which is the toggle key (audit #59).
 ##
 ## Plain character keys fall through and are routed normally to the
 ## focused LineEdit by Godot.
@@ -187,7 +222,31 @@ func _input(event: InputEvent) -> void:
 			KEY_DOWN:
 				_history_navigate(+1)
 				get_viewport().set_input_as_handled()
+			KEY_QUOTELEFT:
+				# The CLOSE half of the backtick toggle (audit #59). The OPEN
+				# half lives in main.gd's _unhandled_input and stays there —
+				# but that stage is unreachable from here, because while we are
+				# visible the LineEdit holds focus and a focused LineEdit
+				# consumes printable keys at GUI dispatch, one stage EARLIER
+				# than _unhandled_input. Before this branch existed, backtick
+				# opened the console and could never close it; the key was
+				# typed into the command field as a literal '`' instead, which
+				# is the same fact seen from the other side.
+				#
+				# _input runs before GUI dispatch, so claiming it here is what
+				# makes the toggle symmetric, and set_input_as_handled() is
+				# what keeps the stray character out of the field. Both halves
+				# are asserted separately in test_console_backtick_toggle.gd —
+				# a console that closed but still typed the character would be
+				# half-fixed, and "it closed" alone cannot see that.
+				_close()
+				get_viewport().set_input_as_handled()
 			KEY_ESCAPE:
+				# Esc closes the console. Unlike the backtick above, this key
+				# is ALSO bound to the `close_info_panel` action that main.gd's
+				# Esc priority chain polls, so closing here is only half the
+				# job — see `take_esc_consumed` and audit #22.
+				_esc_consumed = true
 				_close()
 				get_viewport().set_input_as_handled()
 

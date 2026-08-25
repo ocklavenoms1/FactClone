@@ -579,6 +579,15 @@ func _process(delta: float) -> void:
 	# frame.
 	minimap.visible = not (map_panel.is_open() or inventory_grid.is_open() or _any_building_panel_open())
 
+	# Did the dev console already spend this frame's Esc closing itself?
+	# (audit #22). Read HERE — above the dev-console gate and the quantity-picker
+	# gate below, both of which can `return` before the Esc chain — because the
+	# latch is one-shot and read-and-clear: leaving it set through a frame that
+	# bailed early would strand it into a later frame, where it would swallow an
+	# unrelated Esc. Reading it unconditionally every frame makes that
+	# impossible. The value is consumed by the Esc chain further down.
+	var esc_taken_by_console: bool = dev_console != null and dev_console.take_esc_consumed()
+
 	# Dev Console gate (session-inserter-foundation post-PAUSE-1 hotfix):
 	# when console is open, suppress ALL gameplay action input.
 	# Input.is_action_just_pressed reads from InputMap regardless of
@@ -688,7 +697,17 @@ func _process(delta: float) -> void:
 	#   4. info panel has target → clear target
 	#   5. hotbar has selection → clear (enter NEUTRAL)
 	#   6. else                  → no-op (future: pause menu)
-	if Input.is_action_just_pressed("close_info_panel"):
+	#
+	# The six cases and their order are unchanged (audit #22 was not a
+	# precedence bug). What is new is the `esc_taken_by_console` guard: the
+	# console closes itself from _input, which runs BEFORE this poll in the same
+	# frame, so by now `dev_console.is_open()` is false, the console gate above
+	# did not fire either, and without the guard the chain would spend a press
+	# that was already spent on whichever step below is live. set_input_as_handled()
+	# cannot prevent that — it stops event propagation, and this line is a poll.
+	# The map panel used to have the same shape and no longer does: its Esc
+	# handler was deleted, so step 3 is once again the only thing that closes it.
+	if Input.is_action_just_pressed("close_info_panel") and not esc_taken_by_console:
 		if inventory_grid.is_open():
 			inventory_grid.toggle()
 		elif _any_building_panel_open():
@@ -798,8 +817,20 @@ func _process(delta: float) -> void:
 
 	if Input.is_action_just_pressed("inspect_building"):
 		_try_inspect(hover_tile)
-	if Input.is_action_just_pressed("close_info_panel"):
-		info_panel.clear_target()
+	# There is deliberately NO `close_info_panel` handler here, and this comment
+	# is the reason not to add one back (audit #58). One used to sit on the next
+	# line, calling info_panel.clear_target() unconditionally, and it looked
+	# harmless because the Esc chain above appears to have already dealt with the
+	# press. It had not: the modal early-return between the two is evaluated
+	# AFTER the chain closed the modal, so on that frame it reads "no modal open"
+	# and does not return — and the polled action is still true for the whole
+	# frame. Closing the inventory grid with Esc therefore ALSO wiped the
+	# inspected building's panel, undoing the chain's documented precedence on
+	# every single press.
+	#
+	# Clearing the info panel is chain step 4 and belongs to the chain alone.
+	# test_esc_duplicate_handler.gd pins the count at exactly one poll of that
+	# action in this file, so a second one reddens rather than being rediscovered.
 
 	# Debug: F11 spawns a complete working wheat→flour chain east of the
 	# player, including a Briquetter+Void byproduct sink. Useful for

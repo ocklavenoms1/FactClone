@@ -269,11 +269,22 @@ func _process(_delta: float) -> void:
 		_apply_dirty_regions()
 		queue_redraw()
 
-func _input(event: InputEvent) -> void:
-	# Esc closes (M is handled in main.gd to share the close-on-M-while-open path).
-	if _is_open and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		toggle()
-		get_viewport().set_input_as_handled()
+# There is deliberately NO `_input` here, and no KEY_ESCAPE handler anywhere in
+# this file (audit #22). One used to live here: `if _is_open and ... KEY_ESCAPE:
+# toggle(); get_viewport().set_input_as_handled()`. It read as correct and was
+# not, because set_input_as_handled() stops EVENT PROPAGATION and nothing else —
+# main.gd's Esc priority chain does not read events, it polls
+# Input.is_action_just_pressed from _process later in the SAME frame, which the
+# handled flag cannot reach. So this handler closed the map during the input
+# phase, the chain then found is_open() already false, skipped its own step 3
+# and spent the press on the next live step down: one Esc closed the map AND
+# cleared the player's hotbar selection.
+#
+# Esc for the map is chain step 3 in main.gd and belongs to it alone. M is
+# handled there too, to share the close-on-M-while-open path. The "M / Esc to
+# close" hint in _draw stays accurate — the chain still closes it, one action
+# per press. test_esc_modal_race.gd asserts both the behaviour and the absence
+# of KEY_ESCAPE from this file.
 
 func _gui_input(event: InputEvent) -> void:
 	if not _is_open:

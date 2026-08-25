@@ -102,6 +102,19 @@ const TESTS: Array = [
 	# Audit cluster C, #14: a processor must never push its output onto a belt
 	# that feeds it — measured, the feeder saturates and the input line dies.
 	preload("res://scripts/tests/test_processor_feeder_push.gd"),
+	# Audit cluster H — Esc / input routing. Three findings that all answer the
+	# same question ("which handler saw the key, and did more than one thing act
+	# on it"), which is exactly why they are three separate suites: fixing any
+	# one of them turns a naive "Esc closes the console" check green. Each one
+	# below reddens only for its own defect — see the discrimination matrix in
+	# the cluster-H report and the header of each file.
+	#
+	# They share `esc_input_harness.gd`, which is NOT registered here: it has no
+	# test_name(), and its filename is outside the `test_*.gd` pattern
+	# test_registration_completeness.gd scans.
+	preload("res://scripts/tests/test_esc_modal_race.gd"),
+	preload("res://scripts/tests/test_esc_duplicate_handler.gd"),
+	preload("res://scripts/tests/test_console_backtick_toggle.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
