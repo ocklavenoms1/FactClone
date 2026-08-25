@@ -73,15 +73,21 @@ $proc = Start-Process -FilePath $godot -ArgumentList $args -NoNewWindow -Wait -P
 $exit = $proc.ExitCode
 
 # One log, stdout then stderr, so the greps below see everything the run said.
+#
+# -Encoding utf8 on every read AND the write. Godot's output is UTF-8 and the
+# game's own messages contain em dashes; without this, Get-Content reads them as
+# the system ANSI codepage and the log prints back as mojibake. Found the first
+# time a log line carried a non-ASCII character (the sprite loader's re-export
+# message), not by inspection.
 $out = ""
 $err = ""
-if (Test-Path "$LogPath.out") { $out = Get-Content "$LogPath.out" -Raw }
-if (Test-Path "$LogPath.err") { $err = Get-Content "$LogPath.err" -Raw }
+if (Test-Path "$LogPath.out") { $out = Get-Content "$LogPath.out" -Raw -Encoding utf8 }
+if (Test-Path "$LogPath.err") { $err = Get-Content "$LogPath.err" -Raw -Encoding utf8 }
 Set-Content -Path $LogPath -Value ($out + $err) -Encoding utf8
 Remove-Item "$LogPath.out", "$LogPath.err" -ErrorAction SilentlyContinue
 
 $lines = @()
-if (Test-Path $LogPath) { $lines = @(Get-Content $LogPath) }
+if (Test-Path $LogPath) { $lines = @(Get-Content $LogPath -Encoding utf8) }
 
 function Count-Matching([string]$needle) {
     return @($lines | Where-Object { $_ -like "*$needle*" }).Count

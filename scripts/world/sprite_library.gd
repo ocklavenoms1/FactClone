@@ -76,6 +76,53 @@ const SPRITE_DIR: String = "res://art/sprites"
 ## a tile-size change scales the art instead of breaking the anchor maths.
 const SPRITE_PX_PER_TILE: int = 32
 
+# ---------------------------------------------------------------------------
+# THE ZERO-PADDING RULE
+# ---------------------------------------------------------------------------
+#
+# DECIDED 2026-08-24 (NOTES.md, art-probe finding 3). `anchor_px` is
+# `[sprite_w/2, sprite_h]` on every shipped asset, so the anchor names the
+# sprite's bottom EDGE. If the artwork stops short of that edge, "sprite bottom
+# edge" and "where the object meets the ground" are different rows and nothing
+# in the JSON says by how much. At three assets that is invisible. At twenty it
+# is per-asset vertical jitter with every sprite "correctly placed" by the
+# contract and sitting at a different apparent height.
+#
+# The rejected alternative was a `ground_contact_px` schema field: a
+# hand-maintained number no test can verify, which is the count-drift shape this
+# project keeps re-encountering. Instead the constraint is enforced here, where
+# the loader can check it: THE BOTTOM ROW MUST CARRY ARTWORK.
+#
+# ⚠ ALL THREE CURRENT ASSETS FAIL THIS AND WILL NOT LOAD until art re-exports
+# them. That is the point. Being wrong is loud: the manifest line reports
+# `loaded=0 failed=3`, `report()` push_errors, and any declared building that
+# fell back gets a magenta cross in the frame. The sprite path is off by
+# default, so nothing user-facing changes.
+#
+# ---------------------------------------------------------------------------
+# WHY A THRESHOLD AND NOT "NON-ZERO ALPHA"
+# ---------------------------------------------------------------------------
+# The rule as first written was "at least one non-zero alpha pixel". MEASURED
+# against the real assets, that rule GRANDFATHERS THE SMELTER: both smelter
+# masters carry a single stray pixel of alpha 3/255 in their bottom row — about
+# 1% opacity, which shifts a composited channel by one 8-bit step and is
+# invisible. A strict-zero test passes an asset that is, to the eye, padded.
+# That is the same absence-indistinguishable-from-success shape the rule exists
+# to close, reappearing inside the rule.
+#
+# So the rule takes a threshold, and the threshold is measured rather than
+# picked. Per-row maximum alpha over the bottom rows of the three bodies:
+#
+#   chest.png       … 255, 255, 255, 255, 130,   0,   4,   0, 0, 0, 0, 0
+#   smelter_idle    … 255, 255, 255, 255, 255, 255, 255,  57, 0, 3
+#   power_pole.png  … 255, 233,  18,   0,   1,   0,   0,   0, 0, 0, 0, 0
+#
+# There is a clean gap. Renderer anti-aliasing noise lands at 1, 3 and 4; real
+# silhouette lands at 18, 57, 130, 233, 255. Nothing at all falls between 5 and
+# 17. A threshold of 8 sits in that gap, so it separates artwork from noise
+# without being sensitive to where exactly it is put.
+const BOTTOM_ROW_MIN_ALPHA: float = 8.0 / 255.0
+
 # ---------- the flag ----------
 
 ## Single toggle. False = every building renders through Buildings.draw_one().
@@ -334,7 +381,9 @@ static func load_asset(dir_path: String, base: String, expected_footprint_width:
 	var glow_tex: ImageTexture = null
 	var glow_png: String = "%s/%s_glow.png" % [dir_path, base]
 	if FileAccess.file_exists(glow_png):
-		var gtex: Dictionary = _load_texture(glow_png, sprite_px)
+		# No ground-contact requirement — see `_load_texture`. A glow is an
+		# additive overlay on the hot part of a machine, not a silhouette.
+		var gtex: Dictionary = _load_texture(glow_png, sprite_px, false)
 		if not bool(gtex["ok"]):
 			return fail.call("%s glow: %s" % [base, gtex["error"]])
 		glow_tex = gtex["texture"]
@@ -359,7 +408,16 @@ static func load_asset(dir_path: String, base: String, expected_footprint_width:
 ## Load one PNG and check its real pixel size against what the JSON claims.
 ## Split out because "sprite_px disagreeing with the actual PNG" has to be
 ## checked on EVERY layer — body, shadow, glow — not just the first.
-static func _load_texture(path: String, expect_px: Vector2i) -> Dictionary:
+##
+## `require_ground_contact` applies the zero-padding rule (see
+## BOTTOM_ROW_MIN_ALPHA above). TRUE for body masters and for shadows: both are
+## ground-plane silhouettes, and the shadow shares the body's anchor by
+## contract, so if the body is flush the shadow must be too. FALSE for the glow,
+## and that is not an exemption granted to make things pass — a glow is an
+## additive overlay over the hot part of a machine, not a silhouette.
+## `smelter_glow.png` is legitimately empty for its bottom 12 rows because the
+## forge mouth is not on the floor.
+static func _load_texture(path: String, expect_px: Vector2i, require_ground_contact: bool = true) -> Dictionary:
 	var img := Image.new()
 	var err: int = img.load(path)
 	if err != OK:
@@ -368,7 +426,38 @@ static func _load_texture(path: String, expect_px: Vector2i) -> Dictionary:
 	if got != expect_px:
 		return {"ok": false, "error": "%s is %dx%d on disk but the JSON says sprite_px %dx%d"
 			% [path, got.x, got.y, expect_px.x, expect_px.y], "texture": null}
+	if require_ground_contact:
+		var empty: int = empty_bottom_rows(img)
+		if empty > 0:
+			return {"ok": false, "error": "%s has %d fully transparent bottom row%s (bottom row's strongest pixel is alpha %d of 255; at least one pixel at %d or more is required). anchor_px.y is the sprite's bottom edge AND its ground-contact row, so the silhouette must reach the bottom edge — re-export with no transparent bottom padding."
+				% [path, empty, "" if empty == 1 else "s", int(round(_row_max_alpha(img, got.y - 1) * 255.0)), int(round(BOTTOM_ROW_MIN_ALPHA * 255.0))], "texture": null}
 	return {"ok": true, "error": "", "texture": ImageTexture.create_from_image(img)}
+
+## How many rows at the bottom of `img` carry no pixel at or above
+## BOTTOM_ROW_MIN_ALPHA. 0 means the artwork reaches the bottom edge, which is
+## the whole of the rule; the larger number is carried only so the failure
+## message can say HOW far off the export is rather than just that it is off.
+##
+## Public so `test_sprite_manifest.gd` can report the per-asset counts without
+## re-implementing the scan — one definition of "empty", so the rule and the
+## number in the message cannot drift apart.
+static func empty_bottom_rows(img: Image) -> int:
+	var h: int = img.get_size().y
+	var n: int = 0
+	for y in range(h - 1, -1, -1):
+		if _row_max_alpha(img, y) >= BOTTOM_ROW_MIN_ALPHA:
+			return n
+		n += 1
+	return n
+
+static func _row_max_alpha(img: Image, y: int) -> float:
+	var w: int = img.get_size().x
+	var best: float = 0.0
+	for x in range(w):
+		var a: float = img.get_pixel(x, y).a
+		if a > best:
+			best = a
+	return best
 
 # ---------------------------------------------------------------------------
 # the LOUD guard

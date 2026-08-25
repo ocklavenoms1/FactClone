@@ -36,12 +36,13 @@ const TMP: String = "user://sprite_probe_fixtures"
 const ConsoleScript = preload("res://scripts/ui/console.gd")
 
 static func test_name() -> String:
-	return "sprite manifest + malformed-asset guards (3 declared assets load and validate; 9 corruption shapes are each rejected by name, not silently absorbed)"
+	return "sprite manifest + malformed-asset guards (all 3 declared assets are REJECTED for bottom padding and await re-export; 10 corruption shapes are each rejected by name, not silently absorbed)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
 
-	_case_1_declared_assets_all_load(failures)
+	_case_1_declared_assets_are_rejected_for_bottom_padding(failures)
+	_case_1b_shipped_geometry_still_matches_the_json_on_disk(failures)
 
 	# Corruption shapes. Each writes a fixture, loads it, and asserts BOTH
 	# that it was rejected AND that the message identifies the problem — a
@@ -59,83 +60,167 @@ static func run(parent: Node) -> Dictionary:
 	_case_11_valid_synthetic_asset_loads(failures)
 	_case_12_flag_is_off_by_default(failures)
 	_case_13_console_toggle(parent, failures)
+	_case_14_transparent_bottom_padding(failures)
 
 	if failures.is_empty():
-		return { "ok": true, "message": "13 sub-cases pass: all 3 declared assets load and validate against the real art tree; unparseable JSON, PNG/sprite_px size disagreement, out-of-bounds anchor, cell_tiles/sprite_px inconsistency, a master naming a missing file, a shadow with no body, a shadow anchor diverging from the body's, a footprint width disagreeing with Buildings, and a glow of the wrong size are each rejected with a message naming the fault; a well-formed synthetic asset still loads; the flag is off by default; and `sprites on|off` in the dev console flips it and reports the manifest" }
+		return { "ok": true, "message": "15 sub-cases pass: all 3 declared assets are rejected for transparent bottom padding (chest 7 rows, smelter 2, power_pole 9) and their JSON geometry still matches disk; unparseable JSON, PNG/sprite_px size disagreement, out-of-bounds anchor, cell_tiles/sprite_px inconsistency, a master naming a missing file, a shadow with no body, a shadow anchor diverging from the body's, a footprint width disagreeing with Buildings, a glow of the wrong size, and a body or shadow with transparent bottom padding are each rejected with a message naming the fault; a well-formed synthetic asset still loads and a padded GLOW still loads; the flag is off by default; and `sprites on|off` in the dev console flips it and reports the manifest" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), " | ".join(failures.slice(0, 12))] }
 
 # ===========================================================================
-# (1) THE MANIFEST. Every DECLARED building's sprite loads and validates.
+# (1) THE MANIFEST — and ⚠ IT IS INVERTED FROM WHAT IT USED TO ASSERT.
 #
-# This is the sub-case that reddens when an asset goes missing or an export
-# changes a sprite's dimensions. It compares DECLARED (a table in
-# sprite_library.gd) against LOADED — not against whatever happens to be on
-# disk, because "how many did we intend to load" is the only number that can
-# detect a missing one. A count taken from the directory would happily report
-# success on an empty directory.
+# This sub-case used to require all three declared sprites to LOAD. Since the
+# zero-padding rule (sprite_library.gd, BOTTOM_ROW_MIN_ALPHA) all three are
+# REJECTED, and that is the intended, decided state: the assets must be
+# re-exported with no transparent bottom padding before the sprite path renders
+# them again.
+#
+# ⚠ THIS IS NOT GRANDFATHERING, AND THE DIFFERENCE MATTERS. Nothing here
+# exempts the three assets, downgrades the rule to a warning, or lets them
+# load. They fail, loudly: the manifest line reads `loaded=0 failed=3`,
+# `report()` push_errors, and any declared building that fell back gets a
+# magenta cross painted over it in the frame. This sub-case RECORDS that state
+# so a permanently-red suite does not train everyone to ignore it — and it is
+# written to redden AGAIN, from the other direction, the moment the re-export
+# lands. When it does, the fix is to restore the positive assertions this
+# comment describes, not to update the numbers.
+#
+# The measured counts are pinned per asset, so a PARTIAL re-export (one asset
+# fixed, two not) also reddens rather than sitting in the same green box.
 # ===========================================================================
-static func _case_1_declared_assets_all_load(failures: Array) -> void:
+
+## Empty bottom rows measured 2026-08-24, per BODY master, at
+## SpriteLibrary.BOTTOM_ROW_MIN_ALPHA. All three must be 0 for the assets to
+## load; none is.
+##
+## ⚠ NOTE the NOTES.md art-probe finding recorded "8 empty bottom rows each" for
+## all three. That was wrong for all three — re-measured here from the files.
+## The smelter is the interesting one: its bottom row is not empty at all under
+## a strict alpha>0 reading (one stray pixel at alpha 3/255), which is exactly
+## why the rule carries a threshold instead.
+const EXPECTED_EMPTY_BOTTOM_ROWS: Dictionary = {
+	"res://art/sprites/chest.png": 7,
+	"res://art/sprites/smelter_idle.png": 2,
+	"res://art/sprites/smelter_smelting.png": 2,
+	"res://art/sprites/power_pole.png": 9,
+}
+
+static func _case_1_declared_assets_are_rejected_for_bottom_padding(failures: Array) -> void:
 	SpriteLibrary.reset()
 	SpriteLibrary.ensure_loaded()
 	var declared: Dictionary = SpriteLibrary.declared()
 	var loaded: Array = SpriteLibrary.entry_names()
 	var failed: Array = SpriteLibrary.failures()
-	if not failed.is_empty():
-		failures.append("(1) %d of %d declared sprites failed to load: %s"
-			% [failed.size(), declared.size(), " ; ".join(failed)])
-	if loaded.size() != declared.size():
-		failures.append("(1) declared %d sprites, loaded %d (%s)"
-			% [declared.size(), loaded.size(), ", ".join(loaded)])
-	# Named individually so the message says WHICH one vanished.
-	for t in declared.keys():
-		var base: String = declared[t]
-		if not SpriteLibrary.has_entry(base):
-			failures.append("(1) declared sprite '%s' (%s) is not loaded"
-				% [base, Buildings.name_of(t)])
+
+	if not loaded.is_empty():
+		failures.append("(1) %d declared sprite(s) LOADED (%s). If art has re-exported them with the bottom row flush, that is good news and this sub-case is now stale: restore the positive manifest assertions (loaded == declared, sprite_px / anchor_px / state counts / shadow / glow per asset) that this file carried before the zero-padding rule, and delete EXPECTED_EMPTY_BOTTOM_ROWS."
+			% [loaded.size(), ", ".join(loaded)])
+	if failed.size() != declared.size():
+		failures.append("(1) %d of %d declared sprites failed; expected all %d to fail on bottom padding. Failures: %s"
+			% [failed.size(), declared.size(), declared.size(), " ; ".join(failed)])
+
+	# The failure must be THE PADDING ONE. A guard that rejects everything for
+	# any reason would satisfy the counts above while hiding a real regression
+	# in the JSON validation that runs before the texture step.
+	for f in failed:
+		var msg: String = str(f)
+		for needle in ["transparent bottom row", "re-export"]:
+			if not msg.contains(needle):
+				failures.append("(1) a declared sprite failed for something OTHER than bottom padding — expected '%s' in \"%s\"" % [needle, msg])
+		# Every asset is named by its own file, not by a generic message.
+		if not msg.contains(".png"):
+			failures.append("(1) a failure message does not name a file: \"%s\"" % msg)
+
+	# Per-asset, measured directly rather than parsed out of the message.
+	for path in EXPECTED_EMPTY_BOTTOM_ROWS.keys():
+		var img := Image.new()
+		if img.load(str(path)) != OK:
+			failures.append("(1) could not read %s to measure its bottom padding" % str(path))
 			continue
-		var e: Dictionary = SpriteLibrary.entry(base)
-		# The footprint width in the JSON must match the game's own table, or
-		# the sprite is wider or narrower than the tiles it occupies.
-		var fp_w: int = Buildings.footprint_of(t).x
-		if int(e["footprint_width_tiles"]) != fp_w:
-			failures.append("(1) %s: JSON footprint width %d != Buildings.footprint_of().x %d"
-				% [base, int(e["footprint_width_tiles"]), fp_w])
-		if (e["states"] as Dictionary).is_empty():
-			failures.append("(1) %s: loaded with no body texture" % base)
-	# The specific shapes this session verified, pinned so a silent re-export
-	# at a different resolution reddens here instead of shifting every
-	# building by half a tile.
-	var expect: Dictionary = {
-		"chest": [Vector2i(32, 64), Vector2(16, 64), 1],       # 1 state, has shadow
-		"smelter": [Vector2i(64, 96), Vector2(32, 96), 2],     # idle + smelting
-		"power_pole": [Vector2i(32, 96), Vector2(16, 96), 1],
-	}
-	for base in expect.keys():
-		if not SpriteLibrary.has_entry(base):
+		var got: int = SpriteLibrary.empty_bottom_rows(img)
+		var want: int = int(EXPECTED_EMPTY_BOTTOM_ROWS[path])
+		if got != want:
+			failures.append("(1) %s has %d empty bottom rows, recorded as %d. If it is now 0 the re-export landed — see the note on this sub-case. Otherwise the asset changed and NOTES.md's art-probe counts are stale."
+				% [str(path), got, want])
+	# The layers the rule deliberately does NOT apply to, and the ones it does.
+	# Measured: all three shadows already reach the bottom row; the smelter's
+	# glow does not, and must not be required to.
+	for path in ["res://art/sprites/chest_shadow.png", "res://art/sprites/smelter_shadow.png", "res://art/sprites/power_pole_shadow.png"]:
+		var simg := Image.new()
+		if simg.load(path) != OK:
+			failures.append("(1) could not read %s" % path)
 			continue
-		var e: Dictionary = SpriteLibrary.entry(base)
-		if e["sprite_px"] != expect[base][0]:
-			failures.append("(1) %s: sprite_px %s, expected %s" % [base, e["sprite_px"], expect[base][0]])
-		if e["anchor_px"] != expect[base][1]:
-			failures.append("(1) %s: anchor_px %s, expected %s" % [base, e["anchor_px"], expect[base][1]])
-		if (e["states"] as Dictionary).size() != int(expect[base][2]):
-			failures.append("(1) %s: %d state(s), expected %d" % [base, (e["states"] as Dictionary).size(), int(expect[base][2])])
-		if e["shadow"] == null:
-			failures.append("(1) %s: no shadow layer loaded" % base)
-		if e["shadow_anchor_px"] != e["anchor_px"]:
-			failures.append("(1) %s: shadow anchor %s != body anchor %s" % [base, e["shadow_anchor_px"], e["anchor_px"]])
-	# The smelter is the only asset with a glow, and it is the only one whose
-	# JSON carries two masters under ONE file.
-	if SpriteLibrary.has_entry("smelter"):
-		var sm: Dictionary = SpriteLibrary.entry("smelter")
-		if sm["glow"] == null:
-			failures.append("(1) smelter: no glow layer loaded")
-		for k in ["idle", "smelting"]:
-			if not (sm["states"] as Dictionary).has(k):
-				failures.append("(1) smelter: no '%s' state master" % k)
-	for base in ["chest", "power_pole"]:
-		if SpriteLibrary.has_entry(base) and SpriteLibrary.entry(base)["glow"] != null:
-			failures.append("(1) %s: unexpected glow layer" % base)
+		if SpriteLibrary.empty_bottom_rows(simg) != 0:
+			failures.append("(1) %s has %d empty bottom rows; shadows are ground-plane silhouettes and the rule applies to them too, so this asset is a second re-export"
+				% [path, SpriteLibrary.empty_bottom_rows(simg)])
+	var gimg := Image.new()
+	if gimg.load("res://art/sprites/smelter_glow.png") == OK:
+		if SpriteLibrary.empty_bottom_rows(gimg) == 0:
+			failures.append("(1) smelter_glow.png now reaches the bottom row. Harmless, but the glow exemption in _load_texture was justified by this asset legitimately NOT reaching it — re-read that comment before trusting it.")
+
+# ===========================================================================
+# (1b) THE GEOMETRY COVERAGE THE PADDING RULE WOULD OTHERWISE HAVE DELETED.
+#
+# Sub-case (1) used to read sprite_px / anchor_px / state count / shadow / glow
+# off the LOADED entry. Nothing loads any more, so those assertions would have
+# quietly stopped running — a rule that makes the suite green by removing what
+# it was checking. Exactly the shape NOTES.md's silent-compensation protocol
+# names.
+#
+# So the same facts are read straight off the JSON on disk instead. This is the
+# link `test_sprite_anchor.gd` explicitly delegates here: that file pins the
+# same numbers as LITERALS and says "test_sprite_manifest.gd is the one that
+# reads the real files". Without this the two would be one unchecked belief.
+# ===========================================================================
+const SHIPPED_JSON: Array = [
+	# base, sprite_px, anchor_px, master count, has shadow, has glow
+	["chest", Vector2i(32, 64), Vector2(16, 64), 1, true, false],
+	["smelter", Vector2i(64, 96), Vector2(32, 96), 2, true, true],
+	["power_pole", Vector2i(32, 96), Vector2(16, 96), 1, true, false],
+]
+
+static func _case_1b_shipped_geometry_still_matches_the_json_on_disk(failures: Array) -> void:
+	for row in SHIPPED_JSON:
+		var base: String = str(row[0])
+		var jpath: String = "%s/%s.json" % [SpriteLibrary.SPRITE_DIR, base]
+		if not FileAccess.file_exists(jpath):
+			failures.append("(1b) %s is missing from the art tree" % jpath)
+			continue
+		var reader := JSON.new()
+		if reader.parse(FileAccess.get_file_as_string(jpath)) != OK:
+			failures.append("(1b) %s is unparseable: line %d, %s" % [jpath, reader.get_error_line(), reader.get_error_message()])
+			continue
+		var j: Dictionary = reader.data
+		var spx := Vector2i(int(j["sprite_px"][0]), int(j["sprite_px"][1]))
+		var anc := Vector2(float(j["anchor_px"][0]), float(j["anchor_px"][1]))
+		if spx != row[1]:
+			failures.append("(1b) %s sprite_px %s, expected %s — a silent re-export at a different resolution shifts the building by half a tile" % [base, spx, row[1]])
+		if anc != row[2]:
+			failures.append("(1b) %s anchor_px %s, expected %s" % [base, anc, row[2]])
+		if (j["masters"] as Array).size() != int(row[3]):
+			failures.append("(1b) %s has %d master(s), expected %d" % [base, (j["masters"] as Array).size(), int(row[3])])
+		# The anchor convention itself: bottom-centre of the sprite.
+		if anc != Vector2(float(spx.x) * 0.5, float(spx.y)):
+			failures.append("(1b) %s anchor_px %s is no longer [sprite_w/2, sprite_h] %s — the zero-padding rule's whole premise is that anchor_px.y IS the bottom edge"
+				% [base, anc, Vector2(float(spx.x) * 0.5, float(spx.y))])
+		# Footprint width against the game's own table.
+		var t: int = _type_for_base(base)
+		if t >= 0 and int(j["cell_tiles"][0]) != Buildings.footprint_of(t).x:
+			failures.append("(1b) %s cell_tiles[0] = %d but Buildings.footprint_of(%s).x = %d"
+				% [base, int(j["cell_tiles"][0]), Buildings.name_of(t), Buildings.footprint_of(t).x])
+		# Shadow and glow presence, from the files rather than from a loaded entry.
+		var has_shadow: bool = FileAccess.file_exists("%s/%s_shadow.png" % [SpriteLibrary.SPRITE_DIR, base])
+		if has_shadow != bool(row[4]):
+			failures.append("(1b) %s shadow layer present=%s, expected %s" % [base, str(has_shadow), str(bool(row[4]))])
+		var has_glow: bool = FileAccess.file_exists("%s/%s_glow.png" % [SpriteLibrary.SPRITE_DIR, base])
+		if has_glow != bool(row[5]):
+			failures.append("(1b) %s glow layer present=%s, expected %s" % [base, str(has_glow), str(bool(row[5]))])
+
+static func _type_for_base(base: String) -> int:
+	for t in SpriteLibrary.declared().keys():
+		if str(SpriteLibrary.declared()[t]) == base:
+			return int(t)
+	return -1
 
 # ---------------------------------------------------------------------------
 # fixture helpers — synthetic assets in user://, never in art/
@@ -402,8 +487,14 @@ static func _case_13_console_toggle(parent: Node, failures: Array) -> void:
 		failures.append("(13) `sprites on` did not set SpriteLibrary.enabled")
 	if not on_out.contains("declared=3"):
 		failures.append("(13) `sprites on` did not report the manifest: %s" % on_out)
-	if not on_out.contains("loaded=3"):
-		failures.append("(13) `sprites on` reported the wrong load count: %s" % on_out)
+	# `loaded=0 failed=3` since the zero-padding rule — see sub-case (1). This
+	# line is the loud half of the guard: it is what a person sees when they turn
+	# the flag on and wonder why nothing is textured. When the re-export lands it
+	# becomes loaded=3 failed=0 and this reddens alongside (1).
+	if not on_out.contains("loaded=0 failed=3"):
+		failures.append("(13) `sprites on` reported an unexpected load count — expected `loaded=0 failed=3` while the three assets await re-export: %s" % on_out)
+	if not on_out.contains("untextured fallbacks"):
+		failures.append("(13) `sprites on` did not warn that the failed buildings render as untextured fallbacks: %s" % on_out)
 
 	var off_out: String = console.execute("sprites off")
 	if SpriteLibrary.enabled:
@@ -431,3 +522,86 @@ static func _case_13_console_toggle(parent: Node, failures: Array) -> void:
 
 	console.queue_free()
 	SpriteLibrary.enabled = was
+
+# ===========================================================================
+# (14) TRANSPARENT BOTTOM PADDING — the rule, on synthetic assets.
+#
+# Sub-case (1) shows the rule firing on the real art. This one shows it firing
+# for the RIGHT REASON, on assets whose only fault is the padding, and shows the
+# three boundaries the rule has to get right:
+#
+#   a. a body with padding is rejected, and the message says how many rows;
+#   b. a SHADOW with padding is rejected too (shadows are ground-plane
+#      silhouettes and share the body's anchor by contract);
+#   c. a GLOW with padding LOADS. That exemption is the one place the rule is
+#      deliberately not applied, and an untested exemption is just a hole.
+#
+# And (d): the threshold, which is the part a "non-zero alpha" reading gets
+# wrong. A bottom row whose strongest pixel is alpha 3/255 is padding to the
+# eye, and both real smelter masters are exactly that case.
+# ===========================================================================
+static func _case_14_transparent_bottom_padding(failures: Array) -> void:
+	_reset_tmp()
+
+	# (a) body with 4 transparent bottom rows.
+	_write_png_padded("c14.png", 32, 64, 4, 255)
+	_write_text("c14.json", _json("c14", [1, 2], [32, 64], [16, 64], "c14.png"))
+	_expect_reject(failures, "(14a)", SpriteLibrary.load_asset(TMP, "c14", 1),
+		["c14.png", "4 fully transparent bottom rows", "re-export"])
+
+	# (b) clean body, padded shadow.
+	_write_png_padded("c14b.png", 32, 64, 0, 255)
+	_write_png_padded("c14b_shadow.png", 32, 64, 3, 255)
+	_write_text("c14b.json", _json("c14b", [1, 2], [32, 64], [16, 64], "c14b.png"))
+	_write_text("c14b_shadow.json", JSON.stringify({"anchor_px": [16, 64]}))
+	_expect_reject(failures, "(14b)", SpriteLibrary.load_asset(TMP, "c14b", 1),
+		["c14b_shadow.png", "3 fully transparent bottom rows"])
+
+	# (c) clean body, padded GLOW — must LOAD. The exemption, exercised.
+	_write_png_padded("c14c.png", 32, 64, 0, 255)
+	_write_png_padded("c14c_glow.png", 32, 64, 12, 255)
+	_write_text("c14c.json", _json("c14c", [1, 2], [32, 64], [16, 64], "c14c.png"))
+	var res_glow: Dictionary = SpriteLibrary.load_asset(TMP, "c14c", 1)
+	if not bool(res_glow["ok"]):
+		failures.append("(14c) an asset with a clean body and a padded GLOW was rejected: %s. The glow is an additive overlay on the hot part of a machine, not a ground silhouette — smelter_glow.png is legitimately empty for its bottom 12 rows." % str(res_glow["error"]))
+	elif res_glow["entry"]["glow"] == null:
+		failures.append("(14c) the padded glow did not load even though the asset was accepted")
+
+	# (d) THE THRESHOLD. A bottom row whose strongest pixel is alpha 3 of 255 is
+	# padding, and a strict alpha>0 rule would accept it — which is precisely
+	# how both real smelter masters would have been grandfathered in.
+	# NOTE the shape: ZERO fully-transparent rows, and the bottom row itself
+	# painted at alpha 3. That is the smelter's exact geometry, and a strict
+	# "at least one non-zero alpha pixel" rule accepts it.
+	_write_png_padded("c14d.png", 32, 64, 0, 3)
+	_write_text("c14d.json", _json("c14d", [1, 2], [32, 64], [16, 64], "c14d.png"))
+	_expect_reject(failures, "(14d)", SpriteLibrary.load_asset(TMP, "c14d", 1),
+		["c14d.png", "alpha 3 of 255"])
+
+	# (e) POSITIVE CONTROL for the threshold: alpha 8 is enough. Without this,
+	# (d) would still pass if the rule had degenerated to "reject everything
+	# that is not fully opaque".
+	_write_png_padded("c14e.png", 32, 64, 0, 8)
+	_write_text("c14e.json", _json("c14e", [1, 2], [32, 64], [16, 64], "c14e.png"))
+	var res_thresh: Dictionary = SpriteLibrary.load_asset(TMP, "c14e", 1)
+	if not bool(res_thresh["ok"]):
+		failures.append("(14e) a body whose bottom row sits exactly at the alpha threshold (8/255) was rejected: %s — the rule is stricter than BOTTOM_ROW_MIN_ALPHA says" % str(res_thresh["error"]))
+
+	_reset_tmp()
+
+## A PNG that is opaque magenta except for `empty_rows` fully transparent rows
+## at the bottom, with the last non-empty row painted at `bottom_alpha` (0-255)
+## so the threshold itself can be exercised.
+static func _write_png_padded(name: String, w: int, h: int, empty_rows: int, bottom_alpha: int) -> String:
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1.0, 0.0, 1.0, 1.0))
+	for y in range(h - empty_rows, h):
+		for x in range(w):
+			img.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.0))
+	var last: int = h - empty_rows - 1
+	if last >= 0:
+		for x in range(w):
+			img.set_pixel(x, last, Color(1.0, 0.0, 1.0, float(bottom_alpha) / 255.0))
+	var path: String = "%s/%s" % [TMP, name]
+	img.save_png(path)
+	return path

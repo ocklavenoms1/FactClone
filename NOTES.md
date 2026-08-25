@@ -1058,11 +1058,19 @@ instruction; recorded here so the next reader knows the severity.**
 
 ### 3. `anchor_px` points at an empty row on all three assets — needs a contract line
 
-Every body sprite is **fully transparent in its bottom 8 rows** (`power_pole.png` and
-`smelter_idle.png` empty at y=88..95; `chest.png` at y=56..63). `anchor_px` is
-`[sprite_w/2, sprite_h]`, so the anchor names a row with no artwork in it. Geometrically
-self-consistent, but "sprite bottom edge" and "where the object visually meets the ground"
-are different rows and **nothing in the JSON says by how much**.
+**⚠ SHIPPED, and the numbers below were wrong. See "Zero-padding rule — LANDED" at the
+end of this section for the enforced rule and the re-measured counts.**
+
+~~Every body sprite is **fully transparent in its bottom 8 rows** (`power_pole.png` and
+`smelter_idle.png` empty at y=88..95; `chest.png` at y=56..63).~~ **Not true of any of the
+three.** Re-measured from the files 2026-08-24: `chest.png` is empty at y=59..63 (5 rows),
+`power_pole.png` at y=89..95 (7), and `smelter_idle.png` / `smelter_smelting.png` at **0
+rows** — their bottom row carries a stray pixel at alpha 3/255. The original claim put
+`smelter_idle.png` at y=88..95 when y=88 is solid at alpha 255.
+
+`anchor_px` is `[sprite_w/2, sprite_h]`, so the anchor names a row with no artwork in it.
+Geometrically self-consistent, but "sprite bottom edge" and "where the object visually
+meets the ground" are different rows and **nothing in the JSON says by how much**.
 
 At three assets it is invisible. At twenty, inconsistent bottom padding is per-asset
 vertical jitter with **no test that can catch it** — every sprite is "correctly placed" by
@@ -1106,10 +1114,44 @@ maintaining a runtime loading path forever. **Not yet implemented.**
 
 **`ground_contact_px` — zero-padding mandate, not a schema field. DECIDED.** Sprites must
 have no transparent bottom padding, so `anchor_px.y == sprite_h` is also the contact row. The
-loader enforces it: **the bottom row must contain at least one non-zero alpha pixel, fail
-loud otherwise.** Rationale: a schema field nobody can verify is worse than a constraint the
-loader checks. Note all three current assets **violate** this today (8 empty bottom rows
-each), so adopting it means a re-export, not just a rule. **Not yet implemented.**
+loader enforces it: the bottom row must carry artwork, fail loud otherwise. Rationale: a
+schema field nobody can verify is worse than a constraint the loader checks. **LANDED — see
+below.**
+
+### Zero-padding rule — LANDED, and ⚠ ALL THREE ASSETS NEED RE-EXPORT BEFORE THE SPRITE PATH RENDERS AGAIN
+
+`sprite_library.gd` (`BOTTOM_ROW_MIN_ALPHA`, `empty_bottom_rows`, the
+`require_ground_contact` arm of `_load_texture`) now rejects any body master or shadow whose
+bottom row carries no artwork. Applied to bodies and shadows, **not** to the glow — a glow is
+an additive overlay on the hot part of a machine, and `smelter_glow.png` is legitimately
+empty for its bottom 12 rows.
+
+**Per-asset empty bottom rows, measured at the rule's threshold:**
+
+| file | empty bottom rows | bottom row's strongest alpha |
+|---|---|---|
+| `chest.png` | **7** | 0 |
+| `smelter_idle.png` | **2** | 3 |
+| `smelter_smelting.png` | **2** | 3 |
+| `power_pole.png` | **9** | 0 |
+| `chest_shadow.png` | 0 | 160 |
+| `smelter_shadow.png` | 0 | 162 |
+| `power_pole_shadow.png` | 0 | 159 |
+| `smelter_glow.png` | 12 | 0 — exempt, not a silhouette |
+
+**All three declared assets therefore fail to load.** `sprites on` reports `loaded=0
+failed=3`, `report()` push_errors, every declared building gets the magenta fallback cross,
+and `tools/boot_smoke.ps1` fails if the flag is ever turned on. The flag is off by default,
+so nothing user-facing changed. **Art must re-export the three bodies with the silhouette
+flush to the bottom edge.** When that lands, `test_sprite_manifest.gd` sub-case (1) goes red
+from the other direction and its comment says what to restore.
+
+**The rule carries an ALPHA THRESHOLD (8/255), and that is load-bearing.** Written as "at
+least one non-zero alpha pixel" it **grandfathers the smelter**: both masters have a stray
+pixel at alpha 3/255 in their bottom row, ~1% opacity, invisible — and a strict-zero rule
+accepts them. Measured by mutation: dropping the threshold to 0.5/255 makes the smelter load
+and the suite says so. Per-row maxima show a clean gap — anti-aliasing noise at 1, 3, 4;
+real silhouette at 18, 57, 130, 233, 255; nothing between 5 and 17. 8 sits in the gap.
 
 **Tan pad — OPEN DESIGN ITEM, not a defect.** Depleted soil reading through under buildings
 is a design question. For: visible soil state without opening a panel. Against: buildings
