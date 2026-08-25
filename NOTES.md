@@ -1402,13 +1402,50 @@ a multi-line mutation anchor stopped matching mid-matrix. Same shape: a tool rep
 success, altered something it never mentioned, and the safety net that should have surfaced
 it (the diff) was the thing that hid it.
 
-Practical consequence on this repo: after any bulk edit, check line endings before trusting
-a mutation anchor — `python -c "d=open(F,'rb').read(); print(d.count(b'
-'), d.count(b'
-')-d.count(b'
-'))"`
-should report zero lone LFs. A mutation that stops matching is the *lucky* outcome; the
-unlucky one is a mutation that still matches and silently targets the wrong line.
+### THE STANDING CHECK (two incidents is enough; do not wait for a third)
+
+**After any multi-file edit pass, and before trusting any mutation result, run this.** It is
+a step, not a habit. A mutation that stops matching is the **lucky** outcome; the unlucky one
+still matches and silently targets the wrong line, producing a result that is confidently
+reported and simply about something else.
+
+    python -c "import glob;m=[(f,c,l) for f in glob.glob('scripts/**/*.gd',recursive=True) for d in [open(f,'rb').read()] for c in [d.count(b'
+')] for l in [d.count(b'
+')-c] if c and l];print('MIXED-ENDING FILES:',m) if m else print('no mixed-ending files')"
+
+**Measured 2026-08-24 — the first version of this check was wrong, in the direction of false
+alarm.** It asserted "zero lone LFs", which flagged **29 files** on its first run. All 29 are
+*uniformly* LF and perfectly healthy; **genuinely mixed files: 0**. A check that reports 29
+false positives gets ignored by its third run, which is its own silent-compensation shape —
+so this is the rule-recursion practice applying to the rule written one paragraph earlier.
+
+**The real hazard is a file containing BOTH endings**, where a multi-line anchor breaks
+mid-file and a `
+`-assuming pattern matches some lines and not others. That is what the
+check above tests.
+
+**The second half of the check is not automatable, so hold it as a habit:** this repo is
+**130 CRLF / 29 LF**, split by which tool created each file. A mutation pattern that
+hardcodes either ending is wrong for a large minority of the tree. **Always write `
+?
+`**,
+and never infer a file's convention from its neighbours.
+
+### Why this class stays invisible: `autocrlf` is a safety net that hides the damage it normalises
+
+Both incidents were invisible for the same reason, and it is worth stating alone because it
+inverts an assumption this project leans on constantly.
+
+`core.autocrlf=true` converts line endings on the way into the index. So when a tool
+rewrites a file's endings wholesale, git normalises the rewrite back out and **the diff is
+clean**. The safety net is working exactly as designed, and that is precisely the problem:
+the diff is clean *because the tool cleaned it*.
+
+**So "no diff" carries no information about whether a file changed.** It means "no
+difference git chose to show you", which is a far weaker claim than it reads as. Any
+verification that bottoms out in "the diff was empty" — that a revert landed, that an edit
+was scoped, that nothing else moved — inherits that weakness. Compare bytes or hashes when
+the answer matters.
 
 Cluster C, measured: **three mutations silently no-op'd** — two `perl -0pi` and one `sed`,
 all defeated by CRLF line endings that the patterns did not account for. One of the three
@@ -1465,6 +1502,22 @@ whether a fix is complete — and it is the half that goes unchecked.
 
 Both passed 1-2 independent skeptic passes instructed to REFUTE. **Adversarial verification
 confirms that something is there. It does not confirm what shape it is.**
+
+**⚠ The prescribed fix is a hypothesis, not a spec — verify it runs in THIS environment
+before implementing it.** Cluster H, #22: the audit prescribes recording
+`Engine.get_process_frames()` to suppress the double-action. **`get_process_frames()`
+returns 0 for an entire headless run**, so a stamp of 0 compares equal forever and the guard
+would have wedged the Esc chain shut for every subsequent press — **a worse bug than the
+finding it closes**, shipped under the audit's authority.
+
+The fix texts were written by reading, not by running. None was executed against this
+engine, this Godot version, or this harness. ~57 findings remain, every one carrying a
+prescription with that provenance, and this session has now departed from prescribed fixes
+in #7, #12, #21, #33 and #22 — five of the ones actually attempted.
+
+Treat a fix text as a well-informed suggestion from someone who could not run the code:
+read it, check its assumptions against the environment, and **record the departure loudly
+enough that a future reader does not "restore" the prescription.**
 
 **⚠ A reproduction must be verified to exercise the mechanism before its result is
 trusted.** A repro that produces nothing is indistinguishable from a fixed bug — the same
