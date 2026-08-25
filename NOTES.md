@@ -1271,6 +1271,51 @@ redden a headless run, so a green suite carries no information about what the ga
 like.** The executed check for the sprite path remains a windowed flag-on/flag-off pixel
 differential. Full re-scope in `docs/scoping/visual-verification.md`.
 
+### Input CAN be driven headless — but not through the root Window (measured, cluster H)
+
+The neighbouring `_draw` ceiling made it natural to assume `_input` / `_unhandled_input`
+were equally out of reach without a frame. **They are not**, and audit cluster H (#22 /
+#58 / #59) is tested behaviourally because of it. Measured on Godot 4.6.3 `--headless`
+inside `test_runner.tscn`, all from `_ready` with no frame yielded:
+
+- **`push_input` on a `SubViewport` works.** `_input` and `_unhandled_input` both fire,
+  synchronously, repeatedly, including after a handler has called
+  `set_input_as_handled()`. GUI dispatch works inside it too: a focused `LineEdit` in a
+  SubViewport really does receive a key and really does insert the character.
+- **⚠ `push_input` on the ROOT WINDOW delivers nothing here.** Zero `_input` calls for a
+  key nothing binds. The root's `is_input_handled()` reads true and stays true, i.e.
+  `push_input` returns before the reset it normally does first — and a *forced* handled
+  flag does not block delivery, so the stuck flag is a symptom of the early return, not
+  its cause. The same call on the same root Window works from a `--script` SceneTree
+  during a real frame; the difference left is the runner's no-frame property. **The
+  exact gate was not identified.** What matters: a suite that pushes into the root
+  Window is green and empty. Parent the node under test into a `SubViewport` and push
+  there.
+- **`push_input` does not touch the `Input` singleton.** `Input.is_action_just_pressed`
+  stays false for a pushed event; only `Input.parse_input_event` (the OS path) and
+  `Input.action_press` write action state. Code that mixes event handlers with polled
+  actions — `main.gd` does — needs both driven, separately.
+- **⚠ `Input.action_press` sticks for the whole run.** `is_action_just_pressed` is
+  `pressed_process_frame == Engine.get_process_frames()`, and `get_process_frames()` is
+  0 for the entire headless run, so one press reads as just-pressed forever.
+  `Input.action_release` does **not** undo it (`pressed` goes false, `just_pressed`
+  stays true). Two consequences: **no suite can assert "and the next press behaves
+  differently"** — that shape is hand-only — and a press leaks into every later suite.
+- **A whole `Main` from `main.tscn` instantiates and runs `_ready` headless**, with
+  `@onready` refs resolved. Guard `SaveSystem.save_path` first (audit #63: the runner
+  restores it for nobody) or `Main._ready` will load a previous suite's fixture. Free it
+  with `free()`, not `queue_free()` — no frames means a queued free never happens and the
+  orphan keeps eating input for the rest of the run.
+
+Working harness: `scripts/tests/esc_input_harness.gd`. It re-measures the channel at the
+top of every suite with a key nothing binds rather than trusting any of the above.
+
+**A frame-stamp guard is therefore untestable in this suite.** Audit #22's prescribed fix
+was to compare `Engine.get_process_frames()`; because that value never changes here, such
+a guard cannot be exercised and would misbehave under the runner. Cluster H shipped a
+one-shot read-and-clear latch instead. Reach for a latch, not a frame stamp, whenever a
+cross-handler guard needs to be verifiable.
+
 ### ⚠ Rule recursion: a rule against a failure shape is itself subject to that shape
 
 **This has now happened at least four times, which makes it a pattern rather than
