@@ -457,6 +457,45 @@ func can_place_building(t: int, pos: Vector2i) -> bool:
 			return false
 	return true
 
+## Should the placement hover preview render RED at `anchor` while the player
+## holds `building_type`?
+##
+## EXTRACTED FROM `_draw` DELIBERATELY (audit #16). The predicate used to sit
+## inline in the hover branch, where nothing could test it: `test_runner.gd`
+## never yields a frame, so no `CanvasItem` here receives NOTIFICATION_DRAW
+## (NOTES.md, "A structural ceiling"). A one-line correction applied in place
+## would have shipped green with no assertion able to touch it. It lives here
+## so `test_hover_preview_agreement.gd` can call it without a frame.
+##
+## `building_type < 0` means NEUTRAL mode — the hover rect is highlighting an
+## EXISTING building's footprint, which is not a placement intent and has no
+## blocked state. It must return false, never fall through to the placement
+## rule: `Buildings.footprint_of(-1)` is an invalid DATA index.
+##
+## THE BODY IS A DELEGATION AND MUST STAY ONE. It used to re-derive the rule as
+## `tiles.has(cell) or has_building_at(cell)`, which asks "has this tile ever
+## been MODIFIED", not "is it occupied" — a different question, wrong in both
+## directions. `set_overlay` writes a `tiles` entry for every paved cell, so
+## every legal placement on prepared ground previewed red; bare grass has no
+## entry, so everything illegal on grass previewed free; and neither the Pump's
+## water adjacency nor the drill's ore coverage was consulted at all. Re-deriving
+## the rule anywhere is how the two answers drift apart; there is one rule and
+## this asks it. Covered by `test_hover_preview_agreement.gd` in both directions.
+##
+## NO last_building_place_error SAVE/RESTORE, DELIBERATELY — the audit's fix text
+## prescribed one. `_draw` does clobber the string every frame, but all three
+## readers consume it inside the same synchronous call as the failed placement
+## that set it (`main.gd` `_try_place`, `console.gd` `_cmd_place` twice), so no
+## frame can interleave and there is nothing to protect. Two untested defensive
+## lines are not free here: they would read as a live hazard that does not exist.
+## The premise is asserted, not assumed — that suite's (E2) reddens if any
+## reading function ever becomes a coroutine, which is the condition that would
+## make the save/restore necessary.
+func hover_preview_blocked(building_type: int, anchor: Vector2i) -> bool:
+	if building_type < 0:
+		return false
+	return not can_place_building(building_type, anchor)
+
 ## `extra` is forwarded to Buildings.make for type-specific payload
 ## (currently only PLANTER uses it — for crop_type).
 func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
@@ -1765,18 +1804,10 @@ func _draw() -> void:
 			if existing != null:
 				fp_size = Buildings.footprint_of(existing.type)
 		var hover_rect: Rect2 = Rect2(rect_anchor.x * TILE_SIZE, rect_anchor.y * TILE_SIZE, TILE_SIZE * fp_size.x, TILE_SIZE * fp_size.y)
-		# Blocked if any footprint cell is occupied. Skipped when we're
-		# highlighting an existing building (that's not a placement intent).
-		var blocked: bool = false
-		if hover_building_type >= 0:
-			for dx in fp_size.x:
-				for dy in fp_size.y:
-					var cell: Vector2i = Vector2i(rect_anchor.x + dx, rect_anchor.y + dy)
-					if tiles.has(cell) or has_building_at(cell):
-						blocked = true
-						break
-				if blocked:
-					break
+		# Red if this placement would be refused. The rule lives in
+		# hover_preview_blocked() and NOT here, because nothing headless can
+		# reach a _draw body — see that method's header.
+		var blocked: bool = hover_preview_blocked(hover_building_type, rect_anchor)
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
 		# Hover outline width: 2 world units AT zoom >= 1 (so it scales
 		# with the tile and stays exactly aligned with tile boundaries),

@@ -116,6 +116,12 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_esc_modal_race.gd"),
 	preload("res://scripts/tests/test_esc_duplicate_handler.gd"),
 	preload("res://scripts/tests/test_console_backtick_toggle.gd"),
+	# Audit #16: the placement hover preview must agree with can_place_building
+	# in both directions. The predicate was EXTRACTED out of GridWorld._draw to
+	# make this suite possible at all — nothing headless can reach a _draw body,
+	# so a correction applied in place would have been unverifiable. See the
+	# file's header.
+	preload("res://scripts/tests/test_hover_preview_agreement.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

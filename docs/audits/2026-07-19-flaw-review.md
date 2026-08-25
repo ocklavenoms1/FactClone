@@ -118,9 +118,17 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #80 (cluster J). **#34, #35, #36 and #77 all stay LIVE**, deliberately: #34's and #35's titles each carry a clause the edit does not reach, and #36/#77 prescribe file deletions, which are the user's call. One doc edit closed one finding and advanced four | **28 closed / 56 live** |
 | 2026-08-25 | #36 + #77 | **30 closed / 54 live** — two root plan files deleted after lifting their live tails |
 | 2026-08-25 | #19 (rating RE-CONFIRMED as MEDIUM, against this document's own mis-rating note — see the rating note below) | **31 closed / 53 live** |
+| 2026-08-25 | #16 — the predicate EXTRACTED out of `_draw` and delegated, not swapped in place. **#38 stays LIVE and was deliberately not touched**; its headline symptom dissolved as predicted, its dict-growth half did not | **32 closed / 52 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 31 + LIVE—HIGH 0 + LIVE—MEDIUM 14 + LIVE—LOW 39 = **84**.
+incrementing: CLOSED 32 + LIVE—HIGH 0 + LIVE—MEDIUM 13 + LIVE—LOW 39 = **84**.
+Each section header was checked against its own row count in the same pass
+(32/0/13/39), and the 84 ids are distinct — no row lost, duplicated, or
+double-counted.
+
+**And per the caveat at the top of this document, that is the entire content of
+the check.** Two of those four addends were re-derived today; the LOW block's 39
+was counted, not audited, and counting proves only that 39 rows exist.
 
 The line above this one used to read `28 + 0 + 16 + 40`, which also summed to 84 and
 was two clusters out of date in three of its four terms. **A total that still adds up
@@ -142,7 +150,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (31)
+### CLOSED (32)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -177,6 +185,7 @@ is closed at all.
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `2026-08-25` — **file deleted**, user-approved. Live tails lifted to `NOTES.md` first ("two live tails lifted"): zoom-level persistence, verified absent from `save_system.gd`. `PROJECT_LOG.md` references left intact as historical record | doc-only; no test |
 | 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `2026-08-25` — **file deleted**, user-approved. Live tails lifted first: right-click half-stack + drag-and-drop, both verified absent (`MOUSE_BUTTON_RIGHT` = 0 across the three slot files). Dangling citation at `buildings.gd:1297` rewritten | doc-only; no test |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` | `f154b88` — the prescribed delegation, taken as written (rare here); the **rating** departs from this document's mis-rating note and stays MEDIUM on measured evidence — see the rating note below | `test_inserter_chest_overfill.gd` (7 cases) — a reachability case so the overfill case's silence means something; the behavioural full-chest repro; **an item-conservation case that is the severity evidence, not a regression guard**; unit accept/refuse either side of the cap; a retention case pinning the per-stack waiver the removed comment claimed; and a chest whose state has no `"bag"` key |
+| 16 | hover preview contradicts `can_place_building`, both directions | **`8b460d1`+ (this cluster)** — the prescribed three-line swap was **declined as unverifiable**, which was the whole shape of the work. The predicate is now `GridWorld.hover_preview_blocked()` at `grid_world.gd:494-497`, called once from `_draw` at `:1810`; its body is `not can_place_building(...)` behind a `building_type < 0` guard. **The extraction is not tidying — it is the only way this could be tested at all**, since `test_runner.gd` never yields a frame and no `CanvasItem` here is sent NOTIFICATION_DRAW. **No `last_building_place_error` save/restore**, against the fix text: all three readers consume the string synchronously with the failed placement that set it, so no frame can interleave — and that premise is asserted, not assumed | `test_hover_preview_agreement.gd` — both directions the title claims, each measured RED first against the real production predicate: 4 legal-previews-RED cases (belt/oven on paved ground, pump beside water, drill on its own ore) and 3 illegal-previews-FREE cases (belt/oven on bare grass, drill with no ore). Plus a **reachability control** that agreed even before the fix, so the other cases' silence means something; 4 retention cases for what the old predicate got right; the neutral `type < 0` branch; and an 8-type × 12-cell sweep of `preview == not can_place`, which is the assertion that catches a HALF-delegation |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -216,12 +225,25 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (14)
+### LIVE — MEDIUM (13)
+
+> **⚠ EVERY `grid_world.gd` CITATION BELOW ABOVE LINE `:494` IS UNAFFECTED; EVERY
+> ONE BELOW IT SHIFTED BY +39 when #16 landed** (`hover_preview_blocked` was
+> inserted at `:494`, and 8 lines came out of `_draw`). Rows 17, 29, 30, 31 and
+> 32 all cite `grid_world.gd` below that point and were **not** rewritten here,
+> deliberately: spot-checking the +39 arithmetic against today's source found
+> that several of them do **not** land on the construct they name even after the
+> shift — i.e. they were already stale before this commit, by an amount nobody
+> has measured. (The document already disagrees with itself about one: #30's row
+> says the terrain loop is at `:1598`; the cost note below says `:1619`.) Writing
+> `old + 39` into those rows would have manufactured a precise-looking number
+> from an unverified one. **Re-derive them at dispatch.** The one that WAS
+> re-derived today is #30's terrain loop: `for tile_key in tiles:` is at
+> **`grid_world.gd:1658`**.
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1768-1779` (bad check `:1775`), `can_place_building` at `:417-458` — **re-derived 2026-08-25 and drifted 44 lines in three days**; the row said `:1731-1741` / `:1736` on 2026-08-22 and `:1598-1606` before that, which now lands on #30's terrain loop. Interlocks with #38: #38's headline symptom *is* this bug — **both measured, see the cost note below** |
-| 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
+| 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` — **grid_world line is pre-#16 and unverified; see the +39 note above** |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
@@ -240,7 +262,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | # | Finding | Today's citation |
 |---|---|---|
 | 37 | `tile_regen_progress` not cleared on load | sibling clears at `save_system.gd:724, 737, 752, 766`; **`tile_regen_progress.clear()` appears nowhere in the file** — was cited `:550-579` |
-| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:663-664` — was cited `:515-516`; the collapse sites it mirrors are `grid_world.gd:1092-1094` (chop_tree, was `:921-923`), `:1046-1048` (deplete_resource, was `:875-877`), `:387-388` (clear_tile). Its headline symptom *is* #16 — **confirmed by measurement, not by reading**; fix #16 first, then re-scope to dict growth. See the cost note below |
+| 38 | load rehydrates explicit default-grass tiles | `save_system.gd:663-664` (unchanged); collapse sites **re-derived 2026-08-25 after #16 landed**: `grid_world.gd:1131-1133` (chop_tree, was `:1092-1094`), `:1085-1087` (deplete_resource, was `:1046-1048`), `:387-388` (clear_tile, **unchanged** — it sits above `hover_preview_blocked`'s insertion point). **Its headline symptom is GONE, measured, and the remaining finding is narrower**: the red preview on a chopped tile after F5+F9 was #16's bug and dissolved with it. What is left is the dict entry — see the #16/#38 cost note below for the post-fix numbers |
 | 39 | Harvester reassigns `b.state["buffer"]` instead of mutating | `harvester.gd:123, 163` |
 | 40 | drill pulls fuel from all 4 edges | `mining_drill.gd:119` |
 | 41 | composter recipes comment claims non-rotatable | `recipes.gd:207-208` |
@@ -458,7 +480,54 @@ conservation case with **2450 before, 2441 after**. Nine items destroyed outrigh
 half-applied version of this fix is strictly worse than the defect it replaces, and the
 only assertion that catches it is the one that looks redundant.
 
-### Cost note — #16 and #38 priced 2026-08-25, both still reproduce, neither implemented
+### Cost note — #16 and #38 priced 2026-08-25; #16 has since been IMPLEMENTED, #38 has not
+
+> **⚠ STATUS UPDATE, same day, after the work landed. Read this before the
+> pricing below, which is preserved as the pre-fix measurement.**
+>
+> **#16 is CLOSED.** The shape this note proposed — extract, delegate, test — is
+> what shipped, and the cost estimate held: **-12 / +43 in `grid_world.gd`** (the
+> +43 is almost entirely the retention comment on the new method) **plus a new
+> suite**, against the predicted "-9 / +6 plus a new suite".
+>
+> **The note's one wrong call was the save/restore.** It said "keep it anyway —
+> it costs two lines". It was **not** kept, and the reason is the note's own
+> finding turned around: the save/restore is provably unnecessary *today*, so
+> two defensive lines would assert a hazard that does not exist and would
+> themselves be untested. What shipped instead is an assertion on the PREMISE —
+> `test_hover_preview_agreement.gd` (E2) reddens if any function reading
+> `last_building_place_error` in `main.gd` or `console.gd` ever becomes a
+> coroutine, which is the exact condition that would make the save/restore
+> necessary. Verified today: **neither file contains `await` at all.**
+>
+> **#38's headline symptom is gone, re-measured after the fix**, on a chopped
+> tree at `(-256, 61)`, seed 42:
+>
+> ```
+> LIVE          : tiles.has=false  OLD_predicate=false  hover_preview_blocked=false  can_place=true
+> after F5 + F9 : tiles.has=true   OLD_predicate=TRUE   hover_preview_blocked=false  can_place=true
+> rehydrated tile: base=0 overlay=0 resource=0   (== DEFAULT_BASE / DEFAULT_OVERLAY / DEFAULT)
+> ```
+>
+> `OLD_predicate` is the deleted `tiles.has(cell) or has_building_at(cell)`
+> expression, re-derived inside the probe on purpose: it still reads TRUE after
+> the round-trip, which is what makes this a demonstration that **#16's fix**
+> removed the symptom rather than a demonstration that #38 stopped happening.
+> **#38 still happens.** It is simply no longer visible.
+>
+> **The dict growth is re-confirmed at exactly +1 per collapsed tile**, and
+> permanent: `tiles.size()` 15641 generated → **15640** after the chop (the
+> `erase` at `grid_world.gd:1133`) → **15641** after F5+F9, with exactly 1
+> `tile_modifications` entry, and that restored entry is a pure default. (The
+> absolute totals differ from the 14,606 measured earlier in this note — a
+> different tree and a different sample point, not a contradiction. **The delta
+> is the claim, and the delta is identical.**) It feeds `for tile_key in tiles:`
+> at **`grid_world.gd:1658`** — finding #30's per-frame loop — one wasted
+> iteration per frame, forever, drawing a grass tile identical to the default.
+>
+> **#38 was deliberately NOT fixed in the same pass.** Its row stays LIVE—LOW
+> with its citations re-derived. Ordering advice below still stands, now with
+> its first half discharged.
 
 Scoped only. **Both were RUN, not read**: a throwaway probe suite built a seeded world,
 evaluated the hover predicate at `grid_world.gd:1775` and `can_place_building` over the
