@@ -80,9 +80,12 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-23 | #21 (narrowed — see below) | **16 closed / 68 live** |
 | 2026-08-25 | #62 (closed at `26f5066` on 2026-08-24; recorded here a day late) | **17 closed / 67 live** |
 | 2026-08-25 | #23 + #24 + #47 + #79 (cluster G, one file) | **21 closed / 63 live** |
+| 2026-08-25 | #15 + #18 (cluster C, one shared rule in two files) — **#18 needed a second commit, `5a5cced`; the closure at `71c03e0` alone was premature. Same shape as #11's double-commit row** | **23 closed / 61 live** |
+| 2026-08-25 | #14 (cluster C) | **24 closed / 60 live** |
+| 2026-08-25 | #33 — **NOT closed.** Measured, partly fixed, and NARROWED; stays LIVE—MEDIUM. See its row | **24 closed / 60 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 21 + LIVE—HIGH 0 + LIVE—MEDIUM 20 + LIVE—LOW 43 = **84**.
+incrementing: CLOSED 24 + LIVE—HIGH 0 + LIVE—MEDIUM 17 + LIVE—LOW 43 = **84**.
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -100,7 +103,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (21)
+### CLOSED (24)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -125,6 +128,9 @@ is closed at all.
 | 24 | unbounded radius in `deplete_area` / `tile` | `dafd174` — MEDIUM rating re-confirmed rather than inherited; see the rating note below | `test_console_guards.gd` — a radius-6000 sweep must finish inside 2 s, an int64-max radius must still report the whole world, and `tile 0 0 17` must be refused |
 | 47 | `set_soil` doesn't clear wasteland | `dafd174` | `test_console_guards.gd` — after `wasteland 3 3` + `set_soil 3 3 100` the tile must not be wasteland, LOW compost must be accepted, and a planter on it must grow |
 | 79 | console.gd header says 12 commands; registry has 13 | `dafd174` — the count was **14**, not 13; the finding understated it by one | `test_console_guards.gd` — parses the header and compares count AND names to `_register_commands()` |
+| 15 | composter pins a starved recipe forever | `71c03e0` — **one defect with #18, fixed as one shared rule**; see the note below | `test_recipe_pin_release.gd` cases (A) (B) (H) — a lone wheat beside a flax belt must produce compost, a wheat belt must NOT be abandoned, and a stalled partial stack must still be named in the panel |
+| 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `71c03e0` + `5a5cced` — **two commits. Three distinct routes hid behind one title; one of them does not exist, and the one matching the title word for word was found last, from the finding's own fix text.** See the note below | `test_recipe_pin_release.gd` cases (D) (E) (F) (I) (J) — dead-recipe smelter and composter must recover; a valid-recipe NO_FUEL smelter must still resume from belt fuel; a NO_FUEL smelter whose inputs are taken from the panel must accept the *other* ore; and NO_FUEL must survive a full output |
+| 14 | processors push outputs backward onto feeder belts | `cec3632` — **wider than the citation: the strict prefer_dir path had it too** | `test_processor_feeder_push.gd` (5 cases) — no flour on the feeder with no sink, with a real sink, or with a jammed sink; no compost onto an inward belt on the strict path; and a pass-by belt must still accept |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -164,15 +170,12 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (20)
+### LIVE — MEDIUM (17)
 
 | # | Finding | Today's citation |
 |---|---|---|
-| 14 | processors push outputs backward onto feeder belts | `processor.gd:221-230, 260-269` |
-| 15 | composter pins a starved recipe forever | `composter.gd:74-78` |
 | 16 | hover preview contradicts `can_place_building`, both directions | `grid_world.gd:1731-1741` (bad check `:1736`) — **was cited `:1598-1606`, which now lands on #30's terrain loop**. Interlocks with #38: #38's headline symptom *is* this bug |
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
-| 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `smelter.gd:117-125` |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 22 | one Esc press performs two actions | `map_panel.gd:274-276` (was `:243-245`), `console.gd:180-182` (accurate), `main.gd:691-703` (was `:611-622`). One unit with #58 + #59 |
@@ -184,7 +187,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
 | 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | active-tiles rebuild `grid_world.gd:1223-1232`, keys snapshot `:1239`, call site `:1190` — **was cited `:1128-1149`, which now lands on `wood_yield_for_tree`**. Partly closed by #31; same unit as #29 |
-| 33 | per-tick transient allocations in processor pull/push | `processor.gd:101-102, 119, 126`; `buildings.gd:936-956` |
+| 33 | per-tick transient allocations in processor pull/push — **MEASURED and NARROWED 2026-08-25; the caching fix is declined, one free part taken at `6083ff8`** | `processor.gd:158-159` (the `[]`/`{}` pair — **0.9% of a processor tick, not worth touching**), `processor.gd:176, 183` (pull sweep, deliberately left alone), `processor.gd:295` (push sweep, now hoisted to one `all_edge_cells` call); `buildings.gd:936-956` (`edge_cells`, **the actual cost — the finding's own last citation, and the only one that mattered**). See the profiling note below |
 | 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:773, 777`; file is **1068** lines as of 2026-08-25 — was 812 here, and cluster G's own fixes and comments are part of why it moved. Stays LIVE and is worse than the row said. **Same edit as #80** — both resolve to `NOTES.md:773` + `:777`, at different severities. Fix as one; see R3's pattern note |
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
@@ -428,6 +431,177 @@ one … header line … found 0"*, not pass. That check was not theoretical: the
 version of the regex did not allow the header's `-` bullet, and the test caught its
 own parser before it caught anything else.
 
+### Scope note — #14 was narrower as written than the defect is
+
+**Do not remove the feeder guard from `_try_push_to_cell` on the grounds that #14
+only cited the no-preference branch.** The finding cited
+`processor.gd:221-230, 260-269` — the no-preference sweep and
+`_try_push_belt_to_cell`. Both citations were accurate. The **strict `prefer_dir`
+path** (`_try_push_to_cell`) had the identical defect and was not cited: a recipe's
+declared output edge is simply wherever the player put a belt, and nothing stops that
+belt pointing back into the machine. `test_processor_feeder_push.gd` case **(4)**
+reproduced it on the composter's canonical-E compost port, which is a `prefer_dir`
+output.
+
+The consequence, reproduced rather than inferred: a mill with one E-pointing belt on
+its W side turned that belt from `[GRAIN,GRAIN,GRAIN,GRAIN]` into four `FLOUR` in
+400 ticks, after which `Belt.try_insert(feeder, GRAIN)` returned false — the grain
+supply line killed by the mill's own output. `Belt.try_insert` drops the item in slot
+0 and the belt carries it *toward* the machine that made it; the machine will not
+re-accept its own output, so it parks in the front slot forever, once per tick.
+
+**Reachability was checked before the repro was trusted**, because a repro that
+produces nothing looks exactly like a fixed bug. Of 19 `outputs_solid` declarations,
+**5 lack `prefer_dir`** — `mill_grain_to_flour`, `briquetter_fuel`, `yeast_culture`,
+`press_sugar` (and one multi-output line that does declare them). The probe asserted
+`canonical_dir == -1` and `Buildings.world_dir(mill, -1) == -1` *before* reading the
+result, confirming the no-preference branch was the branch under test.
+
+`recipes.gd` already describes this hazard in the composter block and mitigates it
+**with data** — "without prefer_dir, a jammed downstream belt would cause
+`Processor._try_push_outputs` to fall through to other directions — including pushing
+compost BACKWARD onto the input belt". That comment is correct and predates the
+audit. It is a per-recipe mitigation for a per-code defect, which is why four recipes
+were still exposed. **Do not treat adding `prefer_dir` to those four recipes as an
+alternative fix**: it changes established output routing for existing factories and
+still leaves the general case open.
+
+The guard is deliberately narrow — only belts pointing **into** the footprint are
+refused; a belt running past the building is a legitimate sink and still accepts.
+Case **(5)** pins that and is load-bearing: inverting the guard to refuse every belt
+reddens case (5) plus `test_wheat_to_flour`, `test_thresher_prefer_dir`,
+`test_thresher_rotation` and `test_cloth_prefer_dir`.
+
+### Shared-rule note — #15 and #18, and the three separate wedges behind #18's title
+
+**#18's title is accurate; the reading that "NO_FUEL cannot recover" is not.** These
+came apart during verification and the distinction is the whole content of the
+finding, so it is recorded rather than smoothed over. Three routes into the wedge
+were found; only the third is what a reader naturally pictures from the title, and it
+was found last, from the finding's own *fix text* rather than from its description.
+
+**Route 1 — the one that does NOT exist. Do not "fix" it.**
+`Burner.try_pull_fuel` is **step 1 of `Smelter.tick`** (`smelter.gd:81`), not
+`make()`, and runs unconditionally every tick including while `STATE_NO_FUEL`; the
+`STATE_NO_FUEL` arm re-checks inputs, room and fuel and restarts. **Measured:** a
+smelter with 1 ore and no fuel entered NO_FUEL in 3 ticks and produced an ingot once
+wood reached the S-edge fuel belt. Case **(F)** is the retention case, because the
+plausible over-fix is to clear the pin on entering NO_FUEL; it is mutation-tested —
+dropping the resolvability check so the release fires on valid recipes reddens (F)
+along with `test_smelter.gd`.
+
+**Route 2 — unresolvable pin. Real, and NOT smelter-specific.** See below.
+
+**Route 3 — inputs removed underneath NO_FUEL. Real, smelter-specific, and the only
+route reachable without a save file.** `STATE_NO_FUEL` asserts "inputs and room, no
+fuel". `SMELTER`'s `slot_layout` binds an `"input"` slot to `in_buffer` and
+`BuildingPanel._take_from_slot` handles kind `"input"` by removing the entry, so a
+player emptying a stuck smelter from its panel falsifies that state — and nothing
+restored it, because the arm needs `_has_all_inputs` to fire, selection is gated on
+`STATE_IDLE`, and `_try_pull_inputs` filters belt pulls by the still-pinned recipe.
+**Measured: 400 ticks with `fuel_buffer` 8 and four copper ore sitting on the W belt
+produced nothing, status "NO FUEL".** That is #18's title word for word — a smelter
+wedged with fuel available. Fixed with the narrow `elif` #18's fix text prescribes;
+case **(I)**.
+
+This one is genuinely smelter-specific, and structurally rather than incidentally:
+the composter's non-IDLE states do not depend on `in_buffer` — `RUNNING` has already
+consumed its inputs and completes regardless, `BLOCKED_OUTPUT` re-checks room and
+drains via the push. `NO_FUEL` is the only input-dependent non-IDLE state in either
+machine.
+
+⚠ **#18's fix text gave the WRONG REASON for its own (correct) `elif`.** It argued an
+unconditional `else` would "oscillate IDLE<->NO_FUEL every tick". It would not: the
+`else` binds to the outer `if inputs and room`, so with inputs present it never runs.
+Measured — swapping the `elif` for `else` left all 63 suites green, which is why case
+**(J)** was written. The real difference is that `else` also fires when inputs are
+present but the output is full, reporting "Idle" for a machine short of both fuel and
+a sink. The rule kept is: leave a state only when that state's own precondition is
+violated. **Do not restore the oscillation rationale.**
+
+**Route 2 in full — the unresolvable pin, on BOTH machines.** Both machines
+gate recipe selection on IDLE and both bail before their state machine when the pin
+does not resolve, so a non-IDLE state holding an unresolvable `recipe_id` can never
+recover. Measured at 400 ticks each: a smelter forced to `NO_FUEL` with
+`smelt_mithril`, 4 ore and 99 fuel never moved; a composter forced to `RUNNING` with
+`composter_gone` and 4 wheat never moved. The route is a save — `Recipes.get_recipe`
+names it in its own comment ("a save references a recipe ID that's been
+renamed/removed") and `SaveSystem` restores building state verbatim with no
+validation of `recipe_id`. So any future recipe rename silently bricks every
+mid-batch smelter and composter in every existing save, announcing it with one
+`push_warning` per id, ever.
+
+**#18's fix text called applying the guard to the smelter "optional
+future-proofing"; #15's said the reverse. #15 is right, on two independent grounds:**
+
+1. The unresolvable-pin wedge reproduces on **both** machines — cases (D) and (E) —
+   so for that half there is nothing optional about either file.
+2. The startability half is a no-op on the smelter **today only because every
+   smelter recipe needs exactly 1 ore** (`smelt_iron`, `smelt_copper`), while every
+   composter recipe but `composter_high_loafpack` needs 2. That is a data
+   coincidence, not a structural difference. The first smelter recipe needing 2 of
+   an ore — steel, an alloy — wedges exactly as a lone wheat wedged the composter.
+
+The rule therefore lives once, in `Processor` (`can_start_from_buffer` and
+`release_unresolvable_recipe`), and both machines call both. **Do not "simplify" the
+smelter's call to `can_start_from_buffer` away as dead code.** It is inert today by
+data, not by design, and deleting it re-creates the drift that made these two files
+one defect reported twice.
+
+`recipe_id == ""` is deliberately exempt from the release: it is the documented
+"nothing selected yet" sentinel a fresh machine is built with. Case **(G)** pins that
+a fresh belt-fed composter still works.
+
+### Profiling note — #33 was measured, and the measurement did not support the fix
+
+**#33 is the one entry in the "deferred pending profiling" list that has now been
+profiled. Do not implement the cache it proposes without reading this first.**
+
+Measured on a debug headless build, 200 mills × 100 ticks, with an instrumented
+counter inside `Buildings.edge_cells` (added, measured, reverted from a file copy):
+
+| | before `6083ff8` | after |
+|---|---|---|
+| `edge_cells()` calls per building-tick | **12.00** (4 pull, 8 push) | **8.00** |
+| Arrays allocated per building-tick | 12 | 9 (8 + one combined) |
+| Time per building-tick | 18.45 µs | 14.15 µs |
+
+Supporting micro-measurements, 200 000 iterations each: `edge_cells` on a 1×1
+**0.569 µs/call**, on a 2×2 **0.639 µs**; a `Dictionary` lookup — the best case a
+cache can reach — **0.047 µs**; the `[]` + `{}` pair at `processor.gd:158-159`
+**0.167 µs**.
+
+**Three things the numbers say that the finding does not:**
+
+1. **The finding's weighting is wrong.** The two containers it cites by line are
+   **0.9%** of a processor tick. `edge_cells`, its last and least specific citation,
+   was **37%**. Anyone "fixing" #33 by pooling those two containers would do
+   essentially nothing and believe the finding addressed.
+2. **At the scale this game reaches, the whole line item is noise.** 50 processors
+   = 0.82 ms/tick = 16 ms per second of wall clock = **1.6% of a core**. A cache
+   recovering ~34% of that saves 0.28 ms/tick.
+3. **At stress scale the cache does not solve the stated problem.** 500 processors
+   = 7.93 ms/tick, **15.9% of a core**, and a 47% frame-budget spike every third
+   frame at 20 tps. Removing a third leaves a 5.2 ms spike: the allocation is not
+   what makes 500 processors expensive, it is a third of a cost already too large.
+   The lever there is tick budgeting, not micro-allocation.
+
+Against a ≤1.6%-of-a-core benefit, a cache would hand the same **mutable** `Array` to
+all 14 `edge_cells` call sites across 9 files, making "no caller ever mutates it" a
+permanent unenforced invariant, and retain 4 arrays per building position forever.
+**Declined.**
+
+What was taken is the part with no cache and no shared state: the no-preference push
+branch built its edge-cell list twice, once per sweep. `Buildings.all_edge_cells`
+appends dir 0,1,2,3 in order and each dir's cells in order, so the hoist is
+byte-identical in iteration order and no contested push changes winner —
+`CONVENTIONS.md`'s tick-determinism rule is not touched, and #17's under-specified
+two-pass contract is not touched either. The **pull** sweep is left alone on purpose:
+it scans once, so the same hoist would allocate 5 arrays where it now allocates 4.
+
+**#33 stays LIVE—MEDIUM**, narrowed to `edge_cells` allocation at stress scale, with
+the note that its severity was assigned without any of the numbers above.
+
 ### Current baselines for count-type findings
 
 **Re-derive these before citing one. A bare number here is exactly the drift that
@@ -456,7 +630,7 @@ parse, never what the writer emits.
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **61** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **63** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **14** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
 | `console.gd` **1068** lines | `wc -l < scripts/ui/console.gd` |
 | **12** ProcessorPanel subclasses | `grep -rlc '^extends ProcessorPanel' scripts/ui/*.gd \| wc -l` |
@@ -474,6 +648,16 @@ of the three were drifting in the same document that tracks drift:
 - `console.gd` lines **812 → 1068**. That figure feeds finding #34's split trigger
   (~800 lines), which is now breached by 268 rather than by 12. #34 stays LIVE and
   is scoped harder than the number in it suggests.
+
+**Re-derived 2026-08-25 at cluster C, by running all seven commands, not by
+incrementing.** Only the test-suite row moved: **61 → 63**, the two cluster C suites
+(`test_recipe_pin_release.gd`, `test_processor_feeder_push.gd`). The runner's own
+pass count (`63 passed`) equals the number of registered files, so the two
+cross-check in one line. `SAVE_VERSION` re-checked and unchanged at **18** — cluster
+C changed tick behaviour only and touched no serialized field; note that #18's wedge
+is *reached* through saves but is not a schema problem, so no bump is warranted.
+Worldgen `VERSION` **4**, console commands **14**, `console.gd` **1068** lines,
+ProcessorPanel subclasses **12**, panels **26 − 5 = 21**: all unchanged.
 
 **Correction, 2026-08-24 — this block was wrong when written, in both rows.** It is
 recorded rather than quietly fixed, because a block whose whole purpose is stopping
@@ -494,8 +678,11 @@ original figure was right; dropping it was the error. Finding #81's "21 real" st
 
 **#45** — its 2-line fix changes worldgen output and needs a v4→v5 bump that
 hard-fails every existing save; ship it batched with other worldgen changes.
-**#30, #33, #70, #71** — deferred pending profiling; the analyses in their entries
-stand ready.
+**#30, #70, #71** — deferred pending profiling; the analyses in their entries
+stand ready. **#33 has now been profiled** (2026-08-25) and left this list: the
+measurement did not support its proposed fix, the free part was taken at `6083ff8`,
+and the numbers are in the profiling note above so the next reader does not
+re-derive them.
 
 ---
 
