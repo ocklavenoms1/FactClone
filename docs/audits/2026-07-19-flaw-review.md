@@ -83,9 +83,10 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #15 + #18 (cluster C, one shared rule in two files) — **#18 needed a second commit, `5a5cced`; the closure at `71c03e0` alone was premature. Same shape as #11's double-commit row** | **23 closed / 61 live** |
 | 2026-08-25 | #14 (cluster C) | **24 closed / 60 live** |
 | 2026-08-25 | #33 — **NOT closed.** Measured, partly fixed, and NARROWED; stays LIVE—MEDIUM. See its row | **24 closed / 60 live** |
+| 2026-08-25 | #22 + #58 + #59 (cluster H — one Esc/input-routing unit across three files) at `dd0493b` | **27 closed / 57 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 24 + LIVE—HIGH 0 + LIVE—MEDIUM 17 + LIVE—LOW 43 = **84**.
+incrementing: CLOSED 27 + LIVE—HIGH 0 + LIVE—MEDIUM 16 + LIVE—LOW 41 = **84**.
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -103,7 +104,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (24)
+### CLOSED (27)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -131,6 +132,9 @@ is closed at all.
 | 15 | composter pins a starved recipe forever | `71c03e0` — **one defect with #18, fixed as one shared rule**; see the note below | `test_recipe_pin_release.gd` cases (A) (B) (H) — a lone wheat beside a flax belt must produce compost, a wheat belt must NOT be abandoned, and a stalled partial stack must still be named in the panel |
 | 18 | `STATE_NO_FUEL` has no fallback — smelter wedges with fuel available | `71c03e0` + `5a5cced` — **two commits. Three distinct routes hid behind one title; one of them does not exist, and the one matching the title word for word was found last, from the finding's own fix text.** See the note below | `test_recipe_pin_release.gd` cases (D) (E) (F) (I) (J) — dead-recipe smelter and composter must recover; a valid-recipe NO_FUEL smelter must still resume from belt fuel; a NO_FUEL smelter whose inputs are taken from the panel must accept the *other* ore; and NO_FUEL must survive a full output |
 | 14 | processors push outputs backward onto feeder belts | `cec3632` — **wider than the citation: the strict prefer_dir path had it too** | `test_processor_feeder_push.gd` (5 cases) — no flour on the feeder with no sink, with a real sink, or with a jammed sink; no compost onto an inward belt on the strict path; and a pass-by belt must still accept |
+| 22 | one Esc press performs two actions | `dd0493b` — **both routes the title names were reproduced, not just the one the description leads with.** `map_panel.gd`'s Esc handler deleted; the console keeps its own and now latches the press. The fix for the console half **deliberately departs from the prescribed frame stamp** — see the cluster H note | `test_esc_modal_race.gd` (4 sub-cases) — map route, console route, both asserting the hotbar selection SURVIVES the press that closed the modal; plus a structural check that `map_panel.gd` names KEY_ESCAPE in no code line |
+| 58 | duplicate unconditional `close_info_panel` handler | `dd0493b` — deleted as prescribed | `test_esc_duplicate_handler.gd` (3 sub-cases) — Esc that closes the inventory grid must leave the info-panel target standing, plus a structural check pinning `main.gd` at exactly ONE poll of that action |
+| 59 | backtick cannot close the console | `dd0493b` — `KEY_QUOTELEFT` arm added to `console.gd`'s `_input` match, as prescribed | `test_console_backtick_toggle.gd` (3 sub-cases) — backtick opens, backtick closes, **and the command field is still empty afterwards**; the stray `` ` `` is asserted separately because a console that closed but still typed the character would be half-fixed |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -170,7 +174,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (17)
+### LIVE — MEDIUM (16)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -178,7 +182,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` — **see mis-rating note below** | `inserter.gd:641-654` |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 22 | one Esc press performs two actions | `map_panel.gd:274-276` (was `:243-245`), `console.gd:180-182` (accurate), `main.gd:691-703` (was `:611-622`). One unit with #58 + #59 |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
 | 27 | bag-cap phases assert an in-test mirror of production logic | `test_bag_cap.gd:20-21, 108-115` |
@@ -192,7 +195,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5` |
 | 36 | stale `SESSION_E_PLAN.md` hand-off brief (v9 / 8 tests) | `SESSION_E_PLAN.md:3, 7-8, 48` |
 
-### LIVE — LOW (43)
+### LIVE — LOW (41)
 
 | # | Finding | Today's citation |
 |---|---|---|
@@ -215,8 +218,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 54 | hotbar keys not gated by modals | `hotbar.gd:266` |
 | 55 | drill panel overflows its 280px top area | `drill_panel.gd:54, 57, 180` |
 | 57 | chest capacity label hardcodes 2400 | `chest_panel.gd:56` |
-| 58 | duplicate unconditional `close_info_panel` handler | `main.gd:801-802` — **was cited `:721-722`; `:802` now lands in #59's neighbourhood**. One unit with #22 + #59 |
-| 59 | backtick cannot close the console | `main.gd:878-881` (was `:802-805`); `console.gd:162-180`. One unit with #22 + #58 |
 | 60 | F11 demo writes tiles bypassing `tile_modifications` | `main.gd:1547` — was cited `:1463-1464` |
 | 61 | `on_impassable` escape valve permits free water walking | `player.gd:82` |
 | 63 | runner restores neither `save_path` nor tick rate | **no restoration exists** — `SaveSystem.save_path` appears in `test_runner.gd` only in comments (`:121-124`, `:167-168`), and `tick_rate_multiplier` not at all. Was cited `:80-83`. Scope is **21** suites overriding `save_path`, not the 10 the body claims |
@@ -602,6 +603,124 @@ it scans once, so the same hoist would allocate 5 arrays where it now allocates 
 **#33 stays LIVE—MEDIUM**, narrowed to `edge_cells` allocation at stress scale, with
 the note that its severity was assigned without any of the numbers above.
 
+### Routing note — cluster H's three findings, the fix that departs from its prescription, and the harness that made any of it testable
+
+**All three were CONFIRMED and are closed. None was mis-shaped.** The cluster was
+scoped with a warning that fixing any one of them would produce a report reading as
+if the other two were fixed, because all three answer the same question — *which
+handler saw the key, and did more than one thing act on it*. That warning was
+correct and it drove the test design, so it is recorded here rather than left in a
+session report.
+
+**What each finding actually covers, which is narrower than the shared symptom.**
+
+- **#22** is two *handlers* racing one *poll*. `map_panel.gd` and `console.gd` each
+  closed their own modal from `_input` and called `set_input_as_handled()`, which
+  stops event propagation and has no effect whatever on `Input.is_action_just_pressed`.
+  Main's chain polls that, from `_process`, later in the same frame — so the modal
+  was already gone, the chain skipped its own step for it and spent the press on the
+  next live step down.
+- **#58** involves no `_input` handler at all. It is `main.gd` racing *itself*: two
+  polls of `close_info_panel` in one `_process`, with a modal early-return between
+  them that is evaluated *after* the first one already closed the modal, and so does
+  not fire.
+- **#59** is the opposite failure — a handler that does NOT exist. The console's
+  `_input` match had no backtick arm, so the key fell through to GUI dispatch and the
+  focused LineEdit ate it before `_unhandled_input` could toggle.
+
+**The title, not the description.** #22's description leads with the map panel and
+mentions the console second; both routes were reproduced separately, because the
+title says "modal Esc handlers" in the plural and closing on one of them would have
+been the #18 mistake again.
+
+**Deliberate design of the tests, so the three stay separable.** Each suite watches a
+different casualty, and each is forbidden the other two's setup:
+
+- #22's suites watch the **hotbar selection** (chain step 5) and assert the info panel
+  has NO target — watching the info panel would make them redden for #58.
+- #58's suite closes the **inventory grid**, which owns no `_input` handler, and
+  asserts neither the map nor the console is open — using the map would make it
+  redden for #22.
+- #59's suite never presses Esc at all.
+
+Measured discrimination, one mutation at a time, each mutated line echoed back from
+disk and reverted from a file copy:
+
+| mutation | #22 suite | #58 suite | #59 suite |
+|---|---|---|---|
+| **M22a** — restore `map_panel._input`'s KEY_ESCAPE branch | **FAIL** | PASS | PASS |
+| **M22b** — drop `and not esc_taken_by_console` from the chain | **FAIL** | PASS | PASS |
+| **M22c** — move the latch read *below* the early-return gates | **FAIL** | PASS | PASS |
+| **M22a + M22b** together | **FAIL** | PASS | PASS |
+| **M58** — restore the second `close_info_panel` handler | PASS | **FAIL** | PASS |
+| **M59** — point the console's backtick arm at an unused key | PASS | PASS | **FAIL** |
+
+Two further mutations were applied to the *harness*, because a suite whose repro
+delivers nothing is green and empty: neutering `deliver()` reddens #22 and #59 on
+their PREMISE and MECHANISM assertions (and correctly leaves #58 green, which
+genuinely does not depend on event propagation); neutering `press_action()` reddens
+#22 and #58 on their polled premises and correctly leaves #59 green.
+
+**⚠ The console half of #22 does NOT use the fix the finding prescribes.** #22's fix
+text says to record `Engine.get_process_frames()` in the console's Esc branch and
+compare it in main. That is correct in a running game and **unverifiable here**: the
+test runner never yields a frame, so `Engine.get_process_frames()` is 0 for an entire
+run, a stamp of 0 compares equal forever, and the guard would wedge the Esc chain
+shut for every subsequent press instead of just the one. What shipped is a one-shot
+read-and-clear latch (`DevConsole.take_esc_consumed()`), which is frame-independent,
+self-clearing by construction, and testable. **Do not "restore" the frame stamp.**
+
+The latch introduced one hazard of its own and it is guarded rather than argued away:
+a latch set on a frame whose `_process` returns early would strand into a later frame
+and swallow an unrelated Esc. That is reachable — `_unhandled_input` deliberately lets
+backtick through the quantity-picker gate, so the console can be opened over the
+picker. `main.gd` therefore reads the latch **above** both early-return gates, and
+case 4 of `test_esc_modal_race.gd` is the mutation-verified guard on that placement
+(M22c above).
+
+**The map half is a deletion, as prescribed.** `map_panel.gd` has no `_input` at all
+now; chain step 3 was always able to close the map, and the panel's own
+"M / Esc to close" hint stays accurate. **The six-case Esc precedence order was not
+changed** — the chain gained a suppression guard ahead of it, and cases 1–6 and their
+order are byte-for-byte what they were.
+
+**Severity, re-judged rather than inherited.** The console is debug-build-gated
+(`OS.is_debug_build()`), the same consideration cluster G applied to #24:
+
+- **#22 keeps MEDIUM on the map route alone.** The map panel ships in production, so
+  a production player pressing Esc on the map really did lose their hotbar selection.
+  The console route is dev-only and is the lesser half.
+- **#59 stays LOW and is entirely dev-only** — nothing about it reaches a production
+  export. LOW is already the floor; it would otherwise be arguable that it belongs
+  below the table.
+- **#58 stays LOW but is NOT dev-gated at all.** Inventory grid and info panel both
+  ship. Of the three it is the one a player met most often, which is worth noticing
+  next to its severity.
+
+**What is genuinely testable here, established by measurement rather than assumption.**
+The scoping pass expected `_input` to be as untestable headless as `_draw` is. It is
+not, but the route matters and the obvious one is a trap:
+
+- `push_input` **on the root Window delivers nothing** inside the runner — zero
+  `_input` calls for a key nothing binds — while the identical call works from a
+  `--script` SceneTree during a real frame. A suite that pushed there would pass while
+  testing nothing.
+- `push_input` **on a `SubViewport` works**, in `_ready`, with no frame yielded, and
+  repeatably. Every suite here parents its `Main` into one.
+- `push_input` does **not** update the `Input` singleton; `Input.action_press` is a
+  separate call. Driving both is not a shortcut around #22 — it is #22.
+- `Input.action_press` **sticks** for the whole run (frame-stamp comparison, frames
+  never advance), and `action_release` does not undo it. **Hand-only consequence:**
+  no suite can assert "and the next press behaves normally". The ritual is: debug
+  build, open the console over the quantity picker, Esc, dismiss the picker, then Esc
+  again and confirm the second press closes the modal it should.
+- A real `Main` from `main.tscn` instantiates and runs `_ready` headless, and the
+  console's LineEdit really takes focus and really receives typed characters — which
+  is why #59's stray-backtick assertion is a genuine observation and not a stand-in.
+
+All of this lives in the header of `scripts/tests/esc_input_harness.gd`, next to the
+code it constrains, and is summarised in `NOTES.md` beside the `_draw` ceiling.
+
 ### Current baselines for count-type findings
 
 **Re-derive these before citing one. A bare number here is exactly the drift that
@@ -630,9 +749,9 @@ parse, never what the writer emits.
 |---|---|
 | `SAVE_VERSION` **18** | `grep 'const SAVE_VERSION' scripts/systems/save_system.gd` |
 | worldgen `VERSION` **4** | `grep 'const VERSION' scripts/world/world_generator.gd` |
-| **63** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
+| **66** test suites | `grep -c 'res://scripts/tests/test_' scripts/tests/test_runner.gd` |
 | console **14** commands | `grep -cE '^\s*"[a-z_]+": \{' scripts/ui/console.gd` |
-| `console.gd` **1068** lines | `wc -l < scripts/ui/console.gd` |
+| `console.gd` **1127** lines | `wc -l < scripts/ui/console.gd` |
 | **12** ProcessorPanel subclasses | `grep -rlc '^extends ProcessorPanel' scripts/ui/*.gd \| wc -l` |
 | **21** building-specific panels | `ls scripts/ui/*_panel.gd \| wc -l` = 26, minus the 5 that are not building-specific: `building_panel`, `processor_panel` (base classes), `info_panel`, `inventory_panel`, `map_panel` |
 
@@ -657,6 +776,27 @@ cross-check in one line. `SAVE_VERSION` re-checked and unchanged at **18** — c
 C changed tick behaviour only and touched no serialized field; note that #18's wedge
 is *reached* through saves but is not a schema problem, so no bump is warranted.
 Worldgen `VERSION` **4**, console commands **14**, `console.gd` **1068** lines,
+ProcessorPanel subclasses **12**, panels **26 − 5 = 21**: all unchanged.
+
+**Re-derived 2026-08-25 at cluster H, by running all seven commands, not by
+incrementing.** Two rows moved:
+
+- test suites **63 → 66**, the three cluster H suites (`test_esc_modal_race.gd`,
+  `test_esc_duplicate_handler.gd`, `test_console_backtick_toggle.gd`). The runner's
+  own pass count (`66 passed`) equals the number of registered files, so the two
+  cross-check in one line. Note the cluster also added
+  `scripts/tests/esc_input_harness.gd`, which is **not** a suite and is deliberately
+  named outside the `test_*.gd` pattern — it is invisible to this command and to
+  `test_registration_completeness.gd` alike, which is the intended arrangement for a
+  shared helper.
+- `console.gd` lines **1068 → 1127**. Cluster H added the backtick arm, the Esc latch
+  and their reasoning. This feeds finding **#34**'s ~800-line split trigger, now
+  breached by **327** rather than 268; #34 stays LIVE and gets worse each time this
+  file is touched, which is itself an argument for scheduling it.
+
+`SAVE_VERSION` re-checked and unchanged at **18** — cluster H changed input routing
+only and touched no serialized field, so no bump is warranted. Worldgen `VERSION`
+**4**, console commands **14** (the backtick arm is a key handler, not a command),
 ProcessorPanel subclasses **12**, panels **26 − 5 = 21**: all unchanged.
 
 **Correction, 2026-08-24 — this block was wrong when written, in both rows.** It is
@@ -689,7 +829,8 @@ re-derive them.
 ## DEFECTS FOUND DURING RE-APPLICATION — deliberately outside the numbered tables
 
 This audit tracks exactly **84** findings and every table above is arithmetic against
-that number (16 closed / 68 live). Defects discovered *while closing* those findings
+that number (27 closed / 57 live as of cluster H — re-derived by counting table rows,
+not by editing this sentence). Defects discovered *while closing* those findings
 are recorded here instead of being numbered #85+, so the 84-row arithmetic stays
 checkable. These are **not** audit findings; nothing above counts them. Forward-looking
 copies live in `NOTES.md` under their own `## Queued:` headings.
