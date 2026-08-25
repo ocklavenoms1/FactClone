@@ -1630,6 +1630,36 @@ whose state has no `"bag"` key. `state.get("bag", [])` returns the *default lite
 append lands in a temporary and the item is discarded. Closed incidentally by delegating to
 `Chest.try_insert`, which repairs the shape through `Chest._bag`.)
 
+### Assert the MECHANISM, not the answer — an assertion can pass for the wrong reason
+
+#16, mutation M3. The extracted predicate opens with a guard: `if building_type < 0: return
+false`, the neutral case where the hover highlights an existing building rather than a
+placement. Deleting that guard should have reddened the neutral assertions. It did not —
+the suite reported **68 passed, 0 failed**, while emitting **8 `SCRIPT ERROR` lines**.
+
+The trace is worth reading, because every step is individually reasonable.
+`Buildings.requires_overlay(-1)` and `footprint_of(-1)` are out-of-bounds Dictionary reads.
+GDScript aborts the function and hands back the declared return type's default — an empty
+Array. `can_place_building` then walks zero cells, finds no obstruction, and returns
+`true`. The preview computes `not true` = `false`. **The correct answer, reached by
+faulting twice per call.**
+
+Four assertions checked the answer. All four passed. The guard they existed to protect was
+gone.
+
+**The rule:** where a guard exists to make something happen *a particular way*, assert the
+way, not the outcome. Outcomes have more than one cause; that is exactly what makes them
+weak evidence. The strengthened assertion (N5) plants a sentinel in
+`last_building_place_error` and requires it to **survive** the neutral call —
+`can_place_building` clears that string on its first line, so a surviving sentinel proves
+the guard returned *before* delegating. It asserts the path taken. M3 re-run against it
+reddens four times.
+
+**And note what caught the original miss: only the `SCRIPT ERROR` count.** The pass/fail
+line was clean and truthful — every assertion really did pass. This is the concrete case
+the three-count run protocol exists for, and the first time it has caught a *test* rather
+than a compile break.
+
 ### ⚠ FIXES ARE NOT MONOTONE — the intermediate state can be worse than either endpoint
 
 Same finding, mutation M1: delegate to `Chest.try_insert` **but keep `return true`**.
