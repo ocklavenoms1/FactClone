@@ -60,6 +60,7 @@ const TESTS: Array = [
 	preload("res://scripts/tests/test_load_network_invalidation.gd"),
 	preload("res://scripts/tests/test_mixed_tier_save_roundtrip.gd"),
 	preload("res://scripts/tests/test_inserter_shared_input_cap.gd"),
+	preload("res://scripts/tests/test_inserter_chest_overfill.gd"),
 	preload("res://scripts/tests/test_applicator_wasteland_recovery.gd"),
 	preload("res://scripts/tests/test_save_atomicity.gd"),
 	preload("res://scripts/tests/test_load_malformed_save.gd"),

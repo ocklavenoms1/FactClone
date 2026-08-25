@@ -630,7 +630,7 @@ static func _try_drop(b: Building, world) -> bool:
 	# (the "back of the queue") — consistent with how Processors push.
 	if dst_b.type == Buildings.Type.BELT:
 		return Belt.try_insert(dst_b, item)
-	# Chest: append to bag.
+	# Chest: insert via existing API, which is what bounds it.
 	if dst_b.type == Buildings.Type.CHEST:
 		return _drop_to_chest(dst_b, item)
 	# Recipe-driven Processor: drop into in_buffer if recipe accepts.
@@ -639,19 +639,26 @@ static func _try_drop(b: Building, world) -> bool:
 	return false
 
 static func _drop_to_chest(chest: Building, item: int) -> bool:
-	# Mirror the chest-add pattern: try to top up an existing entry,
-	# otherwise append a new one. Chest cap check (TOTAL_CAPACITY = 2400)
-	# is generous; for v1 we don't enforce per-stack caps inside the bag
-	# (chest uses aggregate capacity, not per-slot).
-	var bag: Array = chest.state.get("bag", [])
-	# Top-up existing entry if present.
-	for entry in bag:
-		if int(entry[0]) == item:
-			entry[1] = int(entry[1]) + 1
-			return true
-	# New entry.
-	bag.append([item, 1])
-	return true
+	# Delegate; do not re-implement. Chest owns its capacity rule and
+	# `try_insert` is where every other producer meets it
+	# (processor.gd:345/360, harvester.gd:83, mining_drill.gd:252). A second
+	# copy of the bag-add here is what let the inserter and its destination
+	# disagree about what "full" means — audit finding #19.
+	#
+	# The waiver the previous body claimed is REAL and is kept: Chest ignores
+	# `Items.max_stack_of` and holds one entry per type at any count
+	# (chest.gd:9), so `_bag_add` still tops up in place and no per-stack cap
+	# appears. What that comment did NOT license, and what this line restores,
+	# is the AGGREGATE bound — `free_capacity < 1` refuses, and the false
+	# return is the only thing that can put the arm in BLOCKED_AT_DEST for a
+	# chest destination (see the WORKING_OUT arm above).
+	#
+	# `try_insert` also reaches the bag through `Chest._bag`, which repairs a
+	# chest whose state carries no "bag" key. The old `state.get("bag", [])`
+	# appended into the default literal and returned true, so that item was
+	# destroyed — the one path on this function where anything was actually
+	# lost. Both halves are pinned by test_inserter_chest_overfill.gd.
+	return Chest.try_insert(chest, item, 1)
 
 static func _drop_to_processor(dst: Building, item: int) -> bool:
 	# Drop to in_buffer ONLY if the building's recipe (current OR any
