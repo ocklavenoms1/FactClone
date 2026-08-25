@@ -287,24 +287,122 @@ func _submit_line(line: String) -> void:
 	# Execute and append result.
 	var result: String = execute(trimmed)
 	if result != "":
-		# Heuristic: if first word is "Error" / starts with "Unknown"/"Usage"/etc.,
-		# render in error color. Otherwise default. Cheap classifier.
-		var color: Color = ERROR_COLOR if _looks_like_error(result) else TEXT_COLOR
+		var color: Color = ERROR_COLOR if _is_refusal(result) else TEXT_COLOR
 		_append_line(result, color)
 
-static func _looks_like_error(text: String) -> bool:
+# ---------------------------------------------------------------------------
+# OUTPUT CLASSIFICATION — which colour a command's reply is drawn in
+# ---------------------------------------------------------------------------
+#
+# WAS `_looks_like_error` (console.gd:295-307), an allowlist of ERROR-shaped
+# prose that defaulted to "normal output". The audit filed this as an "inverted
+# error classifier" citing console.gd:527-531; that citation is dead (it points
+# at _cmd_set_soil's bounds branch) and the finding's name is wrong too. It was
+# not inverted. It was INCOMPLETE, and mismatched against the actual text.
+#
+# MEASURED before the change, by running every `return "…"` literal in this file
+# plus the five multi-line producers through the old function: 84 messages, 30
+# classified as normal output, and TWELVE of those 30 were refusals. A rejected
+# command rendered exactly like a successful one:
+#
+#   :495  Count must be > 0 (got 3).
+#   :512  Tile (3, 4) is outside world bounds [3, 3).
+#   :528  Tile (3, 4) is outside world bounds.
+#   :556  Radius must be >= 0 (got 3).
+#   :585  Tier must be 'low', 'mid', or 'high' (got '…').
+#   :588  Tile (3, 4) is outside world bounds.
+#   :614  Direction '…' invalid. Use E|S|W|N or 0|1|2|3.
+#   :617  Tile (3, 4) is outside world bounds.
+#   :656  Tile (3, 4) is outside world bounds.
+#   :697  Building at (3, 4) is not a Chest.
+#   :744  Tile (3, 4) is outside world bounds.
+#   :769  Radius must be >= 0 (got 3).
+#
+# Six of the twelve are the same message. The rule meant to catch them read
+# `begins_with("tile (") and find("out of") >= 0`, and every one of those six
+# says "outside", not "out of". The wording it WAS written against still exists,
+# in exactly one place: `_format_tile_detail`'s "(out of world bounds)" row. So
+# the rule was not written against wording that never existed — it was written
+# against ONE message and silently assumed to cover six others.
+#
+# ---------------------------------------------------------------------------
+# WHY THE POLARITY IS INVERTED RATHER THAN THE LIST EXTENDED
+# ---------------------------------------------------------------------------
+# Adding "must be > 0", "is not a", "invalid" to the old list fixes today's
+# twelve and re-creates the problem at the next validation branch someone
+# writes. The shape of the bug is the DEFAULT, not the coverage:
+#
+#   - The two sides do not grow alike. Refusals are open-ended prose, one per
+#     validation branch, and there are ~54 of them; every new guard clause adds
+#     one. Successes are a closed set of past-tense reports emitted by the code
+#     that did the work — Added / Placed / Removed / Cleared / Depleted /
+#     Player → / soil → / fertilized / → WASTELAND / Tick speed → / World seed,
+#     plus three info dumps. Eighteen, and they move only when a command changes
+#     what it does.
+#   - The two failure directions do not cost alike. A refusal drawn as normal
+#     output tells the player their command worked when it did not. A success
+#     drawn red is cosmetically wrong and self-correcting: the world changed,
+#     and they can see it.
+#
+# So: match the small, slow, closed side, and DEFAULT TO ERROR. An unrecognised
+# message is now red. A new refusal is red without anyone remembering anything.
+#
+# ⚠ WHAT THIS IS NOT. It is still prose matching, and a fully structural fix —
+# a typed result, or every refusal returning through a `_refuse()` wrapper that
+# tags it — would remove the guessing entirely. That is ~54 call sites in this
+# file and disproportionate to a LOW finding, so it is not done here. The
+# residual exposure is narrowed to rewording a SUCCESS message, and
+# `test_console_error_classifier.gd` reddens on exactly that: it scans this
+# file's source for every string-literal return and requires each one to
+# classify as a refusal unless it is on the test's own success list.
+#
+# KNOWN AND ACCEPTED: `help <cmd>` returns "Usage: <usage>\n<help>" and is drawn
+# red. It was drawn red before this change too (the old list matched "usage"),
+# so this is not a regression, and it is the safe direction. Telling a
+# successful `help give` from a refusal's usage line needs structure, not a
+# better guess.
+
+## Message shapes that mean THE COMMAND DID WHAT YOU ASKED. Everything else is a
+## refusal. Each row is [kind, needle] with kind "prefix" or "contains";
+## needles are lower-case, and the text is lower-cased before matching.
+##
+## The four "contains" rows exist because their commands lead with the tile, not
+## the verb — "Tile (3, 4) soil → 40." — and `begins_with("tile (")` cannot be a
+## success rule: six REFUSALS start that way too, and so does
+## `_format_tile_detail`'s out-of-bounds row. The needle is the part that only
+## appears when the work actually happened.
+const SUCCESS_SHAPES: Array = [
+	["prefix",   "world seed: "],              # seed
+	["prefix",   "added "],                    # give — full and partial
+	["prefix",   "player → tile "],            # tp
+	["prefix",   "depleted "],                 # deplete_area
+	["prefix",   "placed "],                   # place
+	["prefix",   "removed "],                  # destroy
+	["prefix",   "cleared "],                  # clear inventory | clear chest
+	["prefix",   "tick speed → "],             # tick_speed
+	["prefix",   "commands (type "],           # help, bare
+	["prefix",   "[sprites] "],                # sprites — manifest report
+	["prefix",   "soil grid centered on "],    # tile <x> <y> <radius>
+	["contains", " soil → "],                  # set_soil
+	["contains", " fertilized: "],             # fertilize
+	["contains", " → wasteland "],             # wasteland
+	# tile <x> <y> — the single-tile detail dump. Present only when the tile is
+	# in bounds; the out-of-bounds variant has no Soil row and stays a refusal.
+	["contains", "\n  soil: "],
+]
+
+## True when this output means the command did NOT do what was asked.
+## Defaults to TRUE — see the block comment above for why.
+static func _is_refusal(text: String) -> bool:
 	var lower: String = text.to_lower()
-	return lower.begins_with("unknown") \
-		or lower.begins_with("usage") \
-		or lower.begins_with("error") \
-		or lower.begins_with("cannot") \
-		or lower.begins_with("not found") \
-		or lower.begins_with("tile (") and lower.find("out of") >= 0 \
-		or lower.find("must be between") >= 0 \
-		or lower.find("is not a number") >= 0 \
-		or lower.begins_with("item not found") \
-		or lower.begins_with("building not found") \
-		or lower.begins_with("no building")
+	for shape in SUCCESS_SHAPES:
+		var needle: String = str(shape[1])
+		if str(shape[0]) == "prefix":
+			if lower.begins_with(needle):
+				return false
+		elif lower.find(needle) >= 0:
+			return false
+	return true
 
 # ---------- output ----------
 

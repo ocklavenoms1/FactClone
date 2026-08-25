@@ -84,6 +84,10 @@ const TESTS: Array = [
 	# docs/scoping/visual-verification.md, route A.
 	preload("res://scripts/tests/test_inserter_body_colours.gd"),
 	preload("res://scripts/tests/test_inserter_status_strings.gd"),
+	# Scans console.gd's source for every message it can emit and judges each
+	# one. The only arrangement that reddens when a FUTURE refusal starts
+	# rendering like a success — see the file's header.
+	preload("res://scripts/tests/test_console_error_classifier.gd"),
 	# Guards THIS array. Asserts every test_*.gd on disk appears above, because
 	# a dropped registration reddens nothing — see the file's header for the
 	# incident that motivated it.
