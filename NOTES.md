@@ -1709,36 +1709,6 @@ that half-state is one plausible edit away, and nothing else in the suite would 
 it. Where a partial state is genuinely unsafe, say so in the retention comment: "these two
 lines land together" is information a future editor cannot derive.
 
-### ⚠ A claim ABOUT a finding becomes a finding — and inherits nothing but my confidence
-
-**Twice now I have asserted something about an entry, then treated my own assertion as
-verified in later briefs. Both times it was wrong.**
-
-- **#19's mis-rating note.** I wrote that its outcome is "item duplication or destruction",
-  called it HIGH-shaped, and repeated it as settled. Measured: conservation holds exactly,
-  2450 before and after. Neither happens.
-- **#28's prescription.** I briefed an implementer that "the prescribed fix is **known to
-  be wrong**, and the audit says so itself." **The Fix paragraph had already been rewritten
-  to the corrected version.** Only the *verification note* still carried the wrong one —
-  as the thing being corrected. I was quoting an earlier session's *report about* the entry
-  instead of the entry.
-
-The second is the more interesting failure, because it adds a wrinkle to
-"reproduce the title, not the paragraph". That protocol says the five sections of an entry
-can disagree. This says something further: **the entry is versioned.** Corrections land in
-one section and not the others, so a section can be stale *relative to its own document*,
-and a claim harvested from it ages the moment the entry is edited — including by us.
-
-**The rule: a statement about a finding is not part of the finding.** Whatever I write in a
-brief, a report, or a tracker note about what a finding says is a derived claim with a
-timestamp, and it decays exactly like a citation. **Re-read the entry at dispatch; never
-brief from a previous brief.** If a report is the only source for a claim, say "reported"
-and let the next reader know it was not re-checked.
-
-The tell in both cases is identical and easy to catch: **the claim was mine, and I stopped
-attributing it.** Once "the cost-check found X" becomes "X", the provenance is gone and
-nothing prompts a re-check.
-
 ### ⚠ Never shift a citation by arithmetic — a known-good delta on an unverified number produces a wrong number that looks verified
 
 **#16's fix inserted a method at `grid_world.gd:494`, shifting every citation below it by
@@ -1816,6 +1786,35 @@ restarts correctly; on that basis the finding was nearly written off as false. B
 `in_buffer`, so `BuildingPanel._take_from_slot` can empty a stalled smelter from the panel.
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
+
+**⚠ And the entry is VERSIONED — a claim about a finding is not part of the finding.**
+
+Corrections land in one section and not the others, so a section can be stale *relative to
+its own document* — including stale because we edited a neighbouring section and not it.
+
+**Measured, twice, and both were mine:**
+
+- **#19's severity.** I wrote that its outcome is "item duplication or destruction",
+  called it HIGH-shaped, and repeated it across briefs as settled. Conservation holds
+  exactly: 2450 items before, 2450 after. Neither happens.
+- **#28's prescription.** I briefed an implementer that the prescribed fix was "**known to
+  be wrong**, and the audit says so itself". The Fix paragraph had **already been rewritten
+  to the corrected version**; only the verification note still carried the wrong one, as
+  the thing being corrected. I was quoting an earlier session's *report about* the entry
+  instead of the entry.
+
+**The tell, which is the operative part: once "the cost-check found X" becomes "X",
+provenance is gone and nothing prompts a re-check.** Both claims were derived once,
+correctly caveated at the time, and then restated as fact in the next brief — at which
+point they read as properties of the codebase rather than as somebody's measurement with a
+date on it. Nothing about a bare assertion invites re-derivation. That is the whole
+mechanism, and it is entirely upstream of whether the original derivation was any good.
+
+**The practice: when carrying a claim about a finding into a brief, carry where it came
+from — or re-derive it.** "The cost-check on 2026-08-25 measured X" survives contact with a
+reader who can check it. "X" does not. Re-read the entry at dispatch; never brief from a
+previous brief.
+
 
 **In practice:** before closing an inherited finding, construct the failure the finding
 describes and watch it happen. If the reproduction does not match the description, *the
