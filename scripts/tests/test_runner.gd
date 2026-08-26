@@ -122,6 +122,12 @@ const TESTS: Array = [
 	# so a correction applied in place would have been unverifiable. See the
 	# file's header.
 	preload("res://scripts/tests/test_hover_preview_agreement.gd"),
+	# Audit #26: the two-pass belt tick. Belts had no suite of their own — they
+	# appeared only as incidental transport behind LOWER-BOUND thresholds, which
+	# a faster-than-correct or item-duplicating belt satisfies. Everything in
+	# this one is an exact equality. It is belts-only on purpose, and the hole
+	# it leaves (machine-adjacent timing, audit #17) is named in its header.
+	preload("res://scripts/tests/test_belt.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
