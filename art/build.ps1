@@ -131,6 +131,17 @@ foreach ($a in $manifest.assets) {
             continue
         }
     }
+    # Shadow contract: pure black, alpha only. The game composites the layer
+    # with modulate.a and trusts its RGB blindly, so a tint here colours every
+    # ground contact and nothing downstream would catch it.
+    $sb = python (Join-Path $ArtDir "tools\assert_shadow_black.py") $a.name
+    $sbFailed = ($LASTEXITCODE -ne 0)
+    $sb | ForEach-Object { Write-Host "$_" }
+    if ($sbFailed) {
+        Write-Host "  SHADOW TINTED for $($a.name) - must be pure black + alpha" -ForegroundColor Red
+        $failed += $a.name
+        continue
+    }
     $built += $a.name
 }
 

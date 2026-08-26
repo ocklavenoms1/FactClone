@@ -2335,3 +2335,92 @@ disagreement, not a visible restyling — and at three assets the largest
 remaining disagreement is now source, not correction. The value of it is that
 it does not compound: every future asset whose hue Tripo gets right will now be
 left alone instead of being rotated away from the set.
+
+## 33. The anchor contract, verified by experiment - transparent bottom rows are the TILE, not a bug
+
+First report from the game side, and it contained a real observation with an
+inverted diagnosis: "transparent bottom rows push artwork upward, by a
+different amount per asset - chest 7, smelter 2, pole 9. Fix: re-export with
+art touching the bottom edge."
+
+### The numbers are real, and they are geometry
+
+The transparent strip below each sprite's ink is the part of the asset's OWN
+TILE in front of it. The cell bottom is pinned to the footprint's front edge
+(`frame()`: `bottom_v = min(front_v, v0 - pad_v)`); a centred mesh shallower
+than its footprint stands back from that edge by `(footprint - depth) / 2`
+tiles, and after the anamorphic correction one ground tile is exactly 32 px:
+
+| Asset | depth (tiles) | predicted gap `(fp - depth)/2 x 32` | measured transparent rows |
+|---|---|---|---|
+| `chest` | 0.5809 | 6.71 px | 7 |
+| `smelter` | 1.8400 | 2.56 px | 3 *(reported as 2 - threshold difference on one soft-edge row)* |
+| `power_pole` | 0.3873 | 9.80 px | 10 *(reported as 9 - same)* |
+
+The chest's 7 rows are §11's plan-ratio measurement made visible: 1.549:1 in
+plan means 0.21 tiles of visible tile floor in front of the chest, and that
+floor is transparent because the sprite has no ground plane. **The rows differ
+per asset because the buildings genuinely stand at different depths in their
+tiles.** That is information, not error.
+
+### anchor_px is correct - by experiment, not just by construction
+
+Construction alone would not settle it: `anchor_px` is derived from the same
+math that frames the camera, and agreement-by-shared-mistake looks identical
+to agreement-by-correctness. So `verify_anchor.py` re-frames each asset, hides
+it, renders an emissive quad covering exactly the footprint, and pushes that
+through the same master and downsample; `measure_anchor.py` reads where the
+quad actually landed:
+
+```
+PASS chest       front edge at row boundary 64 (anchor_y 64.0)  centre 16.0  width 32px
+PASS smelter     front edge at row boundary 96 (anchor_y 96.0)  centre 32.0  width 64px
+PASS power_pole  front edge at row boundary 96 (anchor_y 96.0)  centre 16.0  width 32px
+```
+
+The pipeline, asked where the footprint is, answers with the number the
+metadata already claims. All three anchors sit at the sprite's bottom edge
+because no asset overhangs its front edge; the `min()` in `frame()` extends
+the cell downward if one ever does, and the anchor formula then lands
+mid-sprite - the contract does not change.
+
+Note what the anchor points AT: a ground-contact pixel boundary, which on
+every current asset is transparent air. That is correct. The anchor is a
+POINT on the ground, not ink, and a consumer that expects ink at the anchor
+has misread the contract.
+
+### THE RENDERER CONTRACT
+
+```
+draw_position = footprint_bottom_centre_on_screen - anchor_px
+```
+
+That is the whole contract, one subtraction, already written in every
+metadata JSON. Bottom-aligning ink instead re-introduces exactly the
+per-asset offsets observed - it throws away the depth information and
+substitutes "wherever the ink happens to stop." Re-exporting with art flush
+to the bottom edge would be strictly worse: it would push every building to
+the front boundary of its own tile (a chest centred in its tile would draw
+0.21 tiles too far forward), break the moment any asset overhangs its front
+edge, and break 4-way unions, where the cell is shared across four yaws and
+cannot be flush for all of them.
+
+**The art does not change. The fix is one line on the consumer's side.**
+
+### Accepted from the game team, both now permanent
+
+**Shadow layers are pure black, alpha-only - a REQUIREMENT, not a happy
+accident.** The game composites the layer with `modulate.a` and trusts its RGB
+blindly, so a tint would colour every building's ground contact.
+`assert_shadow_black.py` now gates every build: tolerance 1/255, because the
+smelter's shadow carries a single stray 1 from 8-bit unpremultiply rounding
+and a gate that cries wolf on quantisation teaches people to ignore it; 2 and
+above fails. Verified failing on a synthetic tinted shadow.
+
+**Their framing of the risk is right and is the reason this section exists:**
+at three assets a placement inconsistency is invisible; at twenty, every
+building sits at a slightly different height and nothing catches it but the
+eye, one asset at a time. That is the same silent-compensation shape as
+everything else this session - which is why the anchor now has an empirical
+verifier and the shadow has a tripwire, rather than both resting on being
+currently true.
