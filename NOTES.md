@@ -1450,6 +1450,22 @@ dispatches to every building type it should. That is the same shape one level do
 **When adding a system to any tick path, delete the call and run the suite before you
 consider it covered.** If nothing reddens, the coverage does not exist yet.
 
+**First cache built under this protocol (2026-08-26, audit #29):** the
+`_active_regrowth` index in `grid_world.gd` — and a cache is this failure shape's
+natural habitat, because a stale entry is absence wearing success (a chopped tree
+that silently never regrows). Two deliberate choices, recorded so the next cache
+copies them rather than re-deriving: the hot loop reads `resource_state[pos]`
+**unguarded**, so a stale index entry faults loudly every frame instead of
+self-healing — do not "harden" that read; and every invalidation edge got a
+drop-the-call mutation run before the fix was called covered (`test_regrowth_index.gd`'s
+header carries the M1-M6 ledger; three of the six drops announce themselves only in
+the `SCRIPT ERROR` count, which is the three-count protocol earning its keep again).
+The same day, #32's prescribed caches were **declined** when measurement put their
+benefit below their invalidation risk — the tracker's #29/#32 measurement note has
+the numbers. The pair is the protocol's decision rule in miniature: a cache is
+justified when the measured waste is large AND every edge can be made loud; absent
+either half, the walk you can see beats the cache you cannot.
+
 ### Fourth instance (2026-08-24): the sprite draw call site
 
 `SpriteLibrary.draw_building` was added to the building draw loop and **deleting the call

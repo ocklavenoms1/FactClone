@@ -124,13 +124,18 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #26 at `a2891fa` — a TEST-GAP row: `belt.gd` was already correct, so nothing was fixed. What landed is `test_belt.gd`. **The finding's own fix text mis-models the path and a test written to it fails against correct code**; the mis-modelled half is reported, not encoded — see the note below | **35 closed / 49 live** |
 | 2026-08-25 | #25 — another TEST-GAP row: `recipes.gd` is correct and untouched; what landed is `test_processor_recipes.gd`. **The finding's "no test ticks these nine" is stale for exactly one row** — `test_inserter_shared_input_cap.gd` has ticked `oven_bread` since #3 closed, but behind LOWER BOUNDS that a ratio or duration change walks straight through. Measured; see the note below | **36 closed / 48 live** |
 | 2026-08-26 | #31 | **37 closed / 47 live** — WONTFIX-with-rationale; the split is deliberate, the comment was the defect; #29/#32 unblocked |
+| 2026-08-26 | #29 (measured first: 1,010 µs/frame idle → 0.20 µs) at `5f02f7d` | **38 closed / 46 live** — #32 was measured in the same pass and every prescribed cache was **DECLINED with numbers**; it stays LIVE—MEDIUM, narrowed. See the #29/#32 measurement note |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 36 + LIVE—HIGH 0 + LIVE—MEDIUM 9 + LIVE—LOW 39 = **84**.
+incrementing: CLOSED 38 + LIVE—HIGH 0 + LIVE—MEDIUM 7 + LIVE—LOW 39 = **84**.
 Each section header was checked against its own row count in the same pass
-(36/0/9/39), and the 84 ids are distinct — no row lost, duplicated, or
+(38/0/7/39), and the 84 ids are distinct — no row lost, duplicated, or
 double-counted; the ids present are exactly 1..84, checked as a set rather
-than by reading the total.
+than by reading the total. (The previous version of this paragraph read
+`36 + 0 + 9 + 39` — stale against its own document's headers, which already
+said 37/8 after #31 moved. The paragraph was not updated when the row above
+it was. Same lesson as every prior instance: count the rows, do not trust
+the paragraph.)
 
 **This is a consistency check, not a currency check.** It proves the four tables
 partition 84 distinct ids; it proves nothing about whether any row's citation,
@@ -164,7 +169,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (37)
+### CLOSED (38)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -205,6 +210,7 @@ is closed at all.
 | 26 | no dedicated belt two-pass test | `a2891fa` — a TEST-GAP row. `belt.gd` was correct and stayed untouched; the commit is a new suite. **The finding's own fix text is wrong about the path and was not followed**: it prescribes "12 slots total path", but Pass 1 runs before Pass 2, so the advance tick that carries an item into a front slot is the same tick that hands it across — the resting positions on a three-belt line are `0,1,2,4,5,6,8,9,10,11`, ten of twelve, and a test written to the prescription FAILS against correct code. That makes `belt.gd:6-7`'s "Items advance one slot per belt tick" a false simplification of `belt.gd:10-12`'s own mechanism at every boundary — **reported, not encoded**; the suite asserts the two passes, not the prose sentence | `test_belt.gd` — four belts-only cases, every assertion an exact equality and no `>=` anywhere: single-item advance driven one tick at a time; jam/compression with conservation checked either side of every insert AND every tick; the opposite-facing guard; and a four-belt ring pinning both the item count and the item types. Each case carries a **reachability control**, because a dead belt leaves its item at slot 0 — which is where tick 0 expects it, and which makes "no handoff occurred" and "the ring conserved five items" both trivially true. Mutation-measured: double-advance, the removed handoff clear, the removed opposite-facing guard and an always-true `is_advance_tick` each redden it, and a straight-lines-only handoff regression is caught by the ring's control ALONE. **Machine-adjacent timing is a named gap in the file header, cross-referenced to #17** — #17's own fix option (b) prescribes a mill-then-belt ordering test, which would encode an undecided disagreement |
 | 25 | nine bread/cloth recipes never tick-tested | a TEST-GAP row. `recipes.gd` is correct and stayed untouched; the commit is a new suite. **The title's "never executed by any test" is stale for exactly one of the nine.** `test_inserter_shared_input_cap.gd` — which post-dates this audit; it landed when #3 closed — places a real OVEN, pins `recipe_id` (`:90-92`), pre-loads 8 RISEN_DOUGH (`:95`) and ticks it 400+400 through full bakes. So `oven_bread` HAS had tick-level execution, contradicting the verification note's "No test file emits ticks against an OVEN ... through a recipe cycle". What it never had is a lock on the DATA: its two assertions are `bread_made > 0` (`:116`) and `bread_later > bread_made` (`:127`), the lower-bound shape #26 named. **Measured, one mutation at a time: swapping `oven_bread`'s output to LOAF_PACK reddens that suite; raising RISEN_DOUGH 1→2 and halving `time_ticks` 120→60 each leave it GREEN.** The finding's substance holds for all nine; its wording is wrong for one | `test_processor_recipes.gd` — all nine recipes, N=2 cycles each, **every expected value a LITERAL** (`Recipes` is never called in the file). Seven dry rows in one table and one driver; the two fluid rows get test_mixer_dough's water+PUMP+PIPE fixture plus a pump-removal negative case that asserts the inputs are STILL THERE, not merely that no output appeared. `oven_bread` pre-loads both RISEN_DOUGH and FUEL_BRIQUETTE and asserts both drain. Exact-ratio assertions on all four multi-count rows; no `>=` anywhere. Each row is sampled at tick N·T−1 AND N·T, which is what makes `time_ticks` lockable at all. A **REACHABILITY CONTROL** at tick 1 requires every machine RUNNING with `progress == 1` and one cycle's inputs already paid, because a dead processor satisfies "no wrong item" and "no extra input eaten" trivially. Mutation-measured green→red on output identity, input ratio, output count, `time_ticks`, and a deleted `inputs_fluid` |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `2026-08-26` — **CLOSED WONTFIX-WITH-RATIONALE, decided after a measured design pass.** The split is **deliberate**: tick clock = factory sim, wall-clock = slow world processes, so `tick_speed` accelerates throughput and not world recovery. **The comment was the defect** — `tick_system.gd:5-7`'s "only clock" claim is amended to state both clocks and why. The three migration options are priced in `docs/scoping/r1-two-clocks.md` with **option 4 (the fix text's own N=20 variant) disqualified by measurement: it re-opens #7 at every tier** — compost admitted, consumed, tile scars, 1-2 s window, 70 suites green. Do NOT reopen this as a cheap win; reversing it means writing the tick-side assertions that do not exist and re-deriving `grace_admits_tier`'s thresholds | wiring pinned by `test_tick_loop_wiring.gd` 7-9 (two-sided) |
+| 29 | `_tick_regrowth` walks all of `resource_state` per frame | `5f02f7d` — **measured first, then the finding's own prescription taken nearly as written** (rare here; it involves no re-clocking, so R1/#31's pinned clock is untouched). Measured: worldgen seeds `resource_state` with **8,428** entries at seed 42, the `is_empty()` early-out could never fire, and the walk cost **1,010 µs/frame with ZERO chopped trees** — 6% of a 60 fps frame budget from game start, against a docstring claiming "O(active timers) … microseconds". After the sparse `_active_regrowth` index: **0.20 µs idle, 18 µs at 50 timers, 193 µs at 500** (was 1,042 / 1,238). One departure: the index's staleness hazard is made **LOUD, not tolerated** — `_tick_regrowth` reads `resource_state[pos]` unguarded on purpose, so a stale entry faults every frame rather than self-healing into silence. Numbers and decomposition in the #29/#32 measurement note | `test_regrowth_index.gd` (8 sub-cases) — the fresh-world premise (`resource_state` > 1000 entries AND index empty, pinning the finding's own reachability claim), the chop edge indexing AND ticking, the save mirror tracking in place, and **all six invalidation edges mutation-measured one at a time** (drop any of: the add in `chop_tree`, the erases in `_restore_tree` / `set_overlay` / `place_building`, the add in the save-load branch, the bulk clear in `WorldGenerator.generate` → a named assertion reddens; three of the drops also surface 2-3 `SCRIPT ERROR` lines, which the three-count run protocol exists to catch). `test_tick_loop_wiring` (7) reseeds through `chop_tree` — a fixture change; both of its pinned clock claims are untouched and 7-9 stayed green throughout |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -244,7 +250,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (8)
+### LIVE — MEDIUM (7)
 
 > **⚠ EVERY `grid_world.gd` CITATION BELOW ABOVE LINE `:494` IS UNAFFECTED; EVERY
 > ONE BELOW IT SHIFTED BY +39 when #16 landed** (`hover_preview_blocked` was
@@ -259,14 +265,21 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 > from an unverified one. **Re-derive them at dispatch.** The one that WAS
 > re-derived today is #30's terrain loop: `for tile_key in tiles:` is at
 > **`grid_world.gd:1658`**.
+>
+> **2026-08-26 addendum:** #29 is CLOSED and #30/#32 were re-derived below at
+> `5f02f7d` (whose own edits shifted `grid_world.gd` again — everything below
+> `:64` moved). Measured at dispatch, the old rows' figures were off by **+66
+> each** (#29's early-out `:1471` → `:1537` pre-fix; #32's rebuild `:1223` →
+> `:1289` pre-fix), not the +39 the paragraph above predicts — the warning was
+> right that the inputs had rotted further. Of this block's originals only
+> **#17's** `grid_world.gd` citation remains unverified.
 
 | # | Finding | Today's citation |
 |---|---|---|
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` — **grid_world line is pre-#16 and unverified; see the +39 note above** |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1470-1490` (early-out at `:1471`) — in the +39-shifted range, re-derive before use. **UNBLOCKED 2026-08-26**: #31 closed WONTFIX, so the clock stays put and the earlier "fix #31 first" sequencing is void — this is now an ordinary per-call-cost finding; the O(all-entries) walk was never touched by any clock option |
-| 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
-| 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | active-tiles rebuild `grid_world.gd:1223-1232` area — in the +39-shifted range, re-derive before use. **UNBLOCKED 2026-08-26**: #31 closed WONTFIX; same unit as #29, fix on their own terms |
+| 30 | `_draw` walks every tile and building per frame | **re-derived 2026-08-26 at `5f02f7d`**: `queue_redraw()` `grid_world.gd:1271`, terrain loop `:1715`, buildings loop `:1805` — the row's previous figures (`:1191/:1598/:1688`) and the earlier re-derivation (`:1658`) were all stale again. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
+| 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | **MEASURED 2026-08-26; every prescribed cache DECLINED with numbers — see the #29/#32 measurement note before reaching for one.** Today's citation (post-`5f02f7d`): function `grid_world.gd:1322`, active-tiles rebuild `:1327-1336`, keys snapshot `:1343`. The title's mechanism is real but is **23-32% of the function's cost at every scale measured**; the dominant cost is the per-tile second pass, which is inherent work at the wall-clock rate R1 pinned. Fix item (3) — "move the whole pass from `_process` to the game tick" — is **WRONG by supervening decision**: it re-clocks, which #31's WONTFIX forbids and `test_tick_loop_wiring` 7-9 tripwire. The cost comment on the function now states the measured numbers. NOT the same unit as #29 (see the measurement note) |
 | 33 | per-tick transient allocations in processor pull/push — **MEASURED and NARROWED 2026-08-25; the caching fix is declined, one free part taken at `6083ff8`** | `processor.gd:158-159` (the `[]`/`{}` pair — **0.9% of a processor tick, not worth touching**), `processor.gd:176, 183` (pull sweep, deliberately left alone), `processor.gd:295` (push sweep, now hoisted to one `all_edge_cells` call); `buildings.gd:936-956` (`edge_cells`, **the actual cost — the finding's own last citation, and the only one that mattered**). See the profiling note below |
 | 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:795, 799-805`. **The stale number is fixed; the finding is not.** The title's claim is the *breached trigger*, and the split has not been done — correcting 657 closes the paragraph and leaves the title true, so this stays LIVE with the split as its remaining work. **No figure is pinned in the NOTES paragraph any more**; it names `wc -l < scripts/ui/console.gd` instead, because 657 → 812 → 1068 → **1127** each went stale within a cluster or two. Measured 2026-08-25: 1127, i.e. 327 over "~800", up from 268 one cluster ago — it grows every time the file is touched. `console_commands.gd` does not exist (`ls scripts/ui/console_commands.gd`). The prescribed "~30-min refactor" was estimated at 657 lines and is **not** credible at 1127 — see the cluster J split assessment below. **#80 was the same two lines at LOW and is now CLOSED**; it was fixed in the same edit |
 | 35 | NOTES lifecycle rule names a `CHANGELOG.md` that has never existed | `NOTES.md:5-23` — **rewritten; the second half of the title is still open.** Verified never existed: `git log --all --diff-filter=A -- '**/CHANGELOG*'` returns nothing, so the destination half of the rule was unreachable for the file's whole life and "move it" always meant "leave it here". The new rule names `PROJECT_LOG.md` + git history, says explicitly that no `CHANGELOG.md` should be created (so nobody "restores" it), and **departs from the prescribed "delete once shipped"**: a blanket delete-on-ship is the silent-compensation shape — #34's split trigger is a live tail inside a section marked SHIPPED, and the prescription would have deleted it. The rule now requires extracting live tails first. The title's other clause — "8+ SHIPPED sections never moved or deleted" — is untouched: **that prune is bundled into the #36/#77 lifecycle decision for the user**, see the cluster J note |
@@ -980,6 +993,93 @@ it scans once, so the same hoist would allocate 5 arrays where it now allocates 
 
 **#33 stays LIVE—MEDIUM**, narrowed to `edge_cells` allocation at stress scale, with
 the note that its severity was assigned without any of the numbers above.
+
+### Measurement note — #29 and #32, profiled 2026-08-26; #29 fixed, #32's caches declined
+
+Measured on a debug headless build via a temporary probe suite (registered,
+measured, deleted — not committed), 200 reps per figure, worldgen seed 42,
+per-phase decomposition by replica loops. Both findings were dispatched under
+the R1/#31 decision: **the clock is pinned, so the fix space was per-call cost
+only** — and both findings' pre-R1 fix texts were checked against that (see
+below).
+
+**#29 — the numbers that justified the fix.** `resource_state` after worldgen:
+**8,428 entries** (every ore tile; trees only enter when chopped), so the
+`is_empty()` early-out could never fire — the finding's premise, confirmed.
+Per `_tick_regrowth` call, before → after the `_active_regrowth` index:
+
+| active timers | before | after |
+|---|---|---|
+| 0 (fresh world) | **1,009.6 µs** | **0.20 µs** |
+| 50 | 1,042.4 µs | 18.1 µs |
+| 500 | 1,238.4 µs | 193.2 µs |
+
+Decomposed (before): `keys()` snapshot 64 µs; the iterate+index+`has` skip-walk
+is essentially all the rest (~0.115 µs × 8,428); each live timer added ~0.45 µs,
+of which the per-frame mirror `Dictionary` literal was 0.19 µs (now mutated in
+place). Two non-obvious results worth keeping: iterating the dict **without** a
+`keys()` snapshot measured ~15% SLOWER (1,160 vs 1,026 µs), so the snapshot was
+never the waste it looks like; and at 60 fps the idle cost was **~60 ms of
+GDScript per wall-clock second — 6% of a core — before the player performs any
+action**, which is what moved this from "walk is ugly" to "fix is justified".
+
+**#32 — the numbers that justified declining.** Whole `_tick_soil_regen` call,
+decomposed; "walk" is the buildings scan incl. planter filter, "mark" the 3×3
+inserts, "pass 2" the per-tile loop over `tile_soil_modifications`:
+
+| scale | total | walk | mark | keys() | pass 2 (residual) |
+|---|---|---|---|---|---|
+| realistic — 150 bldgs, 20 planters (10 active), 300 mod tiles | 186 µs | 31 µs | 11 µs | 1.2 µs | ~143 µs |
+| stress — 500 bldgs, 100 planters (50), 1,000 mod tiles | 758 µs | 134 µs | 59 µs | 3.7 µs | ~561 µs |
+| ceiling — 2,800 bldgs, 500 planters (250), 2,800 mod + 2,000 scarred | 3,343 µs | 785 µs | 275 µs | 19 µs | ~2,264 µs |
+
+**What the numbers say against each prescribed item:**
+
+1. **Planter registry** (iterate a planter dict instead of `buildings`): the
+   whole buildings walk is 17-23% of the function — recovering most of it
+   saves 27 µs at realistic scale (0.16% of a 60 fps frame) against a new
+   permanently-unenforced invariant ("registry agrees with `buildings`") on a
+   dict that tests and the load path write directly, where a stale registry
+   means **tiles regenerating under active farming with nothing red** — the
+   silent-compensation shape, in the soil economy the sessions tuned.
+   And at ceiling scale it does not rescue the function: pass 2's ~2.3 ms
+   remains, so the lever there is not this cache either. Declined, #33's
+   exact argument at #33's exact benefit-to-risk ratio.
+2. **Member scratch dict + `clear()`**: the `{}` allocation measured 0.19 µs
+   of a 186-3,343 µs call. Not worth one line of diff. Declined.
+3. **Move the pass onto the tick**: **forbidden** — that is the re-clocking
+   the R1 decision closed (option 1/4 territory; `test_tick_loop_wiring` 7-9
+   tripwire it). The finding's fix text predates the decision; this item is
+   recorded as WRONG by supervening decision, not followed.
+4. **`regen_candidates` excluding scarred tiles**: worth ~0 at realistic
+   scale (scarred tiles only accumulate in late-game abandonment) and ~940 µs
+   at the wasteland-heavy ceiling (2,000 scarred × ~0.47 µs of skip work).
+   Its invalidation surface is the largest of the four — every soil write,
+   scar, rescue, restore and load path — and a missed ADD is a tile that
+   silently never regenerates. Declined at today's scales; the monotonic
+   scarred-set growth is real and is what the narrowed row now names, so if a
+   profile ever shows a save drowning in scarred tiles, THIS is the item to
+   revisit — with a mutation test per edge, per the #29 suite's pattern.
+
+**Pass 2 is the dominant cost everywhere and no cache reaches it**: each
+modified tile must integrate its accumulator every frame at the pinned clock;
+that work is the design, not waste. What "fixing #32 as prescribed" would
+actually have bought is the minority share — the SHORT-prescription shape
+(NOTES.md, two prescription classes) at the scale of a whole finding.
+
+**The "same unit as #29" claim from the old rows is dead.** They share a file,
+a clock, and the phrase "per-frame walk" — nothing else. #29 walked a dict
+whose live entries are a tiny, event-bounded subset with clean add/remove
+events (chop, restore, cancel, load): ideal index shape, fixed. #32's walk
+filters a dict whose relevant subset (active planters) changes state without
+any event (`Planter.is_active` reads live growth), and its dominant cost is a
+different loop entirely. A shared "active set" abstraction would have coupled
+two unrelated invalidation lifecycles — the forced-unit defect the dispatch
+brief warned about. Fixed one, declined the other, separately.
+
+**Established in passing (do not act from here alone):** #30's sites,
+re-derived at `5f02f7d`: `queue_redraw()` `grid_world.gd:1271`, terrain loop
+`:1715`, buildings loop `:1805`. Its row is updated.
 
 ### Routing note — cluster H's three findings, the fix that departs from its prescription, and the harness that made any of it testable
 
