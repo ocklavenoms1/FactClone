@@ -1300,25 +1300,32 @@ path does not perform, or from a value fixed before the run. If you cannot state
 expectation comes from *independently of the thing under test*, the assertion is checking
 that production agrees with itself.
 
-#### Measured cost of getting it wrong: TOTAL blindness, not partial
+#### THE EVIDENCE TABLE — cite this instead of re-litigating
 
-**#25 quantified it.** Two versions of the same recipe suite were built and run against the
-same five table mutations — output item type, input ratio, `time_ticks`, fluid gate,
-output count:
+**This A/B settles the rule.** The next time anyone argues "surely calling production is
+cleaner than duplicating constants" — and someone will, because it *is* cleaner and it
+*looks* like best practice — the answer is this table, measured on #25 (2026-08-25), not a
+re-run of the argument.
 
-- **Expected values as literals:** every mutation **RED**.
-- **Expected values filled from `Recipes.get_recipe()`** — three fields, otherwise identical:
-  **GREEN on all of them.**
+Two versions of the same recipe suite. Identical driving code, identical machines, identical
+tick counts. The only difference: where the **expected** values come from. Five mutations to
+`recipes.gd`, applied one at a time:
 
-Not weakened. **Blind.** The suite still ran the machines, still consumed inputs, still
-produced outputs, still asserted exact counts — and could not see the table it existed to
-lock, because when the table moved its expectations moved with it. The only red in that run
-came from a *different* suite.
+| mutation to the table | expectations as LITERALS | expectations from `Recipes.get_recipe()` |
+|---|---|---|
+| output item type swapped | **RED** | GREEN |
+| input ratio changed | **RED** | GREEN |
+| `time_ticks` halved | **RED** | GREEN |
+| fluid gate removed | **RED** | GREEN |
+| output count changed | **RED** | GREEN |
 
-That is the calling form, the one this file says is hard to see, and it is worth knowing the
-failure is not graceful. There is no partial credit: a suite whose expectations come from the
-system under test does not detect a weaker class of defect, it detects **none of the class it
-was written for**.
+**Five for five against three delegated fields.** The delegated version still ran the
+machines, consumed inputs, produced outputs, and asserted exact counts — and detected
+nothing, because when the table moved its expectations moved with it. The only red in those
+runs came from a *different* suite. Not weakened — **blind**: there is no partial credit,
+no weaker-class detection. A suite whose expectations come from the system under test
+detects **none of the class it was written for**, while looking and running exactly like
+one that does.
 
 #### This one is a CHECK, not a caution — it is mechanically greppable
 
@@ -1873,19 +1880,35 @@ restarts correctly; on that basis the finding was nearly written off as false. B
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
 
-**⚠ A prescription can be right and still be BLIND — incompleteness is the quiet failure
-mode.** #22, #35, #16 and R5 were prescriptions that would have shipped something *wrong*.
-**#25's is not wrong — it is short.** Its prescribed shape (pre-load N cycles, tick to a
-budget, assert exact final counts) was measured against the same five table mutations and
-came back RED on four, **GREEN on `time_ticks`**. Halve a recipe's duration and a suite built
-exactly to the prescription still passes: the final counts are identical, only the timing
-moved, and nothing sampled the timing.
+**⚠ TWO PRESCRIPTION CLASSES — and the short one is more dangerous than the wrong one.**
 
-Closing it needed two per-row samples at tick N·T−1 and N·T — derived from `Processor.tick`'s
-state machine, not from observing a run. **A prescription followed faithfully can leave a
-hole the size of a whole field**, and unlike a wrong prescription it produces no symptom:
-green suite, closed finding, defect class untouched. When following a fix text, ask what it
-does *not* assert, and check that against the data the finding says it is locking.
+- **WRONG prescriptions** — #22 (frame stamp that wedges the Esc chain), #35 (delete-on-ship
+  that removes live triggers), #16 (untestable-in-place swap), R5 (12-slot path that fails
+  against correct code). Each ships something broken and **produces a symptom**: a red test,
+  a wedged chain, a missing trigger someone eventually reaches for. The failure announces
+  itself, sooner or later, because something observable is worse than before.
+- **SHORT prescriptions** — #25. Not wrong: everything it prescribes is correct. It is
+  incomplete. A suite built exactly to its shape (pre-load N cycles, tick to a budget,
+  assert exact final counts) came back RED on four table mutations and **GREEN on
+  `time_ticks`** — halve a recipe's duration and the final counts are identical, so nothing
+  sees it. That suite ships **green**, the finding is marked closed, and the defect class it
+  was written to lock is intact. **No symptom, ever.** Nothing observable is worse; there is
+  simply a hole where coverage is recorded as existing.
+
+**A wrong prescription fails loudly. A short one closes the row.** The wrong kind costs a
+session; the short kind costs the belief that the finding is handled, which is
+open-endedly worse because nothing prompts anyone to look again — the row says CLOSED, the
+suite says green, and both are truthful about everything except the gap.
+
+Closing #25's gap needed two per-row samples at tick N·T−1 and N·T — derived from
+`Processor.tick`'s state machine, not from observing a run.
+
+**Practical consequence, applying to every remaining finding whose prescription is a
+test:** before accepting the prescribed shape, ask **"what mutation would this shape not
+catch?"** — and answer it concretely, against the data or behaviour the finding claims to
+lock. #25's answer was `time_ticks`, and nothing in the prescribed form would ever have
+surfaced it. If the answer is "none I can construct", say so; if there is one, the
+prescription is short and the missing assertion is part of the fix.
 
 **⚠ A finding inherits the errors of the DOCUMENTATION it was written from — and then
 carries them with the audit's authority.**
