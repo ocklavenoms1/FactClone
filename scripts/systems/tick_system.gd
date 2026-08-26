@@ -3,8 +3,24 @@ extends Node
 ## Global simulation heartbeat. Autoloaded as TickSystem.
 ##
 ## Emits `tick` 20 times per second (every 50ms), independent of frame rate.
-## This is the *only* clock the simulation should care about. Buildings,
-## crops, weather, etc. all advance on tick boundaries — never on _process.
+##
+## THE TWO CLOCKS — a decision, not an accident (audit #31, decided 2026-08-26):
+##
+##   - The TICK clock drives the factory sim: buildings, belts, machines,
+##     inserters, power. `tick_speed N` scales it; `paused` gates it.
+##   - Soil regen, fertilizer decay and tree regrowth run on WALL-CLOCK
+##     (`GridWorld._process`, raw engine delta) BY DESIGN. They are slow
+##     world processes on a different scale from factory iteration — 30 s
+##     per soil point, 60 s grace, 30-120 s boosts — so `tick_speed`
+##     accelerates THROUGHPUT and not world recovery. Fast-forwarding your
+##     factory does not fast-forward the land's forgiveness.
+##
+## This comment used to claim ticks were "the *only* clock" — that claim was
+## the defect in audit #31, not the code. The split is priced in
+## `docs/scoping/r1-two-clocks.md` (three migration options costed, a fourth
+## disqualified by measurement); `test_tick_loop_wiring.gd` sub-cases 7-9 pin
+## this wiring two-sided, so moving the three systems onto ticks reddens the
+## suite and forces the author to say so.
 ##
 ## Usage:
 ##   func _ready() -> void:

@@ -899,7 +899,13 @@ func try_apply_fertilizer(pos: Vector2i, tier: int) -> bool:
 ## first tick at or past the threshold, which is up to one frame delta late, so
 ## grace in [threshold, threshold rounded up to a tick] is accepted here and
 ## still scars. That window is narrower than one frame (~16 ms at 60 fps)
-## against a 60-second grace; the alternative is an arbitrary margin constant
+## against a 60-second grace — TRUE ONLY ON THE WALL-CLOCK CLOCK, which is
+## the deliberate wiring (audit #31, decided 2026-08-26). Measured in that
+## design pass: on a fixed 0.05 s tick the window widens to a fixed 50 ms,
+## and on a 1 s cadence (the rejected option 4) it becomes 1-2 s per tier
+## and re-opens audit #7. If this code ever moves clocks, this claim moves
+## with it — do not inherit it as universal.
+## The alternative is an arbitrary margin constant
 ## that no game constant derives, which is worse than a sub-frame edge. Tests
 ## pin decay_remaining directly rather than accumulating it, so 11a's boundary
 ## cases assert the return value only — 11b's outcome assertions are the ones

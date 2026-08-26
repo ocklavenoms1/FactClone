@@ -57,10 +57,23 @@ extends RefCounted
 ## `GridWorld` today runs TWO CLOCKS. Buildings, belts, processors, inserters
 ## and the power pre-pass advance on `TickSystem.tick`. Tree regrowth,
 ## fertilizer decay and soil regen advance on the raw engine frame delta in
-## `_process`. That split contradicts `tick_system.gd`'s own stated law
-## ("never on _process") and is **audit finding #31** (LIVE — MEDIUM), scoped
-## in full at `docs/scoping/r1-two-clocks.md`. It is an OPEN QUESTION with four
-## live options, and this file takes NO position on which one wins.
+## `_process`. That split was **audit finding #31**, scoped in full at
+## `docs/scoping/r1-two-clocks.md` — **DECIDED 2026-08-26: option 2.** The
+## split is deliberate (tick clock = factory sim; wall-clock = slow world
+## processes), the old "only clock" comment was the defect, and this file's
+## pinned wiring is now the RATIFIED design, not a snapshot of an open
+## question. Sub-cases 7-9 going red now means someone moved the three
+## systems off wall-clock — which reverses a recorded decision and must be
+## said out loud, not absorbed.
+##
+## ⚠ A LATENT ACCIDENT WORTH KNOWING, measured in the #31 design pass: under
+## a hypothetical every-N-ticks wiring (the rejected option 4, N=20), the
+## tick-side NEGATIVE halves of (7) and (8) would stay green BY LUCK — this
+## file's single emissions land on ticks 7 and 8, neither ≡ 0 mod 20, so an
+## N-gate would simply never fire during the test. Any emission added earlier
+## in this file shifts which ticks those land on. If an N-gated wiring is
+## ever evaluated again, do NOT read those negatives as the contract holding;
+## emit N consecutive ticks so the gate provably fires.
 ##
 ## What it does do is make the split VISIBLE. Each sub-case asserts both
 ## directions: the tick path drives what it drives AND does not drive what it
