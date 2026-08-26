@@ -1888,35 +1888,87 @@ func _show_toast(msg: String) -> void:
 	toast_timer = TOAST_DURATION
 
 # ---------- bag consume ----------
+#
+# THE SEAM (audit #27). The decision rule and the state change both live in
+# the two statics below, and BOTH key handlers branch on them. Before this,
+# each handler carried its own copy of the ordering rule and `test_bag_cap.gd`
+# carried a THIRD copy — so the suite asserted its own mirror. Measured on
+# 2026-08-25 against the pre-seam code: doubling BAG_CAP to 10 AND swapping
+# the two precondition checks in `_confirm_bag_consume` left the suite at
+# 68 passed, 0 failed, 0 SCRIPT ERROR.
+#
+# These are `static` so the suite can call them with a throwaway Inventory and
+# a throwaway progression dict — no Node2D, no scene tree, no toast_label.
+# `_confirm_bag_consume` and `_request_bag_consume` must stay thin wrappers
+# that add only the toast: `test_bag_cap.gd` asserts structurally that neither
+# one re-states `>= BAG_CAP` or performs the remove/expand itself, because a
+# call site that quietly stops routing through the seam puts the defect back
+# where the suite cannot see it.
+
+## Verdict half of the bag-consume mechanic. Side-effect free.
+##
+## Returns "" when the consume may proceed, otherwise the blocking reason:
+##   "cap"    — lifetime cap of BAG_CAP bags already reached
+##   "no_bag" — no bag in the inventory
+##
+## **The cap-reached check fires BEFORE the no-bag check**, stated here once.
+## The player should hear about the more permanent state first; "save bags for
+## trade" is a strategy hint, "no bag" is just an inventory check.
+static func bag_consume_verdict(bags_consumed: int, bag_count: int) -> String:
+	if bags_consumed >= BAG_CAP:
+		return "cap"
+	if bag_count <= 0:
+		return "no_bag"
+	return ""
+
+## Action half. Re-checks the verdict, then removes one bag, grows the
+## inventory by SLOTS_PER_BAG and advances the lifetime counter.
+##
+## `progression` is mutated in place (Dictionary is a reference type in
+## GDScript), so the caller's `player_progression` sees the new count.
+## Returns the same verdict string — "" on success — so no caller ever has to
+## restate the ordering rule to decide which toast to show.
+static func try_consume_bag(inv: Inventory, progression: Dictionary) -> String:
+	var bags_consumed: int = int(progression.get("bags_consumed", 0))
+	var verdict: String = bag_consume_verdict(bags_consumed, inv.total_of(Items.Type.BAG))
+	if verdict != "":
+		return verdict
+	inv.remove(Items.Type.BAG, 1)
+	inv.expand(SLOTS_PER_BAG)
+	progression["bags_consumed"] = bags_consumed + 1
+	return ""
+
+## Verdict → player-facing toast. One copy of each string, shared by both
+## key handlers.
+static func bag_verdict_toast(verdict: String) -> String:
+	match verdict:
+		"cap":
+			return "Inventory at maximum. Save bags for trade."
+		"no_bag":
+			return "No bag to consume."
+	return ""
 
 ## First-press path. Validates preconditions; only enters the pending-confirm
-## state on a valid request. Failure ordering: cap-reached takes priority
-## over no-bag (cap is the more permanent state — message helps the player
-## stop trying).
+## state on a valid request. Failure ordering comes from bag_consume_verdict.
 func _request_bag_consume() -> void:
-	if int(player_progression.get("bags_consumed", 0)) >= BAG_CAP:
-		_show_toast("Inventory at maximum. Save bags for trade.")
-		return
-	if player_inventory.total_of(Items.Type.BAG) <= 0:
-		_show_toast("No bag to consume.")
+	var verdict: String = bag_consume_verdict(
+		int(player_progression.get("bags_consumed", 0)),
+		player_inventory.total_of(Items.Type.BAG))
+	if verdict != "":
+		_show_toast(bag_verdict_toast(verdict))
 		return
 	_bag_confirm_pending = true
 	_bag_confirm_expires_at = Time.get_ticks_msec() / 1000.0 + BAG_CONFIRM_WINDOW
 	_show_toast("Consume bag for +%d slots? Press B again to confirm." % SLOTS_PER_BAG)
 
-## Second-press path. Defensive re-check of preconditions in case state
-## changed between prompt and confirm (no current code path mutates these
-## while a prompt is pending, but the check is cheap and future-proofs).
+## Second-press path. try_consume_bag re-checks the preconditions in case
+## state changed between prompt and confirm (no current code path mutates
+## these while a prompt is pending, but the check is cheap and future-proofs).
 func _confirm_bag_consume() -> void:
 	_bag_confirm_pending = false
-	if int(player_progression.get("bags_consumed", 0)) >= BAG_CAP:
-		_show_toast("Inventory at maximum. Save bags for trade.")
+	var verdict: String = try_consume_bag(player_inventory, player_progression)
+	if verdict != "":
+		_show_toast(bag_verdict_toast(verdict))
 		return
-	if player_inventory.total_of(Items.Type.BAG) <= 0:
-		_show_toast("No bag to consume.")
-		return
-	player_inventory.remove(Items.Type.BAG, 1)
-	player_inventory.expand(SLOTS_PER_BAG)
-	var n: int = int(player_progression.get("bags_consumed", 0)) + 1
-	player_progression["bags_consumed"] = n
+	var n: int = int(player_progression.get("bags_consumed", 0))
 	_show_toast("Inventory expanded: %d/%d bags consumed, +%d slots" % [n, BAG_CAP, SLOTS_PER_BAG])
