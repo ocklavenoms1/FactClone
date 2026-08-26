@@ -119,20 +119,23 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #36 + #77 | **30 closed / 54 live** — two root plan files deleted after lifting their live tails |
 | 2026-08-25 | #19 (rating RE-CONFIRMED as MEDIUM, against this document's own mis-rating note — see the rating note below) | **31 closed / 53 live** |
 | 2026-08-25 | #16 — the predicate EXTRACTED out of `_draw` and delegated, not swapped in place. **#38 stays LIVE and was deliberately not touched**; its headline symptom dissolved as predicted, its dict-growth half did not | **32 closed / 52 live** |
+| 2026-08-25 | #27 at `cb1b29a` — the test's mirror deleted and a seam CREATED in `main.gd` to delegate to, because there was none. The finding as written ("test mirrors production") was half the defect; the other half was that production had no callable entry point | **33 closed / 51 live** |
+| 2026-08-25 | #28 at `6fb2617` — phase (6) rebuilt as entry + hold + **recovery**. Its own fix text was already corrected against the reviewer's original prescription and the corrected version is what shipped; see the note below | **34 closed / 50 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 32 + LIVE—HIGH 0 + LIVE—MEDIUM 13 + LIVE—LOW 39 = **84**.
+incrementing: CLOSED 34 + LIVE—HIGH 0 + LIVE—MEDIUM 11 + LIVE—LOW 39 = **84**.
 Each section header was checked against its own row count in the same pass
-(32/0/13/39), and the 84 ids are distinct — no row lost, duplicated, or
+(34/0/11/39), and the 84 ids are distinct — no row lost, duplicated, or
 double-counted.
 
 **And per the caveat at the top of this document, that is the entire content of
 the check.** Two of those four addends were re-derived today; the LOW block's 39
 was counted, not audited, and counting proves only that 39 rows exist.
 
-The line above this one used to read `28 + 0 + 16 + 40`, which also summed to 84 and
-was two clusters out of date in three of its four terms. **A total that still adds up
-is not evidence the addends are current** — re-count the rows, do not check the sum.
+The line above this one used to read `32 + 0 + 13 + 39`, and before that
+`28 + 0 + 16 + 40`, which also summed to 84 and was two clusters out of date in
+three of its four terms. **A total that still adds up is not evidence the addends
+are current** — re-count the rows, do not check the sum.
 
 Every original line number in this document has drifted — `NOTES.md` content moved
 ~700 lines, `grid_world.gd` ~+80, `main.gd` ~+230. Use the citations here, not the
@@ -150,7 +153,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (32)
+### CLOSED (34)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -186,6 +189,8 @@ is closed at all.
 | 77 | stale `INVENTORY_UI_PLAN.md` at repo root | `2026-08-25` — **file deleted**, user-approved. Live tails lifted first: right-click half-stack + drag-and-drop, both verified absent (`MOUSE_BUTTON_RIGHT` = 0 across the three slot files). Dangling citation at `buildings.gd:1297` rewritten | doc-only; no test |
 | 19 | `_drop_to_chest` bypasses `Chest.TOTAL_CAPACITY` | `f154b88` — the prescribed delegation, taken as written (rare here); the **rating** departs from this document's mis-rating note and stays MEDIUM on measured evidence — see the rating note below | `test_inserter_chest_overfill.gd` (7 cases) — a reachability case so the overfill case's silence means something; the behavioural full-chest repro; **an item-conservation case that is the severity evidence, not a regression guard**; unit accept/refuse either side of the cap; a retention case pinning the per-stack waiver the removed comment claimed; and a chest whose state has no `"bag"` key |
 | 16 | hover preview contradicts `can_place_building`, both directions | **`8b460d1`+ (this cluster)** — the prescribed three-line swap was **declined as unverifiable**, which was the whole shape of the work. The predicate is now `GridWorld.hover_preview_blocked()` at `grid_world.gd:494-497`, called once from `_draw` at `:1810`; its body is `not can_place_building(...)` behind a `building_type < 0` guard. **The extraction is not tidying — it is the only way this could be tested at all**, since `test_runner.gd` never yields a frame and no `CanvasItem` here is sent NOTIFICATION_DRAW. **No `last_building_place_error` save/restore**, against the fix text: all three readers consume the string synchronously with the failed placement that set it, so no frame can interleave — and that premise is asserted, not assumed | `test_hover_preview_agreement.gd` — both directions the title claims, each measured RED first against the real production predicate: 4 legal-previews-RED cases (belt/oven on paved ground, pump beside water, drill on its own ore) and 3 illegal-previews-FREE cases (belt/oven on bare grass, drill with no ore). Plus a **reachability control** that agreed even before the fix, so the other cases' silence means something; 4 retention cases for what the old predicate got right; the neutral `type < 0` branch; and an 8-type × 12-cell sweep of `preview == not can_place`, which is the assertion that catches a HALF-delegation |
+| 27 | bag-cap phases assert an in-test mirror of production logic | `cb1b29a` — **the finding named half the defect. Production had no seam to delegate to**; see the note below | `test_bag_cap.gd` — phase 0 pins the three production constants (the single drift alarm), phases 2-3 drive `main.gd`'s `try_consume_bag` / `bag_consume_verdict` directly, and **phase 4 reads `main.gd` and pins both key handlers to the seam**, because behavioural delegation alone cannot see a call site that stops using it |
+| 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `6fb2617` — the fix text as it stands today, which already carries the correction its own verification note demanded | `test_smelter.gd` phase (6), four sub-phases — (6a) at-cap-from-IDLE must report **IDLE**, (6b) a batch completing into a full buffer must ENTER `STATE_BLOCKED_OUTPUT`, (6c) the stall holds, (6d) draining the buffer must make the machine leave the state **and produce an ingot**. (6d) is the half no "nothing changed" route can fake |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -225,7 +230,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (13)
+### LIVE — MEDIUM (11)
 
 > **⚠ EVERY `grid_world.gd` CITATION BELOW ABOVE LINE `:494` IS UNAFFECTED; EVERY
 > ONE BELOW IT SHIFTED BY +39 when #16 landed** (`hover_preview_blocked` was
@@ -247,8 +252,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
-| 27 | bag-cap phases assert an in-test mirror of production logic | `test_bag_cap.gd:20-21, 108-115` |
-| 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `test_smelter.gd:153-171` |
 | 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1470-1490` (early-out at `:1471`) — was cited `:1330-1356`. **Partly closed by #31's migration**; fix #31 first or fix both as one unit |
 | 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
@@ -300,6 +303,74 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:1139` — was cited `:998, 1000, 1039`. **21 is correct** (26 `*_panel.gd` minus 5 non-building-specific); see the baselines block |
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1146` (was `:1007`) vs `:834`. **Understated by one, not two** — the real count is 12; the baselines block briefly said 13 and was wrong |
 | 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
+
+### Seam note — #27 named half the defect; production had no entry point to delegate to
+
+The row said "the test mirrors production". It did. What the row did not say is that
+there was **nothing to delegate to**. `main.gd`'s bag-consume mechanic was two `void`
+instance methods — `_request_bag_consume` and `_confirm_bag_consume` — that each stated
+the cap-before-no-bag ordering rule *separately*, performed the remove/expand inline, and
+reported the outcome only by writing a string into `toast_label`. No function took an
+inventory and a count and returned a verdict; no unit test could call either one without
+a live `Node2D` and a scene tree the runner does not build. **So the mirror existed
+because the rule was stated three times — twice in production and once in the suite —
+and only the suite's copy was reachable.** The finding as written would have been closed
+by pointing the test at a seam that did not exist.
+
+The fix therefore had to create one. `bag_consume_verdict` (the ordering rule, once) and
+`try_consume_bag` (remove + expand + counter) are both `static`; both handlers branch on
+them; the suite calls them. This removed production's own duplication as a side effect,
+which is the part the finding could not see from the test file alone.
+
+**Measured, pre-fix:** `BAG_CAP` doubled to 10 **and** the two precondition checks
+swapped in `_confirm_bag_consume` — the finding's own two example mutations — gave
+**68 passed, 0 failed, 0 SCRIPT ERROR**. Post-fix each reddens separately (the constant
+pin; the two ordering assertions).
+
+**The residual the fix text conceded, and how it was closed anyway.** #27's fix text says
+"the removal side effect remains untested unless a headless scene test is added, which
+the file header already scopes out". Moving the side effect into the static seam tested
+it without a scene test: deleting `inv.remove(Items.Type.BAG, 1)` reddens three
+assertions. What a scene test would still be needed for is the *call sites*, and there
+the fix text's concession is real and sharper than it knew — **measured: with the seam in
+place and the suite delegating, re-inlining a swapped-order copy into
+`_confirm_bag_consume` is still 68 passed, 0 failed.** A behavioural test of a seam
+cannot see a caller that stops using it. Phase 4 closes that by reading `main.gd` and
+pinning both handlers structurally (delegates to the seam; does not re-state `>= BAG_CAP`;
+does not perform the remove/expand itself), and it reddens four times on that mutation.
+The two halves of this fix land together: seam + delegation without the structural pin is
+an intermediate state that looks complete and proves nothing about the game.
+
+### Prescription note — #28's fix text had ALREADY been corrected, and the correction is what shipped
+
+Worth recording because the standing rule is that the prescribed fix is the least-verified
+part of a finding, and here the document had already done the verifying.
+
+The *original* reviewer's prescription — assert `STATE_BLOCKED_OUTPUT` on the existing
+at-cap-from-IDLE setup — is wrong, and #28's verification note says so in as many words
+("the reviewer's suggested fix is technically wrong"). **Measured against unmutated
+production: that assertion fails, reporting state 0 (IDLE).** `STATE_BLOCKED_OUTPUT` has
+exactly one writer, `smelter.gd:124`, in the `STATE_SMELTING` arm, reached only when a
+completing batch emits into a buffer that then has no room. There is no IDLE→BLOCKED edge,
+so a machine that never started has nothing to report but IDLE.
+
+But the **Fix paragraph as it stands in this document is not the wrong prescription** — it
+was rewritten to the corrected one (one-below-cap setup, drive a batch to completion, then
+drain) and that is what shipped, near enough verbatim. Anyone dispatching #28 on the
+strength of "the prescription is known to be wrong" would be acting on a stale account of
+this entry. The wrong version survives only inside the verification note, as the thing
+being corrected.
+
+**Measured, pre-fix, both directions:** deleting the whole `STATE_BLOCKED_OUTPUT` → IDLE
+recovery branch left the suite at **68 passed, 0 failed, 0 SCRIPT ERROR**; making
+`STATE_BLOCKED_OUTPUT` unreachable outright (line 124 always `STATE_IDLE`) did too. Three
+"nothing changed" assertions saw neither.
+
+**And the two halves land together.** Measured intermediate: applying (6a)+(6b)+(6c) — the
+state assertions the finding's *title* asks for — while omitting (6d) gives **68 passed,
+0 failed** with the recovery branch deleted. Asserting the state is not "some of the
+benefit"; the permanent stall is the player-facing failure and only the recovery
+assertion reaches it.
 
 ### Scoping note — #21 was closed NARROWER than it was written
 
