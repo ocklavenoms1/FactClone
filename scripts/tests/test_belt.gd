@@ -200,6 +200,12 @@ static func _case_single_item_advance(parent: Node, failures: Array) -> void:
 			occ == [expected],
 			"(1) tick %d (%d advance ticks): expected exactly [%d], got %s" \
 				% [TickSystem.current_tick, advances, expected, str(occ)])
+		# DIAGNOSTIC, NOT LOAD-BEARING — said plainly so nobody trusts it for more
+		# than it does. EXPECTED_PATH contains neither 3 nor 7, so any state this
+		# rejects is a state "(1)path" already rejects: it is redundant BY
+		# CONSTRUCTION and no mutation in the pass that shipped this file reddened
+		# it on its own. It stays because it turns a numeric mismatch into a
+		# named diagnosis. Do not count it as coverage.
 		_check_once(failures, "(1)front",
 			not (occ.size() == 1 and int(occ[0]) in transient_fronts),
 			"(1) item rested on front slot %s at tick %d — Pass 2 did not hand it across in the same tick as the Pass-1 shift" \
