@@ -43,6 +43,25 @@ var resource_state: Dictionary = {}   # Vector2i -> Dictionary (richness/origina
 # overlays player-driven mining changes on top. original_richness is NOT
 # persisted (rederived from procgen).
 var resource_state_modifications: Dictionary = {}
+
+# Sparse index of ACTIVE tree-regrowth timers: Vector2i -> true. This exists
+# because worldgen seeds resource_state with an entry for EVERY ore tile
+# (~8.4k entries at seed 42), so `resource_state.is_empty()` is never true and
+# a per-frame walk over all of it costs ~1.0 ms/frame with zero chopped trees
+# (measured 2026-08-26, audit #29). _tick_regrowth iterates THIS dict instead.
+#
+# INVARIANT: pos is in _active_regrowth IFF resource_state[pos] has
+# "regrowth_remaining". _tick_regrowth indexes resource_state[pos] WITHOUT a
+# guard on purpose: a stale index entry faults loudly (SCRIPT ERROR every
+# frame) instead of being silently healed — silent compensation is this
+# project's recurring failure shape, and a tolerant read here would hide a
+# missed invalidation edge forever. The write sites, each mutation-tested by
+# test_regrowth_index.gd: chop_tree (add), _restore_tree (erase), the
+# set_overlay and place_building cancel paths (erase), the save-load regrowth
+# branch in save_system.gd (add), and WorldGenerator.generate (bulk clear,
+# beside resource_state.clear()). Not serialized — rebuilt from the save's
+# resource_state_modifications on load.
+var _active_regrowth: Dictionary = {}
 var buildings: Dictionary = {}        # Vector2i (anchor) -> Building
 var occupied: Dictionary = {}         # Vector2i (any footprint cell) -> Vector2i (anchor)
 
@@ -334,6 +353,9 @@ func set_overlay(pos: Vector2i, overlay: int) -> bool:
 		if rstate.has("regrowth_remaining"):
 			resource_state.erase(pos)
 			resource_state_modifications.erase(pos)
+			# Index invalidation (audit #29): this erase lands together with
+			# the two above — a surviving index entry faults _tick_regrowth.
+			_active_regrowth.erase(pos)
 		# Else: leave other state intact (overlay-on-ore is blocked above
 		# at the resource_node validation; this branch shouldn't fire for
 		# ore tiles, but stays defensive).
@@ -516,6 +538,9 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 			if rs.has("regrowth_remaining"):
 				resource_state.erase(cell)
 				resource_state_modifications.erase(cell)
+				# Index invalidation (audit #29): lands together with the two
+				# erases above — a surviving index entry faults _tick_regrowth.
+				_active_regrowth.erase(cell)
 	buildings[pos] = b
 	for cell in _footprint_cells(t, pos):
 		occupied[cell] = pos
@@ -1130,6 +1155,9 @@ func chop_tree(pos: Vector2i) -> void:
 	t.resource_node = ResourceNodes.Type.NONE
 	resource_state[pos] = {"regrowth_remaining": TREE_REGROWTH_SECONDS}
 	resource_state_modifications[pos] = {"regrowth_remaining": TREE_REGROWTH_SECONDS}
+	# Index registration (audit #29): without this line the timer above is
+	# invisible to _tick_regrowth and the tree never regrows — silently.
+	_active_regrowth[pos] = true
 	# tile_modifications records the chopped state. If tile collapses to pure
 	# default (grass / no overlay / no resource), erase from tiles dict but
 	# KEEP the tile_modifications entry — that entry is what overrides procgen
@@ -1153,6 +1181,9 @@ func _restore_tree(pos: Vector2i) -> void:
 		return
 	resource_state.erase(pos)
 	resource_state_modifications.erase(pos)
+	# Index invalidation (audit #29): lands together with the two erases
+	# above — a surviving index entry faults _tick_regrowth next frame.
+	_active_regrowth.erase(pos)
 	# Restore tile to canonical procgen state (Tile(GRASS, NONE, TREE)).
 	# tile_modifications is erased so the tile matches canonical from now on.
 	tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
@@ -1261,8 +1292,15 @@ func _process(delta: float) -> void:
 ## Per-frame fallow regen tick. Iterates `tile_soil_modifications` (sparse)
 ## and regenerates soil in tiles where no active planter's 3×3 area overlaps.
 ##
-## Active-tile detection: single O(planters × 9) pass per frame. At 100
-## planters = 900 dict inserts/frame; sub-millisecond.
+## Active-tile detection: one pass over ALL of `buildings` (the planter
+## filter walks every building, not just planters) plus O(active planters
+## × 9) marking. Measured 2026-08-26 (audit #32): whole function 186 µs at
+## 150 buildings / 300 modified tiles, 758 µs at 500 / 1,000, 3.3 ms at
+## 2,800 / 4,800 — and the rebuild below is only 23-32% of that; the
+## dominant cost is the per-tile second pass, which is inherent per-frame
+## work at the wall-clock rate the R1 decision pinned. The prescribed
+## caches (planter registry, scarred-tile exclusion) were measured and
+## DECLINED — see #32's tracker entry before reaching for one.
 ##
 ## Active farming = at least one planter with growth > 0 OR output > 0
 ## whose 3×3 area covers the tile. Idle planters (growth==0 AND output==0)
@@ -1527,31 +1565,44 @@ func _soil_tint_for_tile(pos: Vector2i) -> Color:
 		_:
 			return Color(0, 0, 0, 0)   # PRISTINE / HEALTHY: no tint
 
-## Per-frame regrowth tick. Iterates resource_state for entries with
-## regrowth_remaining (chopped trees), decrements, and restores trees
-## when the timer hits zero.
+## Per-frame regrowth tick. Iterates the _active_regrowth index (chopped
+## trees only), decrements each timer, and restores trees when a timer
+## hits zero.
 ##
-## Cost: O(active timers). With ~hundreds of chopped trees max,
-## negligible per-frame work (microseconds).
+## Cost: O(active timers) — true again since 2026-08-26 (audit #29).
+## This docstring used to make that claim while the loop walked ALL of
+## resource_state, which worldgen seeds with every ore tile: measured
+## ~1.0 ms/frame over 8,428 entries with ZERO chopped trees (the
+## `resource_state.is_empty()` early-out could never fire). The index
+## makes it real: ~0 idle, ~0.45 µs per active timer.
 func _tick_regrowth(delta: float) -> void:
-	if resource_state.is_empty():
+	if _active_regrowth.is_empty():
 		return
 	var to_restore: Array[Vector2i] = []
-	# Iterate keys snapshot — we mutate resource_state inside the loop body
-	# (and _restore_tree mutates further). Snapshot avoids modify-during-iter
-	# pathology.
-	var keys: Array = resource_state.keys()
+	# Iterate keys snapshot — _restore_tree (below) erases from
+	# _active_regrowth. Snapshot avoids modify-during-iter pathology.
+	var keys: Array = _active_regrowth.keys()
 	for pos in keys:
+		# NO existence guard, deliberately: the index invariant says this
+		# entry exists and has the key. A stale index faults loudly here
+		# every frame — do not "fix" that with resource_state.get(); a
+		# tolerant read would hide a missed invalidation edge (see the
+		# _active_regrowth declaration and test_regrowth_index.gd).
 		var state: Dictionary = resource_state[pos]
-		if not state.has("regrowth_remaining"):
-			continue
 		var remaining: float = float(state["regrowth_remaining"]) - delta
 		if remaining <= 0.0:
 			to_restore.append(pos)
 		else:
 			state["regrowth_remaining"] = remaining
 			# Mirror to modifications so save captures current timer value.
-			resource_state_modifications[pos] = {"regrowth_remaining": remaining}
+			# Mutate the existing mirror entry in place (chop_tree and the
+			# load path both seed it); allocating a fresh Dictionary here
+			# cost a measured 0.19 µs per timer per frame.
+			var mirror = resource_state_modifications.get(pos)
+			if mirror != null:
+				mirror["regrowth_remaining"] = remaining
+			else:
+				resource_state_modifications[pos] = {"regrowth_remaining": remaining}
 	for pos in to_restore:
 		_restore_tree(pos)
 

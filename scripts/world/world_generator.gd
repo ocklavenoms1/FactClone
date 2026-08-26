@@ -213,6 +213,11 @@ func generate(world: GridWorld, seed: int) -> void:
 	world.world_seed = seed
 	world.tiles.clear()
 	world.resource_state.clear()
+	# The regrowth index mirrors resource_state's timer entries and must be
+	# cleared with it (audit #29): a surviving index entry after a regenerate
+	# points at nothing and faults _tick_regrowth loudly every frame. The
+	# save-load path re-registers loaded timers after this clear.
+	world._active_regrowth.clear()
 	world.tile_modifications.clear()
 
 	_build_noise(seed)

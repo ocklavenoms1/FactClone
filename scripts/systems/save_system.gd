@@ -715,8 +715,12 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			# entry skipped" in front of the player for data that is intact.
 		elif rs_state.has("regrowth_remaining"):
 			# Tree regrowth: canonical state is "mature" (no entry). Insert
-			# the regrowth dict so _tick_regrowth picks it up next frame.
+			# the regrowth dict AND register it in the regrowth index —
+			# _tick_regrowth iterates the index, not resource_state (audit
+			# #29), so without the second line a loaded timer never ticks
+			# and the tree silently never regrows.
 			grid_world.resource_state[rs_pos] = rs_state.duplicate()
+			grid_world._active_regrowth[rs_pos] = true
 
 	# v16: restore tile_soil_modifications. Sparse — absent entries default
 	# to TILE_SOIL_FULL (100) on read via tile_soil_health(). Old v15 saves

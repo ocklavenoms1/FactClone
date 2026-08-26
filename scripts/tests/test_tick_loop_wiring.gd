@@ -401,8 +401,16 @@ static func _case_6_tick_drives_inserter(parent: Node, failures: Array) -> void:
 static func _case_7_process_drives_regrowth(parent: Node, failures: Array) -> void:
 	var world = _bare_world(parent)
 	var pos: Vector2i = Vector2i(5, 5)
-	# Exactly the shape GridWorld.chop_tree writes.
-	world.resource_state[pos] = {"regrowth_remaining": GridWorldScript.TREE_REGROWTH_SECONDS}
+	# Seed through the real public path, NOT by writing resource_state
+	# directly. Since audit #29 (2026-08-26) _tick_regrowth iterates the
+	# _active_regrowth index that chop_tree maintains; a hand-written
+	# resource_state entry is invisible to it, and this sub-case would
+	# have reported "(_process is not calling _tick_regrowth" — a false
+	# diagnosis. The two pinned claims below (a tick does NOT advance the
+	# timer; _process DOES) are unchanged: this is a fixture change, not a
+	# clock change.
+	world.tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
+	world.chop_tree(pos)
 	var start: float = world.regrowth_remaining_at(pos)
 
 	_check(failures, absf(start - GridWorldScript.TREE_REGROWTH_SECONDS) < 0.001,

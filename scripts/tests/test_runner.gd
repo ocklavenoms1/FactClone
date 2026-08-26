@@ -134,6 +134,13 @@ const TESTS: Array = [
 	# identity and cycle length in that file is a literal, deliberately: a suite
 	# that asked `Recipes` what to expect would move with the table it guards.
 	preload("res://scripts/tests/test_processor_recipes.gd"),
+	# Audit #29: _tick_regrowth iterated ALL of resource_state (worldgen
+	# seeds every ore tile, so the is_empty early-out never fired — measured
+	# ~1.0 ms/frame with zero chopped trees). It now iterates the sparse
+	# _active_regrowth index, which makes STALENESS the failure mode; this
+	# suite pins the index and every one of its six invalidation edges,
+	# each mutation-verified. See the file header.
+	preload("res://scripts/tests/test_regrowth_index.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
