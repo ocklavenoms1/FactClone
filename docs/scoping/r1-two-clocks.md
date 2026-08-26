@@ -1,7 +1,66 @@
 # R1 — Two clocks: `_process` delta vs `TickSystem`
 
-**Status: OPEN SCOPING QUESTION. Do not fix in passing.**
-**This scopes audit finding #31** (LIVE — MEDIUM), not a new defect.
+**Status: DECIDED 2026-08-26 — OPTION 2. The split is deliberate; the comment was the
+defect.** `tick_system.gd` now states the two clocks and why. #31 is closed
+WONTFIX-with-rationale in the tracker. This document is kept as the decision record and
+the price list for ever reversing it.
+
+**Decision reasoning, verbatim from the decision:** the behavioural strand is clean — no
+defect is being suffered, only a false claim in one comment. Options 1/3 ship unpinned
+arithmetic (the correctness budget is the assertions, and nothing depends on
+frame-independence for these three systems). Option 1's ledger is mixed, not favourable:
+closes the hitch hole, widens the `grace_admits_tier` tie from ~17 ms frame-dependent to
+a fixed 50 ms. Option 4 is disqualified — measured to resurrect #7 at every tier, green
+suite, 1-2 s player-visible window. "Soil recovers in real time" is adopted as a
+deliberate stance, not tolerated as an accident.
+
+## Design-pass evidence (2026-08-26) — what the decision was made from
+
+Measured by replica probes anchored against three suite-pinned outcomes (test_wasteland
+ss1, 11b, 11c), plus assertion-level reads of every relevant file. Highlights; the body
+below keeps the original costings with corrections marked.
+
+- **The law lives in exactly one place.** `CONVENTIONS.md:138`'s determinism section is
+  iteration order / RNG / two-pass; the "never on `_process`" claim existed only in
+  `tick_system.gd:5-7`. Option 2 was one comment, not two documents.
+- **Every reader of grace/decay/duration state is tick-safe** — info panel countdown,
+  console `tile`, applicator panel all print the state's own remaining value. No
+  double-scaling path exists anywhere.
+- **Rounding, measured:** under option 1 no observable shifts by more than one 50 ms
+  tick (unboosted soil points become exactly 30.0000 s). Under option 4 every
+  observable shifts a full second.
+- **⚠ OPTION 4 IS DISQUALIFIED BY MEASUREMENT, not by preference.** Under a 1 s
+  cadence `grace_admits_tier` admits an apply that then scars anyway — HIGH at G=4.0,
+  MID at G=8.0, LOW at G=15.0 *and* 16.0 (float ε) — audit #7's exact
+  compost-consumed-tile-scars failure, re-opened by #31's own cheapest variant, with a
+  1-2 s player-visible window per tier and all 70 suites green. Any future N-gated
+  proposal must re-derive the gate thresholds first.
+- **The `841fe3f` tie under option 1 survives and WIDENS** — from ≤16.7 ms
+  frame-dependent to a fixed 50 ms. Deterministic but wider; the earlier claim that a
+  tick migration "closes that hole as a side effect" is corrected below to: it closes
+  the oversized-delta hazard and the frame-rate dependence, not the tie.
+- **Wiring-test inventory:** options 1/3 redden sub-cases (7)(8) both halves and (9)'s
+  `_process` half — and the file cannot distinguish 1 from 3 (it never drives the
+  multiplier). Option 4's tick-side negatives stay green **by accident** (emissions land
+  on ticks 7 and 8, neither ≡ 0 mod 20) — recorded at the test itself. Option 2
+  reddens nothing (confirmed: 70 green after the comment amendment).
+- **No pre-existing suite discriminates any option's arithmetic.** Every soil suite
+  calls the `_tick_*` helpers directly. Whichever option had been chosen, the
+  correctness budget was the new assertions, not the move.
+
+**Standing consequences of option 2:** `tick_speed` remains a partial fast-forward
+(deliberately — throughput, not world recovery); the `wasteland` console command remains
+load-bearing for testing; the wiring test's pinned split is the ratified design;
+`grace_admits_tier`'s "narrower than one frame" claim is wall-clock-dependent and its
+docstring now says so. #29 and #32 are UNBLOCKED — they were held behind this decision
+and are now ordinary per-call-cost findings on their own terms (their O(all-entries)
+walks were never touched by any clock option).
+
+---
+
+*Original scoping below, kept for the record. Line citations predate 2026-08-25's +39
+shift in `grid_world.gd` and are stale; the design pass re-derived every load-bearing
+one (today: `_process` at `:1225-1234`, connect at `:246`, `_on_tick` at `:678`).*
 
 Re-derived 2026-08-23 during the audit re-application session while reviewing
 the finding-#7 fix, and filed as "R1, newly found" before anyone noticed #31

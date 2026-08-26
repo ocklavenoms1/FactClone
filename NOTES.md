@@ -887,7 +887,18 @@ Per-tile soil (NOT region-based — Session 1's region scope was reversed at Ses
 
 ---
 
-## Queued: soil/fertilizer/regrowth run on `_process`, not on ticks — `tick_speed` does not reach them
+## RESOLVED 2026-08-26 (was Queued): soil/fertilizer/regrowth on `_process` — the split is now DELIBERATE
+
+**Audit #31 closed WONTFIX-with-rationale after a measured design pass** (evidence absorbed
+into `docs/scoping/r1-two-clocks.md`). The tick clock drives the factory sim; soil regen,
+fertilizer decay and tree regrowth run on wall-clock **by design** — slow world processes on
+a different scale from factory iteration, so `tick_speed` accelerates throughput, not the
+land's recovery. `tick_system.gd` now states both clocks and why. The three migration
+options are priced in the scoping doc; **option 4 (the fix text's own variant) is
+disqualified by measurement — it re-opens #7 at every tier with a green suite.** Do not
+reopen as a cheap win. The entry below is kept as the original statement of the problem.
+
+### Original entry (historical)
 
 **This is audit finding #31** (LIVE — MEDIUM), not a new defect. Re-derived 2026-08-23 while
 re-applying the audit #7 fix and briefly mis-filed as "newly found R1" before anyone checked
