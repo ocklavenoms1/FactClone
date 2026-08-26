@@ -1709,6 +1709,36 @@ that half-state is one plausible edit away, and nothing else in the suite would 
 it. Where a partial state is genuinely unsafe, say so in the retention comment: "these two
 lines land together" is information a future editor cannot derive.
 
+### ⚠ A claim ABOUT a finding becomes a finding — and inherits nothing but my confidence
+
+**Twice now I have asserted something about an entry, then treated my own assertion as
+verified in later briefs. Both times it was wrong.**
+
+- **#19's mis-rating note.** I wrote that its outcome is "item duplication or destruction",
+  called it HIGH-shaped, and repeated it as settled. Measured: conservation holds exactly,
+  2450 before and after. Neither happens.
+- **#28's prescription.** I briefed an implementer that "the prescribed fix is **known to
+  be wrong**, and the audit says so itself." **The Fix paragraph had already been rewritten
+  to the corrected version.** Only the *verification note* still carried the wrong one —
+  as the thing being corrected. I was quoting an earlier session's *report about* the entry
+  instead of the entry.
+
+The second is the more interesting failure, because it adds a wrinkle to
+"reproduce the title, not the paragraph". That protocol says the five sections of an entry
+can disagree. This says something further: **the entry is versioned.** Corrections land in
+one section and not the others, so a section can be stale *relative to its own document*,
+and a claim harvested from it ages the moment the entry is edited — including by us.
+
+**The rule: a statement about a finding is not part of the finding.** Whatever I write in a
+brief, a report, or a tracker note about what a finding says is a derived claim with a
+timestamp, and it decays exactly like a citation. **Re-read the entry at dispatch; never
+brief from a previous brief.** If a report is the only source for a claim, say "reported"
+and let the next reader know it was not re-checked.
+
+The tell in both cases is identical and easy to catch: **the claim was mine, and I stopped
+attributing it.** Once "the cost-check found X" becomes "X", the provenance is gone and
+nothing prompts a re-check.
+
 ### ⚠ Never shift a citation by arithmetic — a known-good delta on an unverified number produces a wrong number that looks verified
 
 **#16's fix inserted a method at `grid_world.gd:494`, shifting every citation below it by
