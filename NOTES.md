@@ -1300,8 +1300,42 @@ path does not perform, or from a value fixed before the run. If you cannot state
 expectation comes from *independently of the thing under test*, the assertion is checking
 that production agrees with itself.
 
-The tell to look for when reviewing a test: **the expected side of an assertion contains a
-call into the module being tested.**
+#### This one is a CHECK, not a caution — it is mechanically greppable
+
+Almost every protocol in this file needs judgement. This one does not, and that makes it
+worth more than its size. **The tell is syntactic: the expected side of an assertion
+contains a call into the module being tested.** A first-cut sweep, deliberately
+over-inclusive, to be read rather than trusted:
+
+    grep -nE "_check\(.*(Belt|Inserter|Processor|Chest|Smelter|Composter|Planter|GridWorld|SaveSystem|Buildings)\." scripts/tests/*.gd
+
+Every hit is a place where production appears inside an assertion. Most are legitimate —
+*acting* on the system under test, or reading its state to compare against a literal. The
+ones that matter are where the production call sits on the **expected** side, deciding what
+the assertion should compare to. That distinction is the part a human still makes; finding
+the candidates is not.
+
+Worth building into a suite if this recurs a third time: a guard that flags assertions whose
+expected expression calls the module under test. It would have caught M4 at authoring time.
+
+#### Same failure, opposite appearance — which is why one is easy and one is not
+
+- **#27** — the suite **reimplemented** production: its own `SLOTS_PER_BAG`, `BAG_CAP`,
+  `STARTING_CAPACITY`, its own `_try_consume` carrying the ordering rule. **Visible on
+  inspection.** Duplicated constants sitting in a test file look wrong to anyone reading
+  them, and the finding was raised by exactly that reading.
+- **M4** — the suite **called** production to compute what it expected
+  (`Belt.is_advance_tick()` deciding which slot the item should be in). **Looks like best
+  practice**: no duplication, no drift, a single source of truth. It reads as the fix for
+  #27, and it is the same defect.
+
+Both make the test agree with production **by construction**. The duplication version is
+caught by review; the delegation version is caught only by mutation, and only if the
+mutation targets the shared function — M4 passed until the expectation was re-derived from
+`TickSystem.current_tick / Belt.TICKS_PER_SLOT`, a source the mutation could not reach.
+
+**So "don't duplicate production in tests" is half a rule.** The whole one is: don't let the
+expectation and the behaviour come from the same place, by copying **or** by calling.
 
 ### The three-count run protocol catches bad TESTS, not just compile breaks
 
@@ -1812,6 +1846,37 @@ restarts correctly; on that basis the finding was nearly written off as false. B
 `in_buffer`, so `BuildingPanel._take_from_slot` can empty a stalled smelter from the panel.
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
+
+**⚠ A finding inherits the errors of the DOCUMENTATION it was written from — and then
+carries them with the audit's authority.**
+
+Three of this session's bad prescriptions were flawed at the prescription: #22's frame stamp,
+#35's delete-on-ship, #16's untestable-in-place swap. **R5 is a different kind.** #26's fix
+text was *correct given its premise*. The premise was a wrong comment in the code it
+described.
+
+`belt.gd:6-7` said "Items advance one slot per belt tick", unqualified. #26 read it, believed
+it, and prescribed asserting a **"12 slots total path"**. Measured, an item traverses **11**
+slots in 9 advance ticks — `0, 1, 2, 4, 5, 6, 8, 9, 10, 11`, with 3 and 7 never appearing,
+because Pass 1 moves an item into a front slot and Pass 2 of the *same* tick hands it across.
+**A test written faithfully to the prescription fails against working code.** #26 also names
+the wrong hazard: the double-move it warns about cannot happen; the real one is slot N−2 →
+front → next belt.
+
+**The diagnostic rule: when a prescription fails against working code, suspect the comment it
+was derived from before suspecting the code.** A static-read audit reads comments as evidence
+— it has little else — so a wrong comment does not stay local. It propagates into every
+finding written about that code, and arrives wearing the audit's authority rather than the
+comment's.
+
+**What this means for what is left.** 49 findings remain open. Every one was produced by
+reading code and comments, and **the comments are demonstrably unreliable** — that is what a
+large part of the LOW tier is *about*, which makes the input to the audit and one of its
+outputs the same defect class. So a finding that will not reproduce is three hypotheses, not
+one: the code changed, the finding was wrong, **or the comment it trusted was wrong**. Check
+the third before concluding either of the first two, and when it is the third, fix the
+comment as well as the finding — otherwise the next reader derives the same error from the
+same source.
 
 **⚠ And the entry is VERSIONED — a claim about a finding is not part of the finding.**
 
