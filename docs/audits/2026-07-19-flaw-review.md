@@ -121,12 +121,14 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #16 — the predicate EXTRACTED out of `_draw` and delegated, not swapped in place. **#38 stays LIVE and was deliberately not touched**; its headline symptom dissolved as predicted, its dict-growth half did not | **32 closed / 52 live** |
 | 2026-08-25 | #27 at `cb1b29a` — the test's mirror deleted and a seam CREATED in `main.gd` to delegate to, because there was none. The finding as written ("test mirrors production") was half the defect; the other half was that production had no callable entry point | **33 closed / 51 live** |
 | 2026-08-25 | #28 at `6fb2617` — phase (6) rebuilt as entry + hold + **recovery**. Its own fix text was already corrected against the reviewer's original prescription and the corrected version is what shipped; see the note below | **34 closed / 50 live** |
+| 2026-08-25 | #26 at `a2891fa` — a TEST-GAP row: `belt.gd` was already correct, so nothing was fixed. What landed is `test_belt.gd`. **The finding's own fix text mis-models the path and a test written to it fails against correct code**; the mis-modelled half is reported, not encoded — see the note below | **35 closed / 49 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 34 + LIVE—HIGH 0 + LIVE—MEDIUM 11 + LIVE—LOW 39 = **84**.
+incrementing: CLOSED 35 + LIVE—HIGH 0 + LIVE—MEDIUM 10 + LIVE—LOW 39 = **84**.
 Each section header was checked against its own row count in the same pass
-(34/0/11/39), and the 84 ids are distinct — no row lost, duplicated, or
-double-counted.
+(35/0/10/39), and the 84 ids are distinct — no row lost, duplicated, or
+double-counted; the ids present are exactly 1..84, checked as a set rather
+than by reading the total.
 
 **And per the caveat at the top of this document, that is the entire content of
 the check.** Two of those four addends were re-derived today; the LOW block's 39
@@ -153,7 +155,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (34)
+### CLOSED (35)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -191,6 +193,7 @@ is closed at all.
 | 16 | hover preview contradicts `can_place_building`, both directions | **`8b460d1`+ (this cluster)** — the prescribed three-line swap was **declined as unverifiable**, which was the whole shape of the work. The predicate is now `GridWorld.hover_preview_blocked()` at `grid_world.gd:494-497`, called once from `_draw` at `:1810`; its body is `not can_place_building(...)` behind a `building_type < 0` guard. **The extraction is not tidying — it is the only way this could be tested at all**, since `test_runner.gd` never yields a frame and no `CanvasItem` here is sent NOTIFICATION_DRAW. **No `last_building_place_error` save/restore**, against the fix text: all three readers consume the string synchronously with the failed placement that set it, so no frame can interleave — and that premise is asserted, not assumed | `test_hover_preview_agreement.gd` — both directions the title claims, each measured RED first against the real production predicate: 4 legal-previews-RED cases (belt/oven on paved ground, pump beside water, drill on its own ore) and 3 illegal-previews-FREE cases (belt/oven on bare grass, drill with no ore). Plus a **reachability control** that agreed even before the fix, so the other cases' silence means something; 4 retention cases for what the old predicate got right; the neutral `type < 0` branch; and an 8-type × 12-cell sweep of `preview == not can_place`, which is the assertion that catches a HALF-delegation |
 | 27 | bag-cap phases assert an in-test mirror of production logic | `cb1b29a` — **the finding named half the defect. Production had no seam to delegate to**; see the note below | `test_bag_cap.gd` — phase 0 pins the three production constants (the single drift alarm), phases 2-3 drive `main.gd`'s `try_consume_bag` / `bag_consume_verdict` directly, and **phase 4 reads `main.gd` and pins both key handlers to the seam**, because behavioural delegation alone cannot see a call site that stops using it |
 | 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `6fb2617` — the fix text as it stands today, which already carries the correction its own verification note demanded | `test_smelter.gd` phase (6), four sub-phases — (6a) at-cap-from-IDLE must report **IDLE**, (6b) a batch completing into a full buffer must ENTER `STATE_BLOCKED_OUTPUT`, (6c) the stall holds, (6d) draining the buffer must make the machine leave the state **and produce an ingot**. (6d) is the half no "nothing changed" route can fake |
+| 26 | no dedicated belt two-pass test | `a2891fa` — a TEST-GAP row. `belt.gd` was correct and stayed untouched; the commit is a new suite. **The finding's own fix text is wrong about the path and was not followed**: it prescribes "12 slots total path", but Pass 1 runs before Pass 2, so the advance tick that carries an item into a front slot is the same tick that hands it across — the resting positions on a three-belt line are `0,1,2,4,5,6,8,9,10,11`, ten of twelve, and a test written to the prescription FAILS against correct code. That makes `belt.gd:6-7`'s "Items advance one slot per belt tick" a false simplification of `belt.gd:10-12`'s own mechanism at every boundary — **reported, not encoded**; the suite asserts the two passes, not the prose sentence | `test_belt.gd` — four belts-only cases, every assertion an exact equality and no `>=` anywhere: single-item advance driven one tick at a time; jam/compression with conservation checked either side of every insert AND every tick; the opposite-facing guard; and a four-belt ring pinning both the item count and the item types. Each case carries a **reachability control**, because a dead belt leaves its item at slot 0 — which is where tick 0 expects it, and which makes "no handoff occurred" and "the ring conserved five items" both trivially true. Mutation-measured: double-advance, the removed handoff clear, the removed opposite-facing guard and an always-true `is_advance_tick` each redden it, and a straight-lines-only handoff regression is caught by the ring's control ALONE. **Machine-adjacent timing is a named gap in the file header, cross-referenced to #17** — #17's own fix option (b) prescribes a mill-then-belt ordering test, which would encode an undecided disagreement |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -230,7 +233,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (11)
+### LIVE — MEDIUM (10)
 
 > **⚠ EVERY `grid_world.gd` CITATION BELOW ABOVE LINE `:494` IS UNAFFECTED; EVERY
 > ONE BELOW IT SHIFTED BY +39 when #16 landed** (`hover_preview_blocked` was
@@ -251,7 +254,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` — **grid_world line is pre-#16 and unverified; see the +39 note above** |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
 | 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
-| 26 | no dedicated belt two-pass test | no `test_belt.gd`; `CONVENTIONS.md:142` untested |
 | 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1470-1490` (early-out at `:1471`) — was cited `:1330-1356`. **Partly closed by #31's migration**; fix #31 first or fix both as one unit |
 | 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
