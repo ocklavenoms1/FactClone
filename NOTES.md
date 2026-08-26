@@ -1238,6 +1238,58 @@ The other two v2 items look superseded rather than pending — ctrl+LMB ships a 
 picker (`slot_click_handler.gd:13, 30`), which covers "transfer one" more generally. Confirm
 before scheduling either.
 
+## Protocol: assert the PATH, not the result — an answer can arrive by any route
+
+**Codified 2026-08-25 from audit #16's mutation M3, and placed above silent compensation
+because it is how a silent-compensation defect survives a mutation pass.**
+
+**The shape:** a guard is deleted. Its absence produces two runtime faults. The faults
+cancel into the correct answer. Every assertion on the output passes. The guard is gone.
+**Only the error count differs.**
+
+The worked case. `hover_preview_blocked` opens with `if building_type < 0: return false` —
+the neutral hover, where the preview highlights an existing building rather than a
+placement. Delete that guard and the suite reports **68 passed, 0 failed**, above **8
+`SCRIPT ERROR` lines**:
+
+1. `Buildings.requires_overlay(-1)` — out-of-bounds Dictionary read, function aborts.
+2. `Buildings.footprint_of(-1)` — same, aborts, hands back the declared return default:
+   an empty `Array`.
+3. `can_place_building` walks **zero** cells, finds nothing blocking, returns `true`.
+4. The caller computes `not true` = `false` — **exactly what the guard would have
+   returned**, reached by faulting twice per call.
+
+Four assertions checked the answer. Four passed.
+
+**The rule, stated as the test to apply:** *a test that asserts the answer cannot
+distinguish "the guard worked" from "the guard is missing and two faults cancelled."* Those
+are different states of the program and an output comparison sees neither — it sees only
+the value they happen to share. Where a guard exists to make something happen **a
+particular way**, assert the way.
+
+**In practice: plant a sentinel that only the intended path preserves.** The strengthened
+assertion writes a sentinel into `last_building_place_error` and requires it to **survive**
+the neutral call. `can_place_building` clears that string on its first line, so a surviving
+sentinel proves the early return fired *before* delegating. It cannot be satisfied by any
+other route to the same boolean. M3 re-run against it reddens four times.
+
+Outcomes have more than one cause; that is precisely what makes them weak evidence. Prefer
+an assertion that names the route: a sentinel, a call counter, an observable side effect
+that only the intended branch produces.
+
+### The three-count run protocol catches bad TESTS, not just compile breaks
+
+Worth stating separately, because it is wider than the use it was written for. The standing
+rule — check `passed,` **and** `Parse Error` **and** `SCRIPT ERROR` — was written after a
+compile error printed `57 passed, 0 failed` above 268 error lines. **M3 is the other use:
+the suite was green, the summary was truthful (every assertion really did pass), and the
+only evidence of a deleted guard was the `SCRIPT ERROR` count.**
+
+So the third count is not redundancy against compile breaks. It is the only signal
+available when a test passes for the wrong reason and the program is faulting its way to
+the right answer. Read all three, every run, including the runs that look clean.
+
+
 ## Protocol: silent compensation — when absence is indistinguishable from success
 
 **Codified at the audit re-application session (2026-08-24)** after the third instance in
@@ -1630,36 +1682,6 @@ whose state has no `"bag"` key. `state.get("bag", [])` returns the *default lite
 append lands in a temporary and the item is discarded. Closed incidentally by delegating to
 `Chest.try_insert`, which repairs the shape through `Chest._bag`.)
 
-### Assert the MECHANISM, not the answer — an assertion can pass for the wrong reason
-
-#16, mutation M3. The extracted predicate opens with a guard: `if building_type < 0: return
-false`, the neutral case where the hover highlights an existing building rather than a
-placement. Deleting that guard should have reddened the neutral assertions. It did not —
-the suite reported **68 passed, 0 failed**, while emitting **8 `SCRIPT ERROR` lines**.
-
-The trace is worth reading, because every step is individually reasonable.
-`Buildings.requires_overlay(-1)` and `footprint_of(-1)` are out-of-bounds Dictionary reads.
-GDScript aborts the function and hands back the declared return type's default — an empty
-Array. `can_place_building` then walks zero cells, finds no obstruction, and returns
-`true`. The preview computes `not true` = `false`. **The correct answer, reached by
-faulting twice per call.**
-
-Four assertions checked the answer. All four passed. The guard they existed to protect was
-gone.
-
-**The rule:** where a guard exists to make something happen *a particular way*, assert the
-way, not the outcome. Outcomes have more than one cause; that is exactly what makes them
-weak evidence. The strengthened assertion (N5) plants a sentinel in
-`last_building_place_error` and requires it to **survive** the neutral call —
-`can_place_building` clears that string on its first line, so a surviving sentinel proves
-the guard returned *before* delegating. It asserts the path taken. M3 re-run against it
-reddens four times.
-
-**And note what caught the original miss: only the `SCRIPT ERROR` count.** The pass/fail
-line was clean and truthful — every assertion really did pass. This is the concrete case
-the three-count run protocol exists for, and the first time it has caught a *test* rather
-than a compile break.
-
 ### ⚠ FIXES ARE NOT MONOTONE — the intermediate state can be worse than either endpoint
 
 Same finding, mutation M1: delegate to `Chest.try_insert` **but keep `return true`**.
@@ -1686,6 +1708,33 @@ moving part, construct the partial applications and check them — M1 exists pre
 that half-state is one plausible edit away, and nothing else in the suite would have caught
 it. Where a partial state is genuinely unsafe, say so in the retention comment: "these two
 lines land together" is information a future editor cannot derive.
+
+### ⚠ Never shift a citation by arithmetic — a known-good delta on an unverified number produces a wrong number that looks verified
+
+**#16's fix inserted a method at `grid_world.gd:494`, shifting every citation below it by
+exactly +39.** Rows #17, #29, #30, #31 and #32 all point into that range. The obvious move
+is to add 39 to each and move on. **Do not.**
+
+The delta is correct. The inputs are not. Several of those rows were **already stale by an
+unmeasured amount** before the insertion — the document even contradicted itself about one,
+with #30's row saying the terrain loop is at `:1598` while a cost note said `:1619`. The
+truth, re-derived, is **`:1658`**.
+
+Apply `old + 39` to a number that was already wrong and you get a number that is still
+wrong, now carrying the appearance of having been maintained. **The arithmetic launders the
+staleness**: a reader sees a recently-updated figure and stops checking. That is strictly
+worse than leaving the old number, which at least looks its age.
+
+**The rule: re-derive, or warn. Never arithmetic.** If you have time to re-derive the rows
+you disturbed, do that. If you do not, write a warning block saying *"every `<file>`
+citation below line N shifted by +D on <date>; re-derive before use"* — which is honest
+about exactly what is and is not known. What was done here: a `+39` warning block above the
+MEDIUM table, plus one row re-derived because it had been measured.
+
+The general form is the currency/consistency distinction from the tracker's header, one
+level down: **a transformation applied to an unverified value yields an unverified value,
+however sound the transformation.** Confidence does not propagate through arithmetic; only
+measurement creates it.
 
 ### Findings carry stale COSTS as well as stale citations — re-derive both
 
