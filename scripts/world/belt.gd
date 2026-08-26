@@ -3,13 +3,27 @@ extends RefCounted
 
 ## Belt — moves items one tile in its facing direction.
 ##
-## Model: each belt tile has SLOTS_PER_TILE discrete slots. Items advance
-## one slot per "belt tick" (every TICKS_PER_SLOT world ticks). Belts are
-## ticked in TWO PASSES per belt-tick to avoid order-dependent jitter:
+## Model: each belt tile has SLOTS_PER_TILE discrete slots. WITHIN one belt,
+## an item advances one slot per "belt tick" (every TICKS_PER_SLOT world
+## ticks). Belts are ticked in TWO PASSES per belt-tick to avoid
+## order-dependent jitter:
 ##
 ##   Pass 1 (shift): each belt shifts items forward within its own slots.
 ##   Pass 2 (handoff): each belt's front slot tries to push into the next
 ##                      consumer (another belt, later: a mill, etc).
+##
+## ACROSS a handoff it advances TWO global slots in one belt tick, and that
+## is correct — Pass 1 moves the item into the front slot, then Pass 2 of the
+## SAME belt tick hands it to the next belt's slot 0. So a belt's front slot
+## is never a resting position at a handoff. Measured over three DIR_E belts,
+## one item, global slot index per advance tick:
+##
+##   0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 11 …   (3 and 7 never appear)
+##
+## This paragraph exists because the sentence above it used to read "items
+## advance one slot per belt tick" unqualified, and audit #26's fix text was
+## written from it — prescribing a "12 slots total path" that FAILS against
+## correct code. Recorded as R5. `test_belt.gd` pins the trajectory.
 ##
 ## Both passes must read a stable "current state" — that's what the two
 ## passes guarantee.

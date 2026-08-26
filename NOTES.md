@@ -1277,6 +1277,32 @@ Outcomes have more than one cause; that is precisely what makes them weak eviden
 an assertion that names the route: a sentinel, a call counter, an observable side effect
 that only the intended branch produces.
 
+### An assertion that derives its expectation from the code under test cannot see it change
+
+**#26, mutation M4.** `Belt.is_advance_tick()` was mutated to `return true`. The suite's path
+assertion computed *which slot to expect* by calling `Belt.is_advance_tick()` — the very
+function under mutation. Expectation and behaviour moved together, stayed in agreement, and
+the assertion passed. **Only the reachability control caught it.**
+
+Fixed by deriving the expectation from a source the mutation cannot reach:
+`TickSystem.current_tick / Belt.TICKS_PER_SLOT` instead of asking production whether this is
+an advance tick. Re-run, M4 now reddens at tick 1.
+
+**This is the mirror of #27 and it is easier to miss.** #27's suite *reimplemented*
+production, so the copy could drift — visible on inspection, since the duplicated constants
+sit right there. Here the suite *calls* production to compute what it expects, which looks
+like the responsible thing to do — no duplication, no drift, a single source of truth. Both
+make the test agree with production **by construction**; only one of them looks wrong.
+
+**The rule: an assertion's expected value must not be computed by any code path the
+assertion is meant to protect.** Derive it from a constant, from arithmetic the production
+path does not perform, or from a value fixed before the run. If you cannot state where the
+expectation comes from *independently of the thing under test*, the assertion is checking
+that production agrees with itself.
+
+The tell to look for when reviewing a test: **the expected side of an assertion contains a
+call into the module being tested.**
+
 ### The three-count run protocol catches bad TESTS, not just compile breaks
 
 Worth stating separately, because it is wider than the use it was written for. The standing

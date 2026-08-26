@@ -1507,6 +1507,36 @@ Verified live by mutation: adding `const STATE_STACKING: int = 6` and asserting 
 the mirror-image hole (empty string, no default arm) and **was** fixed in the same
 session; this half was left deliberately so the change stayed in scope.
 
+
+### R5. `belt.gd`'s model comment was wrong, and #26's fix text was written from it
+
+**Found:** 2026-08-25, closing #26. **FIXED** in the same pass (`belt.gd` header).
+
+`belt.gd:6-7` read *"Items advance one slot per 'belt tick'"*, unqualified. Measured over
+three `DIR_E` belts, one item, global slot index per advance tick:
+
+```
+0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 11 …      (3 and 7 never appear)
+```
+
+Eleven slots in nine advance ticks. Pass 1 runs before Pass 2, so the tick that moves an
+item into a **front** slot is the same tick Pass 2 hands it across — a front slot is never a
+resting position at a handoff. **This is correct behaviour**, order-independent (every belt
+finishes Pass 1 before any belt starts Pass 2), and not #17. The comment was simply false
+across a boundary while true within a belt.
+
+**Why it is worth its own entry rather than a comment fix.** #26's fix text was written
+from that sentence and inherited its error: it prescribes asserting a **"12 slots total
+path"**. A test written literally to that prescription **fails against correct code** —
+measured, not argued. #26 also names the wrong double-move: its stated hazard ("an item
+entering `next_slots[0]` in Pass 2 must not move again that tick") is true and holds; the
+real one is slot N−2 → front in Pass 1 → next belt in Pass 2.
+
+**The pattern this instantiates:** a wrong comment propagates into every finding written
+about that code, and the finding then carries the error with the audit's authority. This is
+the fourth prescription this session that would have shipped something wrong — after #22
+(a permanent wedge), #35 (deleting live triggers) and #16 (untestable as prescribed). The
+comment now carries the measured trajectory and says why it exists; `test_belt.gd` pins it.
 ## HIGH -- player-visible breakage or item loss  (10 findings)
 
 ### 1. load_game replaces all buildings without invalidating the fluid-network cache — stale pipe/pump connectivity after F9 quick-load
