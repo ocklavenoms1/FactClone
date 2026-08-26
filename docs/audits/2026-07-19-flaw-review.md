@@ -122,13 +122,21 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #27 at `cb1b29a` — the test's mirror deleted and a seam CREATED in `main.gd` to delegate to, because there was none. The finding as written ("test mirrors production") was half the defect; the other half was that production had no callable entry point | **33 closed / 51 live** |
 | 2026-08-25 | #28 at `6fb2617` — phase (6) rebuilt as entry + hold + **recovery**. Its own fix text was already corrected against the reviewer's original prescription and the corrected version is what shipped; see the note below | **34 closed / 50 live** |
 | 2026-08-25 | #26 at `a2891fa` — a TEST-GAP row: `belt.gd` was already correct, so nothing was fixed. What landed is `test_belt.gd`. **The finding's own fix text mis-models the path and a test written to it fails against correct code**; the mis-modelled half is reported, not encoded — see the note below | **35 closed / 49 live** |
+| 2026-08-25 | #25 — another TEST-GAP row: `recipes.gd` is correct and untouched; what landed is `test_processor_recipes.gd`. **The finding's "no test ticks these nine" is stale for exactly one row** — `test_inserter_shared_input_cap.gd` has ticked `oven_bread` since #3 closed, but behind LOWER BOUNDS that a ratio or duration change walks straight through. Measured; see the note below | **36 closed / 48 live** |
 
 Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 35 + LIVE—HIGH 0 + LIVE—MEDIUM 10 + LIVE—LOW 39 = **84**.
+incrementing: CLOSED 36 + LIVE—HIGH 0 + LIVE—MEDIUM 9 + LIVE—LOW 39 = **84**.
 Each section header was checked against its own row count in the same pass
-(35/0/10/39), and the 84 ids are distinct — no row lost, duplicated, or
+(36/0/9/39), and the 84 ids are distinct — no row lost, duplicated, or
 double-counted; the ids present are exactly 1..84, checked as a set rather
 than by reading the total.
+
+**This is a consistency check, not a currency check.** It proves the four tables
+partition 84 distinct ids; it proves nothing about whether any row's citation,
+severity or status still matches today's code. #25 is the case in point: it sat
+in LIVE—MEDIUM with a verification note whose central claim had already been
+falsified by a test written for a different finding, and every arithmetic pass
+over this block since then summed to 84 without noticing.
 
 **And per the caveat at the top of this document, that is the entire content of
 the check.** Two of those four addends were re-derived today; the LOW block's 39
@@ -155,7 +163,7 @@ Six findings were nevertheless closed on main, independently, by later feature
 sessions that re-derived the defect from scratch. That is the only reason any HIGH
 is closed at all.
 
-### CLOSED (35)
+### CLOSED (36)
 
 | # | Finding | Closed by | Coverage on main |
 |---|---|---|---|
@@ -194,6 +202,7 @@ is closed at all.
 | 27 | bag-cap phases assert an in-test mirror of production logic | `cb1b29a` — **the finding named half the defect. Production had no seam to delegate to**; see the note below | `test_bag_cap.gd` — phase 0 pins the three production constants (the single drift alarm), phases 2-3 drive `main.gd`'s `try_consume_bag` / `bag_consume_verdict` directly, and **phase 4 reads `main.gd` and pins both key handlers to the seam**, because behavioural delegation alone cannot see a call site that stops using it |
 | 28 | BLOCKED_OUTPUT phase asserts neither state nor recovery | `6fb2617` — the fix text as it stands today, which already carries the correction its own verification note demanded | `test_smelter.gd` phase (6), four sub-phases — (6a) at-cap-from-IDLE must report **IDLE**, (6b) a batch completing into a full buffer must ENTER `STATE_BLOCKED_OUTPUT`, (6c) the stall holds, (6d) draining the buffer must make the machine leave the state **and produce an ingot**. (6d) is the half no "nothing changed" route can fake |
 | 26 | no dedicated belt two-pass test | `a2891fa` — a TEST-GAP row. `belt.gd` was correct and stayed untouched; the commit is a new suite. **The finding's own fix text is wrong about the path and was not followed**: it prescribes "12 slots total path", but Pass 1 runs before Pass 2, so the advance tick that carries an item into a front slot is the same tick that hands it across — the resting positions on a three-belt line are `0,1,2,4,5,6,8,9,10,11`, ten of twelve, and a test written to the prescription FAILS against correct code. That makes `belt.gd:6-7`'s "Items advance one slot per belt tick" a false simplification of `belt.gd:10-12`'s own mechanism at every boundary — **reported, not encoded**; the suite asserts the two passes, not the prose sentence | `test_belt.gd` — four belts-only cases, every assertion an exact equality and no `>=` anywhere: single-item advance driven one tick at a time; jam/compression with conservation checked either side of every insert AND every tick; the opposite-facing guard; and a four-belt ring pinning both the item count and the item types. Each case carries a **reachability control**, because a dead belt leaves its item at slot 0 — which is where tick 0 expects it, and which makes "no handoff occurred" and "the ring conserved five items" both trivially true. Mutation-measured: double-advance, the removed handoff clear, the removed opposite-facing guard and an always-true `is_advance_tick` each redden it, and a straight-lines-only handoff regression is caught by the ring's control ALONE. **Machine-adjacent timing is a named gap in the file header, cross-referenced to #17** — #17's own fix option (b) prescribes a mill-then-belt ordering test, which would encode an undecided disagreement |
+| 25 | nine bread/cloth recipes never tick-tested | a TEST-GAP row. `recipes.gd` is correct and stayed untouched; the commit is a new suite. **The title's "never executed by any test" is stale for exactly one of the nine.** `test_inserter_shared_input_cap.gd` — which post-dates this audit; it landed when #3 closed — places a real OVEN, pins `recipe_id` (`:90-92`), pre-loads 8 RISEN_DOUGH (`:95`) and ticks it 400+400 through full bakes. So `oven_bread` HAS had tick-level execution, contradicting the verification note's "No test file emits ticks against an OVEN ... through a recipe cycle". What it never had is a lock on the DATA: its two assertions are `bread_made > 0` (`:116`) and `bread_later > bread_made` (`:127`), the lower-bound shape #26 named. **Measured, one mutation at a time: swapping `oven_bread`'s output to LOAF_PACK reddens that suite; raising RISEN_DOUGH 1→2 and halving `time_ticks` 120→60 each leave it GREEN.** The finding's substance holds for all nine; its wording is wrong for one | `test_processor_recipes.gd` — all nine recipes, N=2 cycles each, **every expected value a LITERAL** (`Recipes` is never called in the file). Seven dry rows in one table and one driver; the two fluid rows get test_mixer_dough's water+PUMP+PIPE fixture plus a pump-removal negative case that asserts the inputs are STILL THERE, not merely that no output appeared. `oven_bread` pre-loads both RISEN_DOUGH and FUEL_BRIQUETTE and asserts both drain. Exact-ratio assertions on all four multi-count rows; no `>=` anywhere. Each row is sampled at tick N·T−1 AND N·T, which is what makes `time_ticks` lockable at all. A **REACHABILITY CONTROL** at tick 1 requires every machine RUNNING with `progress == 1` and one cycle's inputs already paid, because a dead processor satisfies "no wrong item" and "no extra input eaten" trivially. Mutation-measured green→red on output identity, input ratio, output count, `time_ticks`, and a deleted `inputs_fluid` |
 
 Each was checked for the half-fix pattern. #8/#9's resolver reaches all four call
 sites (take, ctrl-take, draw, hover); #10 guards every footprint cell for every type
@@ -233,7 +242,7 @@ and the new suite, which is what demonstrates it is shared rather than merely
 extracted. The guard is conditional, not a blanket wasteland skip: mutating it to
 skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 
-### LIVE — MEDIUM (10)
+### LIVE — MEDIUM (9)
 
 > **⚠ EVERY `grid_world.gd` CITATION BELOW ABOVE LINE `:494` IS UNAFFECTED; EVERY
 > ONE BELOW IT SHIFTED BY +39 when #16 landed** (`hover_preview_blocked` was
@@ -253,7 +262,6 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 |---|---|---|
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` — **grid_world line is pre-#16 and unverified; see the +39 note above** |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 25 | nine bread/cloth recipes never tick-tested | no suite in `scripts/tests/` ticks them |
 | 29 | `_tick_regrowth` walks all of `resource_state` per frame | `grid_world.gd:1470-1490` (early-out at `:1471`) — was cited `:1330-1356`. **Partly closed by #31's migration**; fix #31 first or fix both as one unit |
 | 30 | `_draw` walks every tile and building per frame | `queue_redraw()` `grid_world.gd:1191`, terrain loop `:1598`, buildings loop `:1688` — was cited `:1103, 1464-1469, 1554-1563`. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
 | 31 | soil regen / fert decay / regrowth advance in `_process`, not on ticks | `grid_world.gd:1182-1191` vs `tick_system.gd:5-7` — **scoped at `docs/scoping/r1-two-clocks.md`**; its fix text's "no test changes needed" is true and is the hazard |
@@ -305,6 +313,36 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 | 81 | "14 specialized panels" vs 17 listed vs 21 real | `NOTES.md:1139` — was cited `:998, 1000, 1039`. **21 is correct** (26 `*_panel.gd` minus 5 non-building-specific); see the baselines block |
 | 82 | ProcessorPanel "11 consumers", code has 12 | `NOTES.md:1146` (was `:1007`) vs `:834`. **Understated by one, not two** — the real count is 12; the baselines block briefly said 13 and was wrong |
 | 84 | cloth-chain enum comment still future-tense | `buildings.gd:46-48` |
+
+### Staleness note — #25's central evidence was falsified by a test written for #3, and no arithmetic pass over this document could have noticed
+
+#25's verification block states it twice, in two independently-written notes:
+"No test file emits ticks against an OVEN, PROOFER, PACKAGER, BRIQUETTER,
+SUGAR_PRESS, LOOM, TAILOR, RETTER, or YEAST_CULTURE" and "no test ever ticks an
+OVEN ... through a recipe cycle". **Re-derived at `629a365`: false for `oven_bread`.**
+`test_inserter_shared_input_cap.gd` places an OVEN, asserts its `recipe_id` is
+`oven_bread` (`:90-92`), pre-loads 8 RISEN_DOUGH (`:95`), inserter-feeds it fuel
+and ticks 400 + 400 through full 120-tick bakes (`:103-105`, `:123-125`).
+
+That file did not exist when #25 was verified — it landed when **#3** closed. Two
+verifiers both wrote "exhaustive grep of all 33 tests"; `test_runner.gd` registered
+69 before this suite and 70 after. Neither claim was wrong when it was made.
+
+**Why it matters beyond the correction.** The consequence #25 draws from its
+premise — that the nine recipes' data is unguarded — turns out to be true anyway,
+but *not for the reason given*. The oven IS ticked; what the existing coverage
+lacks is exactness. `test_inserter_shared_input_cap.gd`'s two production
+assertions are `bread_made > 0` (`:116`) and `bread_later > bread_made` (`:127`).
+Measured, one mutation at a time against that suite:
+
+| mutation to `oven_bread` | `test_inserter_shared_input_cap.gd` | `test_processor_recipes.gd` |
+|---|---|---|
+| output BREAD → LOAF_PACK | **RED** (bread falls to 0) | RED |
+| input RISEN_DOUGH 1 → 2 | GREEN (4 bakes instead of 8; still `> 0`, still rising) | RED |
+| `time_ticks` 120 → 60 | GREEN (faster; still `> 0`, still rising) | RED |
+
+So the row was closable on its title but its stated reason needed re-deriving
+first — the #26 shape again, and the reason both new suites forbid `>=`.
 
 ### Seam note — #27 named half the defect; production had no entry point to delegate to
 
