@@ -1300,6 +1300,26 @@ path does not perform, or from a value fixed before the run. If you cannot state
 expectation comes from *independently of the thing under test*, the assertion is checking
 that production agrees with itself.
 
+#### Measured cost of getting it wrong: TOTAL blindness, not partial
+
+**#25 quantified it.** Two versions of the same recipe suite were built and run against the
+same five table mutations — output item type, input ratio, `time_ticks`, fluid gate,
+output count:
+
+- **Expected values as literals:** every mutation **RED**.
+- **Expected values filled from `Recipes.get_recipe()`** — three fields, otherwise identical:
+  **GREEN on all of them.**
+
+Not weakened. **Blind.** The suite still ran the machines, still consumed inputs, still
+produced outputs, still asserted exact counts — and could not see the table it existed to
+lock, because when the table moved its expectations moved with it. The only red in that run
+came from a *different* suite.
+
+That is the calling form, the one this file says is hard to see, and it is worth knowing the
+failure is not graceful. There is no partial credit: a suite whose expectations come from the
+system under test does not detect a weaker class of defect, it detects **none of the class it
+was written for**.
+
 #### This one is a CHECK, not a caution — it is mechanically greppable
 
 Almost every protocol in this file needs judgement. This one does not, and that makes it
@@ -1597,6 +1617,12 @@ reported and simply about something else.
 ')] for l in [d.count(b'
 ')-c] if c and l];print('MIXED-ENDING FILES:',m) if m else print('no mixed-ending files')"
 
+**⚠ Use a byte count, not `grep`.** Measured on this box: `grep -c` for a carriage return
+returns **0** on a CRLF file — it opens in text mode and strips them — while the anchored
+form returns the *total line count* on an LF file. Both answers look plausible and both are
+wrong. The check above reads bytes for exactly this reason; do not "simplify" it to a grep.
+`git ls-files --eol` is the other trustworthy source.
+
 **Measured 2026-08-24 — the first version of this check was wrong, in the direction of false
 alarm.** It asserted "zero lone LFs", which flagged **29 files** on its first run. All 29 are
 *uniformly* LF and perfectly healthy; **genuinely mixed files: 0**. A check that reports 29
@@ -1846,6 +1872,20 @@ restarts correctly; on that basis the finding was nearly written off as false. B
 `in_buffer`, so `BuildingPanel._take_from_slot` can empty a stalled smelter from the panel.
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
+
+**⚠ A prescription can be right and still be BLIND — incompleteness is the quiet failure
+mode.** #22, #35, #16 and R5 were prescriptions that would have shipped something *wrong*.
+**#25's is not wrong — it is short.** Its prescribed shape (pre-load N cycles, tick to a
+budget, assert exact final counts) was measured against the same five table mutations and
+came back RED on four, **GREEN on `time_ticks`**. Halve a recipe's duration and a suite built
+exactly to the prescription still passes: the final counts are identical, only the timing
+moved, and nothing sampled the timing.
+
+Closing it needed two per-row samples at tick N·T−1 and N·T — derived from `Processor.tick`'s
+state machine, not from observing a run. **A prescription followed faithfully can leave a
+hole the size of a whole field**, and unlike a wrong prescription it produces no symptom:
+green suite, closed finding, defect class untouched. When following a fix text, ask what it
+does *not* assert, and check that against the data the finding says it is locking.
 
 **⚠ A finding inherits the errors of the DOCUMENTATION it was written from — and then
 carries them with the audit's authority.**
