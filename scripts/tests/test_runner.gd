@@ -128,6 +128,12 @@ const TESTS: Array = [
 	# this one is an exact equality. It is belts-only on purpose, and the hole
 	# it leaves (machine-adjacent timing, audit #17) is named in its header.
 	preload("res://scripts/tests/test_belt.gd"),
+	# Audit #25: the nine bread- and cloth-chain recipes, none of which any test
+	# had ever ticked. A test-gap row like #26 — the data is correct; what was
+	# missing was a SECOND statement of it. Every expected count, ratio, output
+	# identity and cycle length in that file is a literal, deliberately: a suite
+	# that asked `Recipes` what to expect would move with the table it guards.
+	preload("res://scripts/tests/test_processor_recipes.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
