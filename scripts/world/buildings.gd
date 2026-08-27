@@ -151,6 +151,16 @@ enum Type {
 	# Lane behaviour, hotbar slot, and post_tick_one membership are Task 3+.
 	# Appended at the END so every previously-saved type keeps its integer.
 	SPLITTER,
+	# Belt Logistics Session 1 Task 2: the underground belt pair. Entry and
+	# exit are TWO enum entries — they tick and draw differently, which is
+	# the axis this registry dispatches on — sharing the UNDERGROUND_TYPES
+	# predicate below the way the pole tiers share POLE_TYPES. 1×1,
+	# rotatable, belt-family ground rules (same overlays as BELT, walkable).
+	# Task 2 ships rows + stub make/draw ONLY: pairing scan, tunnel slots,
+	# and tick membership are Task 5; the ramp glyph is Task 6.
+	# Appended at the END so every previously-saved type keeps its integer.
+	UNDERGROUND_BELT_ENTRY,
+	UNDERGROUND_BELT_EXIT,
 }
 
 const DATA: Dictionary = {
@@ -799,6 +809,32 @@ const DATA: Dictionary = {
 		"walkable": true,
 		# No slot_layout — passive belt infrastructure, same as BELT/PIPE.
 	},
+	Type.UNDERGROUND_BELT_ENTRY: {
+		"name": "Underground Belt Entry",
+		"swatch_color": Color(0.24, 0.24, 0.30),    # belt-metal, sunk dark
+		"footprint": Vector2i(1, 1),
+		# Belt-family ground rules: same overlays as BELT.
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		# The entry faces a direction — its dir is where the tunnel runs.
+		"supports_direction": true,
+		"player_drainable": false,
+		# Walkable like BELT — the player walks over belt-level logistics.
+		"walkable": true,
+		# No slot_layout — passive belt infrastructure, same as BELT/PIPE.
+	},
+	Type.UNDERGROUND_BELT_EXIT: {
+		"name": "Underground Belt Exit",
+		"swatch_color": Color(0.36, 0.36, 0.30),    # belt-metal, surfacing pale
+		"footprint": Vector2i(1, 1),
+		# Belt-family ground rules: same overlays as BELT.
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		# The exit faces a direction — its dir is where items resurface.
+		"supports_direction": true,
+		"player_drainable": false,
+		# Walkable like BELT — the player walks over belt-level logistics.
+		"walkable": true,
+		# No slot_layout — passive belt infrastructure, same as BELT/PIPE.
+	},
 	Type.WATER_WHEEL: {
 		"name": "Water Wheel",
 		"swatch_color": Color(0.40, 0.55, 0.65),    # wet wood-teal
@@ -889,6 +925,18 @@ const POLE_TYPES: Dictionary = {
 	Type.POWER_POLE: true,
 	Type.MEDIUM_POLE: true,
 	Type.SUBSTATION: true,
+}
+
+## The underground belt pair — entry and exit are distinct enum values (they
+## tick and draw differently), and this predicate is the single shared "is
+## part of an underground belt" answer, mirroring POLE_TYPES above. Task 5's
+## pairing scan filters on this set; a tier or variant added to the pair must
+## be added here by hand or the scan silently never finds it.
+##
+## Dictionary-as-set (Godot 4 has no built-in Set); values are ignored.
+const UNDERGROUND_TYPES: Dictionary = {
+	Type.UNDERGROUND_BELT_ENTRY: true,
+	Type.UNDERGROUND_BELT_EXIT: true,
 }
 
 static func name_of(t: int) -> String:
@@ -1147,6 +1195,14 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			# orientation. Splitter.gd, tick, and post_tick_one membership are
 			# Task 3+ — nothing here may grow behaviour before then.
 			return Building.new(Type.SPLITTER, pos, {"dir": dir})
+		Type.UNDERGROUND_BELT_ENTRY:
+			# Stub (Task 2): orientation only. Pairing, tunnel slots, and tick
+			# membership are Task 5 — nothing here may grow behaviour before then.
+			return Building.new(Type.UNDERGROUND_BELT_ENTRY, pos, {"dir": dir})
+		Type.UNDERGROUND_BELT_EXIT:
+			# Stub (Task 2): orientation only. Pairing, tunnel slots, and tick
+			# membership are Task 5 — nothing here may grow behaviour before then.
+			return Building.new(Type.UNDERGROUND_BELT_EXIT, pos, {"dir": dir})
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1279,6 +1335,13 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			var rect_sp: Rect2 = Rect2(world_pos, Vector2(tile_size * fp_sp.x, tile_size * fp_sp.y))
 			canvas.draw_rect(rect_sp, DATA[Type.SPLITTER]["swatch_color"], true)
 			canvas.draw_rect(rect_sp, _MULTITILE_BORDER_COLOR, false, 2.0)
+		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT:
+			# Stub draw (Task 2): a flat 1×1 plate in the pair's swatch colour
+			# so a placed entry/exit is visible and cell-honest. The ramp glyph
+			# and the dashed pair-indicator pass are Task 6's job.
+			var rect_ug: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
+			canvas.draw_rect(rect_ug, DATA[b.type]["swatch_color"], true)
+			canvas.draw_rect(rect_ug, _MULTITILE_BORDER_COLOR, false, 2.0)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.

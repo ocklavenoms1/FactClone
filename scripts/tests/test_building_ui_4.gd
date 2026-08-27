@@ -97,6 +97,11 @@ static func run(parent: Node) -> Dictionary:
 		# pulled forward from Task 2): belt-family passive infrastructure,
 		# no slot_layout — same standing as BELT/PIPE above.
 		Buildings.Type.SPLITTER,
+		# The underground belt pair joined in Belt Logistics Session 1 Task 2:
+		# belt-family passive infrastructure, no slot_layout — same standing
+		# as BELT/SPLITTER above.
+		Buildings.Type.UNDERGROUND_BELT_ENTRY,
+		Buildings.Type.UNDERGROUND_BELT_EXIT,
 	]
 	for type_value in Buildings.DATA.keys():
 		var t: int = int(type_value)
