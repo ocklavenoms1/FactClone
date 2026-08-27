@@ -73,6 +73,15 @@ unpaired entry draws a distinct marker — dimmed stub-line, red mouth, or a Q-i
 line naming the nearest same-dir exit and its distance. Belongs to the next arc session,
 not a hotfix.
 
+**Second instance, same gate (live-traced):** an exit whose beyond-cell holds no belt
+jams the tunnel at its front slot — correct end-of-line behaviour, invisible underground.
+Cause was the walk's own re-pair instruction: it moved the exit one tile west and not the
+output belt, leaving a one-cell gap. Trace: pairing healthy, dispatch healthy, items
+advance through lane and tunnel, stall at the front with the beyond-cell empty; placing
+one belt in the gap restores flow (probe-verified). The candidate marker above should
+cover BOTH unpaired-entry and blocked-exit — the tunnel's failure states all signal by
+omission today.
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)
