@@ -1070,7 +1070,9 @@ rectangles concealed for the whole life of the project, and sprite transparency 
 Decide whether depleted soil should read through under a building at all — that is a design
 question, not a bug.
 
-**Contract line worth adding anyway:** shadow layers are **pure black, alpha-only, no baked
+**Contract line — kept through the reversal, now enforced art-side:** shadow purity is a
+build gate in the art pipeline with a **1/255 per-channel tolerance** for unpremultiply
+rounding, so our recorded contract and their gate agree. Shadow layers are **pure black, alpha-only, no baked
 colour**. This is currently *true* of all three assets and now measured, so write it down as
 a requirement before asset four rather than discover it violated at asset nineteen.
 
@@ -1106,6 +1108,24 @@ three.** Re-measured from the files 2026-08-24: `chest.png` is empty at y=59..63
 `power_pole.png` at y=89..95 (7), and `smelter_idle.png` / `smelter_smelting.png` at **0
 rows** — their bottom row carries a stray pixel at alpha 3/255. The original claim put
 `smelter_idle.png` at y=88..95 when y=88 is solid at alpha 255.
+
+**⚠ REVERSED 2026-08-26 — the designer's rebuttal holds and the reasoning below was a
+misread.** The transparent bottom rows are **depth information**, not padding: a building
+does not necessarily fill its tile front-to-back. The chest's plan is 1.549:1 — 0.58 tiles
+deep, centred, sitting ~0.21 tiles back from the tile's front edge: **predicted 6.71 px of
+empty rows, measured 7.** The pole predicts 9.80, measures 10. The smelter's 2-vs-3
+discrepancy is one soft row falling either side of the alpha-8 threshold. **The depth was
+in the JSON all along** — `normalized_extent_tiles[1]` (chest: 0.5809) — the record read on
+the probe's first day already held the answer.
+
+`anchor_px` is a **ground-contact point, not ink**: placement is
+`footprint_bottom_centre − anchor_px` and nothing else, so the transparent rows are
+irrelevant to it. The anchors were verified empirically art-side — a marker quad covering
+exactly the footprint through the identical camera and downsample path, within a pixel on
+both axes for all three assets. The "no test that can catch it" fear below is answered by
+`test_sprite_manifest.gd` (1c): the PNG's empty rows must agree with its own JSON's depth
+within one row, so a mismatched export reddens. The paragraphs below are kept as the record
+of the misread.
 
 `anchor_px` is `[sprite_w/2, sprite_h]`, so the anchor names a row with no artwork in it.
 Geometrically self-consistent, but "sprite bottom edge" and "where the object visually
@@ -1151,13 +1171,19 @@ importer does its job (compression, mipmaps, platform variants) instead of runti
 `Image.load()`, and the export gap closes as a side effect. The extra hop is trivial next to
 maintaining a runtime loading path forever. **Not yet implemented.**
 
-**`ground_contact_px` — zero-padding mandate, not a schema field. DECIDED.** Sprites must
-have no transparent bottom padding, so `anchor_px.y == sprite_h` is also the contact row. The
-loader enforces it: the bottom row must carry artwork, fail loud otherwise. Rationale: a
-schema field nobody can verify is worse than a constraint the loader checks. **LANDED — see
-below.**
+**`ground_contact_px` / zero-padding — DECIDED, LANDED, then ⚠ REVERSED 2026-08-26.**
+Both options were wrong: the empty rows are depth encoding (see the reversal note under
+finding 3), `anchor_px` already solves placement as a ground-contact point, and the
+zero-padding mandate **would have been the defect it was meant to prevent** — every
+building drawn hard against its tile's front boundary, each by a different per-asset error,
+invisible to any test; unsatisfiable once 4-way rotation ships (one cell unioned across
+four yaws cannot be flush for all of them); and front-edge overhang inexpressible. The
+loader gate is removed; the three assets load unchanged; `test_sprite_manifest.gd` (14)
+pins padded layers as LOADABLE and (1c) checks the depth encoding against each asset's own
+JSON. The alpha-8 threshold is kept — designer-endorsed as the AA-noise floor — with its
+remaining use being exactly that (1c) diagnostic.
 
-### Zero-padding rule — LANDED, and ⚠ ALL THREE ASSETS NEED RE-EXPORT BEFORE THE SPRITE PATH RENDERS AGAIN
+### Zero-padding rule — LANDED 2026-08-25, REVERSED 2026-08-26 (no re-export needed; the table below is now a DEPTH record)
 
 `sprite_library.gd` (`BOTTOM_ROW_MIN_ALPHA`, `empty_bottom_rows`, the
 `require_ground_contact` arm of `_load_texture`) now rejects any body master or shadow whose
@@ -1567,7 +1593,11 @@ went on to commit that exact failure:
    purpose is knowing what is already tracked.
 3. **`git checkout -- <path>` was used one command after writing the rule against it**,
    reverting the very edit the rule existed to protect.
-4. **The zero-padding rule would have grandfathered the smelter.** The rule was adopted
+4. **The zero-padding rule would have grandfathered the smelter** — and the whole rule was
+   later REVERSED (2026-08-26): its premise, that empty bottom rows were padding, was a
+   misread of depth encoding. The instance stands as recursion history — the rule's first
+   form failed its own target class — and gains a second layer: a rule can survive
+   mutation-testing of its mechanism while its premise is wrong. The rule was adopted
    specifically to close the silent-compensation shape, and as first specified — "the
    bottom row must contain at least one non-zero alpha pixel" — both smelter masters
    passed on a single stray pixel at **alpha 3 of 255**. Absence indistinguishable from
@@ -2043,13 +2073,26 @@ on `main`, verified by commit) governs the *closing* half; this protocol governs
 
 **Pattern:** when the user (or a prior design pass) locks in an architectural decision before implementation, and the implementation includes a "verify before code" reconnaissance step, the audit can produce findings that invalidate the locked decision's premise. **Reversing during the design-pass writeup is correct.** It's cheaper than shipping the bad abstraction and removing it later (10× cost differential at typical session-cascade depth).
 
-**Six reversals so far:**
+**Seven reversals so far:**
 1. **`session-mining-manual` — deposit-overlay rule reversal.** Original: "overlay obscures deposit, RMB-clear reveals." Reversed to: "overlay placement BLOCKED on deposits." The UX trap (player accidentally paves over and loses the deposit) was visible in playtest within minutes.
 2. **`session-building-ui-3` — fluid_indicator extracted to shared helper BEFORE ProcessorPanel extension.** User pushback added a 3a→3b→3c sequencing: extract from MixerPanel first, refactor MixerPanel to use shared, THEN extend ProcessorPanel. Avoided two divergent fluid renderers.
 3. **`session-building-ui-4` — ExtractionPanel intermediate deferred.** Reconnaissance found harvester (3×3 coverage) and planter (no coverage, int-typed output) share <30% layout. Forcing them into one base class would mean "if-has-coverage" branches with no real abstraction value.
 4. **`session-soil-exhaustion-1` (in-flight Session 2 attempt) — region-regen partial work salvaged, region-scoped logic rewritten.** Mid-session pivot from region-regen to per-tile rewrite preserved scope-agnostic UI scaffolding (~30 lines).
 5. **`session-soil-exhaustion-2` — region-based soil → per-tile soil.** **The most expensive reversal in the project.** Region scope (32×32 = 1024 tiles per planter) decoupled cause from effect; player UX in playtest was disconnected. Per-tile (3×3 = 9 tiles) localizes the effect. Caught ~1 hour after Session 1 ship; would have cascaded across Sessions 3-5 (fertilizer chain, wasteland, legumes — all fundamentally different under per-tile vs region scope). Estimated 10× cost if caught later.
 6. **`session-zoom-to-map` — separate-render approach → wheel-trigger of existing M-key modal.** ~2 sessions of work fully discarded (`MapBackdrop` Node2D + cross-fade alpha math + dynamic resolution-independent `_zoom_min()` + click-to-pan with smooth lerp + click-vs-drag distinction + dual-texture plan). Replaced with ~30 lines: at the existing zoom floor, one more wheel-down opens the existing M-key modal. Triggered by user clarification at PAUSE 2 manual smoke after diagnostic instrumentation confirmed the cross-fade math was correct but solving the wrong problem. Discarded cleanly via `git restore . && git clean -fd` from clean HEAD; zero salvage attempted because every line of the discarded work encoded the wrong abstraction. **Lesson surfaced:** "exactly like Factorio" is a reference, not a spec — see `Protocol: unpack reference-style requirements before design pass` below.
+
+7. **Zero-padding rule (art contract) — constraint derived from a misread, reversed on the
+   designer's rebuttal (2026-08-26).** The transparent bottom rows the rule rejected are
+   depth information — chest plan 1.549:1 → 0.58 tiles deep → predicted 6.71 px empty,
+   measured 7; pole 9.80 → 10 — and the rule would have shipped a **subtler version of the
+   bug it targeted**: every building flush against its tile's front boundary, each by a
+   different per-asset error, invisible to any test; unsatisfiable under 4-way rotation.
+   **Same shape as the MST re-approval: confident reasoning against a record that already
+   had the answer — except here the record was the JSON** (`normalized_extent_tiles[1]`,
+   read on the probe's first day and not consulted when the constraint was derived). The
+   constraint survived mutation-testing of its *mechanism* while its *premise* was wrong —
+   mutation proves a rule enforces what it says, never that what it says is right. The
+   people who made the assets measured it wrong in an afternoon.
 
 **Protocol:**
 - Always honor a "verify before implementation" step in the implementation order — don't skip it.
