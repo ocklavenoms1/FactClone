@@ -124,7 +124,8 @@ static func make_exit(pos: Vector2i, dir: int = Belt.DIR_E) -> Building:
 ##
 ## CONTRACT: this function is the ONLY answer to "which exit does this
 ## entry feed?". Every caller — try_accept's refuse-when-unpaired gate,
-## both tick passes, info_lines, and any future renderer (Task 6's dashed
+## both tick passes, info_lines, and the renderer's dedicated indicator
+## pass (GridWorld._draw_underground_pair_indicators, Task 6's dashed
 ## tunnel indicator) — must call THIS, never re-derive the scan from a
 ## distance check. Two derivations drift, and the divergence is invisible
 ## until a tunnel draws where no items flow — the same failure
@@ -335,3 +336,68 @@ static func info_lines(b: Building, world = null) -> Array:
 		else:
 			lines.append("UNPAIRED — refusing input (upstream will jam)")
 	return lines
+
+# ---------- visual ----------
+
+## Task 6. Entry vs exit must be DISTINGUISHABLE at a glance (a named
+## PAUSE-gate item): both are belt-dark plates speaking the belt chevron
+## language, but the ENTRY is a ramp INTO the ground — chevrons running
+## toward a dark tunnel mouth on its FRONT edge, ramp walls converging into
+## it — and the EXIT the mirrored ramp OUT: the mouth on its REAR edge, ramp
+## walls spreading from it toward where items resurface. All geometry is
+## built on the flow axis from Buildings.dir_of, so both glyphs stay
+## direction-readable under rotation, and the bright chevron sits nearest
+## where items are headed (into the mouth on the entry, off the emit edge on
+## the exit — the belt's own bright-front convention). Draws strictly inside
+## the 1x1 footprint; the dashed pair-indicator between the halves is
+## grid_world's DEDICATED pass, never drawn here (the z-order finding).
+static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
+	var ts: float = float(tile_size)
+	var rect: Rect2 = Rect2(world_pos, Vector2(ts, ts))
+	canvas.draw_rect(rect, Buildings.DATA[b.type]["swatch_color"], true)
+	canvas.draw_rect(rect, Belt.TRIM_COLOR, false, 1.5)
+
+	var d: int = Buildings.dir_of(b)
+	if b.type == Buildings.Type.UNDERGROUND_BELT_ENTRY:
+		# Mouth on the front edge; ramp walls converge into it; chevrons
+		# walk the rear half toward it, bright last.
+		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.66, 1.00, 0.10, 0.90), Belt.TRIM_COLOR)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.10), _axis_point(world_pos, ts, d, 0.66, 0.24), Belt.ARROW_COLOR, 1.5)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.90), _axis_point(world_pos, ts, d, 0.66, 0.76), Belt.ARROW_COLOR, 1.5)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.16, 0.5), d, ts, Belt.ARROW_COLOR)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.44, 0.5), d, ts, Belt.ARROW_BRIGHT)
+	else:
+		# Mirrored: mouth on the rear edge; ramp walls spread out of it;
+		# chevrons walk the front half away from it, bright at the emit edge.
+		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.00, 0.34, 0.10, 0.90), Belt.TRIM_COLOR)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.24), _axis_point(world_pos, ts, d, 0.94, 0.10), Belt.ARROW_COLOR, 1.5)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.76), _axis_point(world_pos, ts, d, 0.94, 0.90), Belt.ARROW_COLOR, 1.5)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.56, 0.5), d, ts, Belt.ARROW_COLOR)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.84, 0.5), d, ts, Belt.ARROW_BRIGHT)
+
+## Map flow-axis coordinates into world pixels inside this 1x1 tile:
+## t_along runs 0 (rear edge, where the feeder pushes in) to 1 (front edge,
+## the tunnel direction) along dir; t_across runs 0..1 across it.
+static func _axis_point(world_pos: Vector2, ts: float, d: int, t_along: float, t_across: float) -> Vector2:
+	var along: Vector2 = Vector2(Belt.DIR_VECS[d])
+	var across: Vector2 = Vector2(-along.y, along.x)
+	var centre: Vector2 = world_pos + Vector2(ts, ts) * 0.5
+	return centre + along * ((t_along - 0.5) * ts) + across * ((t_across - 0.5) * ts)
+
+## An axis-aligned (in flow coordinates) quad, as polygon points.
+static func _axis_quad(world_pos: Vector2, ts: float, d: int, a0: float, a1: float, c0: float, c1: float) -> PackedVector2Array:
+	return PackedVector2Array([
+		_axis_point(world_pos, ts, d, a0, c0),
+		_axis_point(world_pos, ts, d, a1, c0),
+		_axis_point(world_pos, ts, d, a1, c1),
+		_axis_point(world_pos, ts, d, a0, c1),
+	])
+
+## One belt-language chevron: tip along `d`, wings across.
+static func _draw_chevron(canvas: CanvasItem, centre: Vector2, d: int, ts: float, color: Color) -> void:
+	var along: Vector2 = Vector2(Belt.DIR_VECS[d])
+	var across: Vector2 = Vector2(-along.y, along.x)
+	var size: float = ts * 0.16
+	var tip: Vector2 = centre + along * size
+	canvas.draw_line(centre + across * size, tip, color, 1.5)
+	canvas.draw_line(centre - across * size, tip, color, 1.5)

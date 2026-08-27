@@ -1883,6 +1883,12 @@ func _draw() -> void:
 	# Power wire pass — between buildings and post-pass indicators so wires
 	# render on the building layer but below hover/harvest UI.
 	_draw_power_wires()
+	# Underground pair-indicator pass — immediately after the wires so the
+	# dashed tunnel line shares their defined layer (the z-order finding:
+	# cross-tile drawing never rides the per-building loop).
+	# test_underground_indicator_contract.gd pins both the placement and the
+	# predicate call at grep level.
+	_draw_underground_pair_indicators()
 
 	# Harvest progress arc — yellow arc on the targeted tile, fills 0 → TAU
 	# clockwise as the next tick approaches. Visual feedback for "this tile
@@ -2055,3 +2061,34 @@ func _pole_wire_anchor(anchor: Vector2i) -> Vector2:
 	if fp.y == 1:
 		return Vector2(x, float(anchor.y) * float(TILE_SIZE) + float(TILE_SIZE) * MAST_WIRE_Y)
 	return Vector2(x, (float(anchor.y) + float(fp.y) * 0.5) * float(TILE_SIZE))
+
+## Dashed tunnel indicator between each paired underground entry and its
+## exit — Task 6 of Belt Logistics Session 1 (design record Q9).
+##
+## A DEDICATED pass beside _draw_power_wires, never the per-building loop:
+## anything spanning tiles inside that loop inherits the z-order finding
+## (insertion-order layering), while a pass has a defined layer — on the
+## buildings, under the hover/harvest UI, same as the wires.
+##
+## THE PAIRING IS ANSWERED ONLY BY Underground.paired_exit — this function is
+## the predicate's contracted second caller (its docstring names the
+## renderer). Re-deriving the scan from a distance check here is exactly the
+## drift the contract forbids: two derivations diverge, and a tunnel then
+## draws where no items flow — the renderer-vs-BFS divergence
+## poles_connected exists to prevent. An UNPAIRED entry draws NOTHING: a
+## broken pair must read as a jam (the Q7 backpressure decision, and the
+## arc's PAUSE-gate broken-pair check), never as a live tunnel.
+func _draw_underground_pair_indicators() -> void:
+	const DASH_COLOR: Color = Color(0.80, 0.78, 0.55, 0.85)   # pale straw — reads over grass and stone
+	const DASH_WIDTH: float = 2.0
+	const DASH_LEN: float = 6.0
+	for anchor_key in buildings:
+		var b: Building = buildings[anchor_key]
+		if b.type != Buildings.Type.UNDERGROUND_BELT_ENTRY:
+			continue
+		var exit_b: Building = Underground.paired_exit(b, self)
+		if exit_b == null:
+			continue   # unpaired: no line — see the header
+		var half: Vector2 = Vector2(TILE_SIZE, TILE_SIZE) * 0.5
+		draw_dashed_line(tile_to_world_origin(b.anchor) + half,
+			tile_to_world_origin(exit_b.anchor) + half, DASH_COLOR, DASH_WIDTH, DASH_LEN)

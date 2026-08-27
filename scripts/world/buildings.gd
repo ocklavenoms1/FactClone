@@ -1344,23 +1344,15 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 		Type.ACCUMULATOR:
 			Accumulator.draw(b, canvas, world_pos, tile_size)
 		Type.SPLITTER:
-			# Stub draw (Task 1 pull-forward): a flat brass plate over the
-			# building's ACTUAL (orientation-aware) footprint with a heavy
-			# trim, so a placed splitter is visible and cell-honest before
-			# Task 3 ships the real visual. Deliberately uses the instance
-			# footprint — drawing the canonical rect for a rotated splitter
-			# would paint a cell the building does not occupy.
-			var fp_sp: Vector2i = footprint_of_building(b)
-			var rect_sp: Rect2 = Rect2(world_pos, Vector2(tile_size * fp_sp.x, tile_size * fp_sp.y))
-			canvas.draw_rect(rect_sp, DATA[Type.SPLITTER]["swatch_color"], true)
-			canvas.draw_rect(rect_sp, _MULTITILE_BORDER_COLOR, false, 2.0)
+			# Task 6 replaced the Task-1 stub plate: chevrons mark the input
+			# edge and both output edges, rotated via the port accessors.
+			Splitter.draw(b, canvas, world_pos, tile_size)
 		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT:
-			# Stub draw (Task 2): a flat 1×1 plate in the pair's swatch colour
-			# so a placed entry/exit is visible and cell-honest. The ramp glyph
-			# and the dashed pair-indicator pass are Task 6's job.
-			var rect_ug: Rect2 = Rect2(world_pos, Vector2(tile_size, tile_size))
-			canvas.draw_rect(rect_ug, DATA[b.type]["swatch_color"], true)
-			canvas.draw_rect(rect_ug, _MULTITILE_BORDER_COLOR, false, 2.0)
+			# Task 6 replaced the Task-2 stub plates: ramp-into-ground glyph
+			# on the entry, mirrored ramp-out on the exit, both
+			# direction-readable. The dashed pair-indicator is grid_world's
+			# DEDICATED pass beside _draw_power_wires, not drawn here.
+			Underground.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.

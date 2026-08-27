@@ -205,3 +205,45 @@ static func info_lines(b: Building) -> Array:
 		"Lane: %d / %d" % [occupied, Belt.SLOTS_PER_TILE],
 		"Next branch: %s" % ("LEFT" if int(b.state.get("next_out", 0)) == 0 else "RIGHT"),
 	]
+
+# ---------- visual ----------
+
+## Task 6. Brass plate over the ROTATED footprint, with the belt chevron
+## language marking the three ports of the T: grey chevrons entering through
+## the INPUT EDGE on the rear cell (pointing along the flow, into the body)
+## and one BRIGHT chevron leaving through each OUTPUT EDGE on the front cell
+## (the belt's own front-chevron colour, pointing out of the body — bright is
+## where items go, exactly as on a belt). Every position comes from the port
+## accessors above, so the glyphs rotate with dir and CANNOT disagree with
+## where try_accept and post_tick actually move items. Draws strictly inside
+## the footprint — the only sanctioned cross-tile drawing in this arc is
+## grid_world's dedicated pair-indicator pass (the z-order finding).
+static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
+	var fp: Vector2i = Buildings.footprint_of_building(b)
+	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size * fp.x, tile_size * fp.y))
+	canvas.draw_rect(rect, Buildings.DATA[Buildings.Type.SPLITTER]["swatch_color"], true)
+	canvas.draw_rect(rect, Belt.TRIM_COLOR, false, 1.5)
+
+	var d: int = Buildings.dir_of(b)
+	var ts: float = float(tile_size)
+	var rear_centre: Vector2 = world_pos + (Vector2(rear_cell(b) - b.anchor) + Vector2(0.5, 0.5)) * ts
+	var front_centre: Vector2 = world_pos + (Vector2(front_cell(b) - b.anchor) + Vector2(0.5, 0.5)) * ts
+	# INPUT: two grey chevrons walking in from the input edge along the flow.
+	_draw_chevron(canvas, rear_centre - _dirv(d) * ts * 0.30, d, ts, Belt.ARROW_COLOR)
+	_draw_chevron(canvas, rear_centre, d, ts, Belt.ARROW_COLOR)
+	# OUTPUTS: one bright chevron just inside each branch edge, pointing out.
+	for out_idx in 2:
+		var od: int = out_dir(b, out_idx)
+		_draw_chevron(canvas, front_centre + _dirv(od) * ts * 0.30, od, ts, Belt.ARROW_BRIGHT)
+
+static func _dirv(d: int) -> Vector2:
+	return Vector2(Belt.DIR_VECS[d])
+
+## One belt-language chevron: tip along `d`, wings across.
+static func _draw_chevron(canvas: CanvasItem, centre: Vector2, d: int, tile_size: float, color: Color) -> void:
+	var along: Vector2 = _dirv(d)
+	var across: Vector2 = Vector2(-along.y, along.x)
+	var size: float = tile_size * 0.18
+	var tip: Vector2 = centre + along * size
+	canvas.draw_line(centre + across * size, tip, color, 1.5)
+	canvas.draw_line(centre - across * size, tip, color, 1.5)

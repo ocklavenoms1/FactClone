@@ -165,6 +165,12 @@ const TESTS: Array = [
 	# (arrival dues unchanged because the "tick" field round-trips),
 	# partial-occupancy position literals, and the v18 fields-absent load.
 	preload("res://scripts/tests/test_belt_logistics_save_roundtrip.gd"),
+	# Belt Logistics Session 1 Task 6 (drawing): the pair-indicator's two
+	# structural obligations, pinned at grep level because headless cannot
+	# execute a _draw body — the dedicated pass sits immediately after
+	# _draw_power_wires (the defined layer), and it answers pairing ONLY via
+	# Underground.paired_exit (the predicate's contracted second caller).
+	preload("res://scripts/tests/test_underground_indicator_contract.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
