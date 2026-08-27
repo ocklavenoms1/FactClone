@@ -31,6 +31,12 @@ inserter tier). Belts only; underground pipes are a follow-up.
 - The z-order finding stands; nothing in this arc may enlarge it or quietly fix it.
 - The measured handoff trajectory (`0,1,2,4,5,6,8,9,10,11`; front slot never a resting position) must generalise through a splitter — `test_belt.gd`'s pattern extends, and any deviation is a design change to be said out loud.
 
+## PAUSE-gate checklist (accumulating; run at this arc's first visual gate)
+
+1. **R-key rotate on a placed splitter → expect the refusal toast** ("changes shape when
+   rotated — remove and re-place it instead"). The in-place-rotate path lives in
+   `main.gd` and cannot be tested headless; Task 1 guarded it and this is its only gate.
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)
