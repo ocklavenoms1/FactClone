@@ -1473,6 +1473,21 @@ correct.
    than being pushed to, so a suite can run a belt into a chest and never touch pass 2.
    Now pinned by `test_tick_loop_wiring.gd`.
 
+### Fifth instance (2026-08-27, named at design time): GUARDED BY AN EMERGENT PROPERTY
+
+The electric-processor design keeps fuel fields present-but-unused (the
+`Burner.make_state()` merge, uniform state shape per tier) and keeps the electric variants
+off the fuel path by `is_electric` gates — but part of what protects today is an ABSENCE:
+no `"fuel"` slot in the electric DATA rows means nothing can deliver fuel, and a reader's
+bare state access is what would make a broken shape loud. **The absence that currently
+protects is one idiom-consistent edit from becoming the absence that bills nothing** —
+adding a defensive `.get()` default (this codebase's own recommended idiom!) at the wrong
+site converts a loud crash into silently-zero fuel accounting. The guard therefore ships
+structural: a shape assertion at `make()` pinning the electric state key set as a literal,
+plus the named mutation — add the idiom-consistent `.get()` and the suite must STILL
+redden. Protection must not rest on a crash-by-absence, because the crash is one polite
+refactor away from silence.
+
 ### The detection question
 
 **For each system: if it silently stopped running, what would notice — and how would the
