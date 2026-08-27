@@ -60,6 +60,19 @@ from live play: the splitter's T-junction shape (body-along-flow, lateral branch
 gap-0-does-not-pair (adjacent exit never pairs), and the exit-cell discount (crossing
 costs gap+1 belt-tiles for gap+2 cells of footprint).
 
+### Gate finding (PAUSE 1, 2026-08-27): the unpaired state signals only by omission
+
+Reported as a check-3 anomaly; diagnosed as the rig's deliberate gap-4 starting state —
+entry (-18,-9) E, exit (-13,-9) E, distance 5, out of range; refuse-when-unpaired doing
+its job, predicate verified healthy at k=2 and k=4 against the same save. **The finding
+is UX, and it was predicted in the diagnostic brief itself:** an out-of-range pair is
+visually indistinguishable from a working one except by the ABSENCE of the dashed
+indicator — signalling by omission, the silent-compensation shape in UX form. A player
+who has never seen the line does not know one is missing. Candidate (not decided): an
+unpaired entry draws a distinct marker — dimmed stub-line, red mouth, or a Q-inspect
+line naming the nearest same-dir exit and its distance. Belongs to the next arc session,
+not a hotfix.
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)
