@@ -1907,6 +1907,36 @@ restarts correctly; on that basis the finding was nearly written off as false. B
 Measured: 400 ticks, `fuel_buffer` 8, four copper ore untouched on the belt, status
 "NO FUEL" — the title, word for word, by a mechanism the description never mentions.
 
+**⚠ A THIRD CLASS, and the running ratio (as of 2026-08-26).**
+
+**WRONG-BY-SUPERVENING-DECISION** — a prescription that was *correct when written* and was
+invalidated by a decision taken later. #32's move-to-tick item is the first instance: sound
+under the audit's premises, forbidden the day #31 closed WONTFIX and pinned the three
+systems to wall-clock. Nothing about the prescription's own text betrays this — it reads as
+well today as the day it was written — **the tracker is the only thing that would tell
+you.** So prescription verification now has a third question alongside "does it run in this
+environment" and "what does it not assert": **"has any decision since made this
+forbidden?"** The decisions that have already changed what is permissible since the audit
+was written: the R1/#31 WONTFIX (no re-clocking soil/fertilizer/regrowth), the #16
+extraction (the hover predicate is a tested method now, not an inline block), and the #21
+narrowing (fresh-world fallthrough is sanctioned for two of its three cases).
+
+**The ledger, with provenance (each classification is recorded in the tracker at its
+finding):** RIGHT — #29 (taken nearly as written), #28 (its Fix section had already been
+corrected in place), #38 (verified correct during its cost-check, unimplemented). WRONG —
+#22 (permanent wedge), #35 (deletes live triggers), #16 (untestable as prescribed), #26/R5
+(correct given its premise; the premise was a wrong comment), #7 (would have made wasteland
+organically unreachable), #32's item 3 (supervening, above). SHORT — #25 (blind to
+`time_ticks`), #32's items 1/2/4 (improve the cited 23-32% while the dominant cost is
+unreachable). PARTIAL — #12 (its `error_message` signalling was unimplementable under the
+API's own convention), #21 (over-broad, narrowed on its own conventions).
+
+Counted over the prescriptions actually put to the test: **roughly one in three survived
+contact unchanged.** The exact fraction moves with how you bucket the partials — the
+stable conclusion is that **following a fix text unverified is a coin flip weighted
+against you**, and 46 findings remain, every one carrying a prescription written before
+all three of the decisions above.
+
 **⚠ TWO PRESCRIPTION CLASSES — and the short one is more dangerous than the wrong one.**
 
 - **WRONG prescriptions** — #22 (frame stamp that wedges the Esc chain), #35 (delete-on-ship
