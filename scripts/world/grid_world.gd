@@ -1708,31 +1708,46 @@ func _draw() -> void:
 	var min_tile: Vector2i = world_to_tile(view_min) - Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 	var max_tile: Vector2i = world_to_tile(view_max) + Vector2i(VIEW_PADDING_TILES, VIEW_PADDING_TILES)
 
-	# Terrain + resources, all in one pass over tiles for cache locality.
+	# Terrain + resources, one pass over the VISIBLE RECT with tiles.get()
+	# lookups — NOT over the tiles dict with per-entry culling (audit #30).
+	# Measured 2026-08-26 (windowed off-screen run, --fixed-fps 60, seed 42,
+	# debug build): the dict walk cost 980-1,506 µs/frame — 15,641 entries at
+	# ~0.063 µs each, of which only 21-429 were visible — ~6% of a 60 fps
+	# frame budget from game start. The rect walk costs ~90 µs at default
+	# zoom (49×31 cells incl. padding) and ~277 µs at the 0.85 zoom floor
+	# (79×49), and is O(view) however large the world or the factory grows.
+	# The two enumerations draw the same set (a tile is drawn iff it is in
+	# `tiles` AND inside the rect), and the reordering cannot show on screen:
+	# every terrain draw — base rect, overlay rect, ore inset, tree canopy at
+	# max 0.495·TILE from center (_draw_tree) — stays inside its own tile
+	# rect, so no two tiles' draws overlap. Verified by six-frame md5
+	# comparison, ticks paused, dict walk vs this loop: byte-identical PNGs.
+	# The rect is bounded by the zoom floor; the dict is seeded with ~15k
+	# entries by WorldGenerator, so visible ≪ total at every reachable zoom
+	# and the inversion wins ~4-11× today, more as the world grows.
 	# Layer order per tile: base → overlay → resource_node (if no overlay).
 	# Resource hidden under player overlay paint; revealed on RMB-clear via
 	# set_overlay/clear_tile preserving resource_node through modifications.
-	for tile_key in tiles:
-		var tp: Vector2i = tile_key
-		if tp.x < min_tile.x or tp.x > max_tile.x:
-			continue
-		if tp.y < min_tile.y or tp.y > max_tile.y:
-			continue
-		var t: Tile = tiles[tp]
-		var rect: Rect2 = Rect2(tp.x * TILE_SIZE, tp.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-		# Base layer: only draw if non-default (default grass is the canvas background).
-		if t.base != Terrain.DEFAULT_BASE:
-			draw_rect(rect, Terrain.base_color(t.base), true)
-		# Overlay layer: draw if present.
-		if t.overlay != Terrain.Overlay.NONE:
-			draw_rect(rect, Terrain.overlay_color(t.overlay), true)
-		# Resource layer: draw deposit/tree.
-		# Under the "no overlay on deposits" invariant, t.overlay is always
-		# NONE when t.resource_node != NONE — but the defensive check stays
-		# (cheap; future-proof if rule changes).
-		# (Water tiles never have resource_node; defensive base check too.)
-		if t.overlay == Terrain.Overlay.NONE and t.resource_node != ResourceNodes.Type.NONE and t.base != Terrain.Base.WATER:
-			_draw_resource(t.resource_node, rect, tp)
+	for draw_y in range(min_tile.y, max_tile.y + 1):
+		for draw_x in range(min_tile.x, max_tile.x + 1):
+			var tp: Vector2i = Vector2i(draw_x, draw_y)
+			var t: Tile = tiles.get(tp)
+			if t == null:
+				continue
+			var rect: Rect2 = Rect2(tp.x * TILE_SIZE, tp.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+			# Base layer: only draw if non-default (default grass is the canvas background).
+			if t.base != Terrain.DEFAULT_BASE:
+				draw_rect(rect, Terrain.base_color(t.base), true)
+			# Overlay layer: draw if present.
+			if t.overlay != Terrain.Overlay.NONE:
+				draw_rect(rect, Terrain.overlay_color(t.overlay), true)
+			# Resource layer: draw deposit/tree.
+			# Under the "no overlay on deposits" invariant, t.overlay is always
+			# NONE when t.resource_node != NONE — but the defensive check stays
+			# (cheap; future-proof if rule changes).
+			# (Water tiles never have resource_node; defensive base check too.)
+			if t.overlay == Terrain.Overlay.NONE and t.resource_node != ResourceNodes.Type.NONE and t.base != Terrain.Base.WATER:
+				_draw_resource(t.resource_node, rect, tp)
 
 	# Soil tint pass (session-soil-exhaustion-2). Iterate sparse
 	# tile_soil_modifications and overlay a tint per tile based on its
