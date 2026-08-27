@@ -42,6 +42,24 @@ inserter tier). Belts only; underground pipes are a follow-up.
    the entry. The refusal is suite-tested; what the gate confirms is that it READS as a
    jam to a player rather than as a broken machine.
 
+3. **Round-robin alternation visible in play** — feed a splitter from a loaded belt, watch
+   consecutive items land on alternate branches. The suite pins the labelled sequence;
+   the gate confirms a player can SEE the alternation at normal zoom.
+
+4. **Span refusal at distance 4** — place an entry and an exit with a 4-tile gap, confirm
+   nothing flows and the feeder jams; move the exit to gap 3, confirm flow starts on its
+   own (re-pair is automatic, no interaction needed).
+
+5. **Entry and exit read as different buildings at a glance** (Task 6 ramp glyphs), the
+   dashed tunnel indicator connects only PAIRED ends, and the splitter's input edge and
+   two output edges are readable from the chevrons — including whether the T-junction
+   shape itself reads (bears on the open T-junction ratification).
+
+⚠ Three ratifications are OPEN at this gate and it is the right place to settle them
+from live play: the splitter's T-junction shape (body-along-flow, lateral branches),
+gap-0-does-not-pair (adjacent exit never pairs), and the exit-cell discount (crossing
+costs gap+1 belt-tiles for gap+2 cells of footprint).
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)
