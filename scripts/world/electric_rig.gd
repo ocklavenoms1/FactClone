@@ -201,103 +201,38 @@ static func plan() -> Array:
 ## the generator that stays lit in the brownout state.
 static func build(world, origin: Vector2i) -> Dictionary:
 	# ---- Phase 1: pave. ----
-	# Writing a fresh Tile does three jobs at once, and all three are needed
-	# for the rig to land on ANY world seed:
-	#   1. clears a WATER base, which can_place_building rejects outright;
-	#   2. resets resource_node to ResourceNodes.DEFAULT (Tile._init's third
-	#      default), which is what lets set_overlay past its deposit/tree
-	#      guard and stops can_place_building's own resource-node guard firing;
-	#   3. clears any stale overlay so the STONE write below is the only one.
-	# STONE and PATH are the only two overlays accepted by all five building
-	# types used here (the intersection of their requires_overlay lists);
-	# STONE is chosen for contrast against the surrounding grass. CHEST and
-	# STEAM_GENERATOR are the traps — CHEST's requires_overlay is
-	# [STONE, PATH, SOIL_TILLED] and the generator's is [STONE, PATH], neither
-	# with Overlay.NONE, so bare grass fails for both.
-	#
-	# This IS destructive: it overwrites base, overlay and resource_node across
-	# 120 tiles and discards their regrowth timers. Deliberate — it is the only
-	# way to make placement seed-independent.
-	#
-	# The direct `world.tiles[pos] =` write does not itself record into
-	# tile_modifications, but it does not need to: the set_overlay on the next
-	# line records the WHOLE tile (base, overlay AND resource_node — see
-	# grid_world.gd:347) once it has applied, so the base reset is saved too.
-	# That only holds because the Tile written here always carries Overlay.NONE,
-	# which keeps set_overlay off its `current_overlay == overlay` idempotent
-	# early return (grid_world.gd:337) — the one path that records nothing.
-	for y in range(PAVE_MIN.y, PAVE_MAX.y + 1):
-		for x in range(PAVE_MIN.x, PAVE_MAX.x + 1):
-			var pos: Vector2i = origin + Vector2i(x, y)
-			# Never repaint under someone else's building. set_overlay would
-			# refuse anyway, but the Tile.new above it would already have
-			# stripped that building's terrain out from under it.
-			if world.has_building_at(pos):
-				continue
-			world.tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE)
-			world.set_overlay(pos, Terrain.Overlay.STONE)
+	# RigSupport.pave_rect carries the shared reasoning (the fresh-Tile WATER
+	# clear, the resource_node reset, and why set_overlay's recording still
+	# captures the base write). The rig-specific fact: STONE and PATH are the
+	# only two overlays accepted by all five building types used here (the
+	# intersection of their requires_overlay lists); STONE is chosen for
+	# contrast against the surrounding grass. CHEST and STEAM_GENERATOR are
+	# the traps — CHEST's requires_overlay is [STONE, PATH, SOIL_TILLED] and
+	# the generator's is [STONE, PATH], neither with Overlay.NONE, so bare
+	# grass fails for both.
+	RigSupport.pave_rect(world, origin, PAVE_MIN, PAVE_MAX)
 
 	# ---- Phase 2: build, or ADOPT a rig that is already standing. ----
 	#
-	# Three outcomes, and telling them apart is not bookkeeping pedantry —
-	# each one wants different treatment in Phase 3:
-	#
-	#   BUILT    — every planned cell was empty and got its building. Normal.
-	#   ADOPTED  — every planned cell was ALREADY occupied by a building of
-	#              exactly the planned type, anchored exactly where the plan
-	#              puts it. That is what a relaunch onto a saved game looks
-	#              like (`-- --scenario=electric_rig` on a save that already
-	#              holds the rig, or F10 after F9). The right answer there is
-	#              to RE-ATTACH the lever to the rig on the ground: hand back
-	#              its real generator anchors instead of an empty array, which
-	#              would leave a visibly complete rig that F8 refuses to touch
-	#              and that goes dark 16 seconds later.
-	#   COLLIDED — anything in between: the plan overlaps the player's own
-	#              base. This gets NEITHER treatment. In particular Phase 3
-	#              must not seed a chest we did not place, because a player's
-	#              chest is type-identical to ours and `bag = [[IRON_ORE, N]]`
-	#              would destroy everything they had stored in it with no undo.
-	#
-	# Type AND anchor are both checked. building_at() resolves any footprint
-	# cell to its owning anchor, so a 2x2 generator sitting one tile off would
-	# otherwise report as "already exactly ours" from the wrong cell.
-	var entries: Array = plan()
-	var placed: int = 0
-	var skipped: int = 0
-	var matched: int = 0              # collided with a building identical to the plan's
-	var built_gens: Array = []
-	var existing_gens: Array = []
-	var built_source: bool = false
-	var existing_source: bool = false
+	# The BUILT / ADOPTED / COLLIDED classification lives on
+	# RigSupport.place_or_adopt. The stakes for THIS rig: ADOPTED must hand
+	# back the real generator anchors (a relaunch onto a saved game —
+	# `-- --scenario=electric_rig` on a save that already holds the rig, or
+	# F10 after F9 — with an empty array would leave a visibly complete rig
+	# that F8 refuses to touch and that goes dark 16 seconds later), and
+	# COLLIDED must not let Phase 3 seed a chest we did not place, because a
+	# player's chest is type-identical to ours and `bag = [[IRON_ORE, N]]`
+	# would destroy everything they had stored in it with no undo.
+	# owned_anchors applies exactly that rule, so source_is_ours comes back
+	# true only for a chest this call placed or adoption proved is the rig's
+	# own.
 	var source_pos: Vector2i = origin + SOURCE_CHEST_OFFSET
-	for entry in entries:
-		var pos: Vector2i = origin + (entry[0] as Vector2i)
-		var btype: int = int(entry[1])
-		var dir: int = int(entry[2])
-		if world.has_building_at(pos):
-			skipped += 1
-			var sitting: Building = world.building_at(pos)
-			if sitting != null and sitting.type == btype and sitting.anchor == pos:
-				matched += 1
-				if btype == Buildings.Type.STEAM_GENERATOR:
-					existing_gens.append(pos)
-				elif btype == Buildings.Type.CHEST and pos == source_pos:
-					existing_source = true
-			continue
-		if not world.place_building(btype, pos, dir):
-			skipped += 1
-			continue
-		placed += 1
-		if btype == Buildings.Type.STEAM_GENERATOR:
-			built_gens.append(pos)
-		elif btype == Buildings.Type.CHEST and pos == source_pos:
-			built_source = true
-
-	# Adoption is all-or-nothing on purpose. "Some of it was already here" is
-	# the collision case, and a half-adopted rig has the wrong demand total.
-	var adopted: bool = placed == 0 and matched == entries.size()
-	var gen_anchors: Array = existing_gens if adopted else built_gens
-	var source_is_ours: bool = existing_source if adopted else built_source
+	var report: Dictionary = RigSupport.place_or_adopt(world, origin, plan())
+	var placed: int = int(report["placed"])
+	var skipped: int = int(report["skipped"])
+	var adopted: bool = bool(report["adopted"])
+	var gen_anchors: Array = RigSupport.owned_anchors(report, Buildings.Type.STEAM_GENERATOR)
+	var source_is_ours: bool = RigSupport.owned_anchors(report, Buildings.Type.CHEST).has(source_pos)
 
 	# ---- Phase 3: seed state (plain data only — house law). ----
 	# Only ever seed a chest this call placed, or one adoption proved is the

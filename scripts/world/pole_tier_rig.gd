@@ -277,103 +277,39 @@ const POWER_ZERO: int     = ElectricRig.POWER_ZERO
 ##
 ## Keys: placed, skipped, gen_anchors, substation, adopted.
 ##
-## DELIBERATE DUPLICATION. Phase 2's adopt-or-collide classifier is a near copy
-## of ElectricRig.build's, minus the source-chest arm this rig has no use for.
-## The obvious move is to extract a shared RigSupport with pave_rect() and
-## place_or_adopt() and route both rigs through it — and that is the right
-## refactor for a THIRD rig to trigger. It was not done now because
-## electric_rig.gd is this session's untouched control: test_electric_rig.gd
-## pins exact satisfaction values with == rather than is_equal_approx, and
-## restructuring the module underneath it would put the one stable reference
-## point in the session at risk for a structural win nothing yet needs.
+## The pave loop and the adopt-or-collide classifier this build() once carried
+## as DELIBERATE DUPLICATION (this header is where the shared RigSupport with
+## pave_rect() and place_or_adopt() was first named, with a THIRD rig as the
+## trigger) now live on RigSupport, extracted at the top of Electricity
+## Session 4 once the fourth rig was queued.
 static func build(world, origin: Vector2i) -> Dictionary:
 	# PHASE 1 — pave the whole rectangle BEFORE placing anything.
 	# can_place_building validates the FULL footprint, so the 2x2 generators
 	# and the 2x2 substation need their overlay on all four cells before their
 	# anchor row runs. Interleaving paving with placement makes the rig
 	# seed-dependent: it would succeed or fail based on what terrain the world
-	# happened to generate underneath. ElectricRig.build has the same split for
-	# the same reason.
+	# happened to generate underneath. RigSupport.pave_rect carries the
+	# fresh-Tile reasoning.
 	#
-	# Writing a fresh Tile first clears a WATER base (which can_place_building
-	# rejects) and resets resource_node to its default (which is what lets the
-	# set_overlay past its deposit/tree guard). The set_overlay that follows
-	# records the WHOLE tile into tile_modifications, so the base reset is
-	# saved too — that only holds because the Tile written here carries
-	# Overlay.NONE, which keeps set_overlay off its idempotent early return.
-	#
-	# STONE is legal for every type this rig places: POWER_POLE, MEDIUM_POLE,
-	# SUBSTATION, ELECTRIC_LAMP and ELECTRIC_INSERTER all accept
-	# [NONE, STONE, PATH, SOIL_TILLED], and STEAM_GENERATOR — the strict one —
-	# accepts [STONE, PATH]. STONE is the intersection, and it reads as a
-	# deliberate pad against the surrounding grass.
-	for y in range(PAVE_MIN.y, PAVE_MAX.y + 1):
-		for x in range(PAVE_MIN.x, PAVE_MAX.x + 1):
-			var cell: Vector2i = origin + Vector2i(x, y)
-			# Never repaint under someone else's building. set_overlay would
-			# refuse anyway, but the Tile.new above it would already have
-			# stripped that building's terrain out from under it.
-			if world.has_building_at(cell):
-				continue
-			world.tiles[cell] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE)
-			world.set_overlay(cell, Terrain.Overlay.STONE)
+	# The rig-specific fact: STONE is legal for every type this rig places —
+	# POWER_POLE, MEDIUM_POLE, SUBSTATION, ELECTRIC_LAMP and ELECTRIC_INSERTER
+	# all accept [NONE, STONE, PATH, SOIL_TILLED], and STEAM_GENERATOR — the
+	# strict one — accepts [STONE, PATH]. STONE is the intersection, and it
+	# reads as a deliberate pad against the surrounding grass.
+	RigSupport.pave_rect(world, origin, PAVE_MIN, PAVE_MAX)
 
-	# PHASE 2 — build, or ADOPT a rig that is already standing.
+	# PHASE 2 — build, or ADOPT a rig that is already standing. The BUILT /
+	# ADOPTED / COLLIDED classification (type AND anchor checked,
+	# all-or-nothing adoption) lives on RigSupport.place_or_adopt; what
+	# ADOPTED buys here is the F8 lever re-attaching to a rig relaunched from
+	# a save, or F7 after Shift+F7 without moving.
 	#
-	# Three outcomes, and telling them apart is what keeps the F8 lever alive:
-	#
-	#   BUILT    — every planned cell was empty and got its building. Normal.
-	#   ADOPTED  — every planned cell was ALREADY occupied by a building of
-	#              exactly the planned type, anchored exactly where the plan
-	#              puts it. That is what a relaunch onto a saved game looks
-	#              like, or F7 after Shift+F7 without moving. The right answer
-	#              is to RE-ATTACH the lever: hand back the real generator
-	#              anchors instead of an empty array, which would otherwise
-	#              leave a visibly complete rig that F8 refuses to touch and
-	#              that goes dark 16 seconds later when its fuel buffers run
-	#              out. Same reasoning, verbatim, as ElectricRig.build's.
-	#   COLLIDED — anything in between: the plan overlaps the player's own
-	#              base, or a second rig. main.gd reports it as INCOMPLETE.
-	#
-	# Type AND anchor are both checked. building_at() resolves any footprint
-	# cell to its owning anchor, so a 2x2 generator or substation sitting one
-	# tile off would otherwise report as "already exactly ours" from the wrong
-	# cell. Adoption is all-or-nothing for the same reason it is in ElectricRig:
-	# "some of it was already here" is the collision case, and a half-adopted
-	# rig has the wrong demand total.
-	#
-	# There is no source-chest arm here. ElectricRig carries one because seeding
-	# a chest it did not place would destroy a player's stored items; this rig
-	# places no chests at all, so the only thing adoption has to recover is the
-	# generator list.
-	var entries: Array = plan()
-	var placed: int = 0
-	var skipped: int = 0
-	var matched: int = 0              # collided with a building identical to the plan's
-	var built_gens: Array = []
-	var existing_gens: Array = []
-
-	for entry in entries:
-		var pos: Vector2i = origin + (entry[0] as Vector2i)
-		var t: int = int(entry[1])
-		var dir: int = int(entry[2])
-		if world.has_building_at(pos):
-			skipped += 1
-			var sitting: Building = world.building_at(pos)
-			if sitting != null and sitting.type == t and sitting.anchor == pos:
-				matched += 1
-				if t == Buildings.Type.STEAM_GENERATOR:
-					existing_gens.append(pos)
-			continue
-		if not world.place_building(t, pos, dir):
-			skipped += 1
-			continue
-		placed += 1
-		if t == Buildings.Type.STEAM_GENERATOR:
-			built_gens.append(pos)
-
-	var adopted: bool = placed == 0 and matched == entries.size()
-	var gen_anchors: Array = existing_gens if adopted else built_gens
+	# There is no source-chest arm here. ElectricRig carries one because
+	# seeding a chest it did not place would destroy a player's stored items;
+	# this rig places no chests at all, so the only thing adoption has to
+	# recover is the generator list.
+	var report: Dictionary = RigSupport.place_or_adopt(world, origin, plan())
+	var gen_anchors: Array = RigSupport.owned_anchors(report, Buildings.Type.STEAM_GENERATOR)
 
 	# PHASE 3 — light the generators. Same contract as ElectricRig: seed
 	# fuel_buffer directly and let the generator's own tick flip output_active
@@ -386,11 +322,11 @@ static func build(world, origin: Vector2i) -> Dictionary:
 	world.mark_power_network_dirty()
 
 	return {
-		"placed": placed,
-		"skipped": skipped,
+		"placed": int(report["placed"]),
+		"skipped": int(report["skipped"]),
 		"gen_anchors": gen_anchors,
 		"substation": origin + SUBSTATION_OFFSET,
-		"adopted": adopted,
+		"adopted": bool(report["adopted"]),
 	}
 
 ## The full placement list as [rig_relative_offset, building_type, dir]
