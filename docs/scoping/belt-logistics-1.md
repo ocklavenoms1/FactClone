@@ -37,6 +37,11 @@ inserter tier). Belts only; underground pipes are a follow-up.
    rotated — remove and re-place it instead"). The in-place-rotate path lives in
    `main.gd` and cannot be tested headless; Task 1 guarded it and this is its only gate.
 
+2. **Broken underground pair stops flow at the entry** — destroy the exit, confirm items
+   pile up on the feeding belt (visible backpressure), nothing spills, nothing sinks into
+   the entry. The refusal is suite-tested; what the gate confirms is that it READS as a
+   jam to a player rather than as a broken machine.
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)
