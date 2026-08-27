@@ -9,6 +9,36 @@ Each entry has three sections:
 
 ---
 
+## Belt Logistics Session 1 — Splitter + Underground Belts
+
+**Tag:** `session-belt-logistics-1` · **Suite:** 74 → 76 suites, all green · **Save:** v18 unchanged (append-only enums 34/35/36 + `.get()`-defaulted state; integers pinned by literal)
+
+### What shipped
+
+- **SPLITTER** (2×1, rotatable, own module dispatched in both belt passes): one input edge, two output edges, round-robin via `state["next_out"]` toggled ONLY on successful delivery — all-to-open-side falls out of that one rule with zero extra state. No filtering (filters live in the inserter tier).
+- **UNDERGROUND_BELT_ENTRY / _EXIT**: pair recomputed per advance tick by `Underground.paired_exit` — the `poles_connected` of this arc, one predicate, contracted callers named in its docstring (tick path, info_lines, the pair-indicator renderer). Span 3, module-own constant documented-equal to the basic pole's range and pinned by a test literal. Items-in-tunnel as slots (`state["tunnel"]`, gap×4), not teleport. Unpaired entry REFUSES input — visible backpressure, never a sink.
+- **Dir-aware footprints** (`footprint_for(t, dir)`): the first building whose shape changes under rotation. 26 call sites needed the instance dir, zero production callers remain on the default; `place_building` normalizes dir for non-rotatable types so validate-one-rect-free-another cannot happen.
+- Save round-trip suite: enum integers as literals, save-at-N-continue-to-M merged trajectories, partial-occupancy position literals (the pole-tier session's silent-loss shape, pinned here before it could recur), missing-fields v18 defaults.
+- Drawing: splitter edge chevrons from the port accessors (glyphs cannot disagree with behaviour); entry/exit ramp glyphs; dashed pair-indicator in a dedicated pass beside the power wires, answering pairing only via the predicate (contract suite-pinned).
+
+### Decisions
+
+- **THE LANE (locked before the first test literal): one belt-tile-equivalent internal latency for the splitter, and by extension span-length lanes for the tunnel.** Reasoning, verbatim from the decision: slot arithmetic stays derivable from existing constants rather than bespoke per test; and zero-latency would be the first exception to a timing model where everything on the belt clock takes time proportional to distance — **exceptions are where throughput bugs hide**. This is the decision future belt work builds on: the measured trajectory (`0,1,2,4,5,6,8,9,10,11`) generalises through every new element, and every suite literal derives from `SLOTS_PER_TILE`/`TICKS_PER_SLOT`.
+- The two-pass contract fits both buildings with no third pass and no Pass-1 cross-reads; #17 neither widened nor decided. `belt.gd` gained exactly two Pass-2 handoff branches (splitter, entry).
+- **R-key rotate on a non-square building refuses with a toast** — "changes shape when rotated — remove and re-place it instead" — telling the player why and what to do, instead of silently desyncing `occupied`. Gate-verified (the path is not headless-testable).
+- Three interpretive resolutions stand as shipped through a passed gate, formal ratification pending in the design record: the splitter's T-junction shape (body-along-flow, lateral branches — forced by the canonical 2×1-along-flow footprint), gap-0-does-not-pair, and the exit-cell discount (crossing costs gap+1 belt-tiles for gap+2 cells).
+
+### Lessons
+
+- **Two omission-signalling findings from one gate, same family:** an UNPAIRED entry and a GAP-BLOCKED exit are both visually indistinguishable from working tunnels — every tunnel failure state today signals only by absence (no dashed line; no emerging items). Routed to a design session with the note that **one marker should cover both states**. This is the silent-compensation shape surfacing in UX, and the gate is where it was caught because no suite can judge "reads as broken".
+- **The gate's own walk instruction caused the second failure**: the re-pair command moved the exit one tile west and not its output belt, leaving a one-cell gap the exit emits into. The stall was diagnosed live — pairing healthy, dispatch healthy, items advancing, front slot stalled against an empty cell — and the scenario, not the code, was broken. **The false-negative-repro shape one level up: verify the scenario reaches the mechanism before reading its result as the mechanism's.** (Also the first diagnosis that session: my "check 3 is failing" read was the rig's DELIBERATE out-of-range exit — shipped that way so the refusal was seen before the fix. Measured distance first, per the diagnostic order, and the "bug" was the design working.)
+- **The implementer read geometry better than the brief, twice.** The scan-window/gap-0 resolution: the mandated bounds fix gap to 1-3 while the record's prose said "gap 0..3" — the implementer shipped the self-consistent formula and pinned adjacent-no-pair as a visible literal rather than silently choosing. And the refusal-visibility nuance: under the deleted-refusal mutation items do not vanish — the frozen entry keeps them counted — so the sink is caught by the named sink assertion and the pile-up literal, NOT by conservation; the test was written to the mechanism that actually fires.
+- The rig-builder pattern (headless scene building the gate layout with production code, saved as the real slot) removed all manual setup from PAUSE 1 — and its first probe also produced a false negative by placing an exit without its required overlay: the console auto-paints, raw `place_building` does not. Probe placement must mirror the path the player uses.
+
+### Arc status
+
+Belt Logistics Session 1 SHIPPED — splitter with round-robin, underground belts with span 3, both save-stable with resume-not-reset pinned by merged-trajectory literals. **Session 2 candidates when the arc resumes:** underground pipes on the same pairing predicate; the tunnel-failure marker from the design record (one marker, both failure states); whatever the splitter needs once real factories exercise it.
+
 ## Electricity Arc Session 3 — Pole Tiers
 
 **Date:** 2026-08-22

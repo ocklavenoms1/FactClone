@@ -1231,6 +1231,30 @@ normally. Nothing writes into `art/` from the engine, the export packs real reso
 the pipeline shape already matches — `art/renders` → `art/sprites` gains one more hop. This
 is a pipeline change, so it is a decision, not a cleanup.
 
+## Belt Logistics — multi-session arc (Session 1 SHIPPED 2026-08-27, tag `session-belt-logistics-1`)
+
+**Shipped:** SPLITTER (2×1 rotatable, round-robin via toggle-on-delivery, all-to-open) and
+UNDERGROUND_BELT_ENTRY/_EXIT (span 3, pair recomputed per advance tick by
+`Underground.paired_exit` — the arc's `poles_connected` — items-in-tunnel as slots,
+unpaired entry refuses input). Dir-aware footprints (`footprint_for(t, dir)`) landed as the
+enabler. Save v18 unchanged; enum ints 34/35/36 pinned by literal; resume-not-reset pinned
+by save-at-N-continue-to-M merged trajectories. Full decisions + PAUSE-gate findings:
+`docs/scoping/belt-logistics-1.md`; session narrative in PROJECT_LOG.
+
+**The load-bearing decision:** one belt-tile-equivalent lane latency, locked before the
+first literal — every timing literal derives from `SLOTS_PER_TILE`/`TICKS_PER_SLOT`, no
+zero-latency exceptions on the belt clock.
+
+**Session 2 candidates:**
+- Underground **pipes** on the same pairing predicate (design pass said follow-up).
+- The **tunnel-failure marker** — one marker covering BOTH omission-signalling states
+  (unpaired entry, gap-blocked exit); both gate findings recorded in the design record.
+- Whatever the splitter needs once real factories exercise it (side-loading? priority?
+  measure demand first).
+- Three interpretive resolutions pending formal ratification (T-junction shape, gap-0
+  no-pair, exit-cell discount) — shipped and gate-passed; ratify or reverse in the
+  Session 2 design pass.
+
 ## Queued: two live tails lifted out of the root plan files before deleting them (2026-08-25)
 
 `SESSION_E_PLAN.md` and `INVENTORY_UI_PLAN.md` were deleted (audit #36 / #77). Both were

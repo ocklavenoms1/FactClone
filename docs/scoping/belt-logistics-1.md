@@ -1,6 +1,6 @@
 # Belt Logistics Session 1 — design record
 
-**Status: DESIGN LOCKED 2026-08-26. Implementation in progress (Task 1 dispatched).**
+**Status: SESSION 1 SHIPPED 2026-08-27 (`session-belt-logistics-1`), PAUSE 1 passed all five checks.** Three interpretive resolutions still awaiting formal ratification (T-junction, gap-0, exit-discount) — see NOTES arc section.
 Full evidence in the design-pass transcript; this is the decision record that survives it.
 Scope (user-set): SPLITTER + UNDERGROUND BELT pair. No filtering (filters live in the
 inserter tier). Belts only; underground pipes are a follow-up.
