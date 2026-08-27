@@ -158,6 +158,13 @@ const TESTS: Array = [
 	# layout conservation, mid-transit re-pair both directions, the #14 emit
 	# guard, and the input-edge refusals.
 	preload("res://scripts/tests/test_underground.gd"),
+	# Belt Logistics Session 1 Task 6: save round-trip for the splitter and
+	# the underground pair — the pinned on-disk type integers (34/35/36) and
+	# the SAVE_VERSION 18 drift alarm, resume-not-reset in the
+	# save-at-N-continue-to-M form for next_out and for items mid-tunnel
+	# (arrival dues unchanged because the "tick" field round-trips),
+	# partial-occupancy position literals, and the v18 fields-absent load.
+	preload("res://scripts/tests/test_belt_logistics_save_roundtrip.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
