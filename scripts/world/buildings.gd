@@ -1193,13 +1193,14 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 		Type.SPLITTER:
 			return Splitter.make(pos, dir)
 		Type.UNDERGROUND_BELT_ENTRY:
-			# Stub (Task 2): orientation only. Pairing, tunnel slots, and tick
-			# membership are Task 5 — nothing here may grow behaviour before then.
-			return Building.new(Type.UNDERGROUND_BELT_ENTRY, pos, {"dir": dir})
+			# Task 5: the entry owns ALL of the pair's moving state (surface
+			# lane + tunnel); see underground.gd's header for the conventions.
+			return Underground.make_entry(pos, dir)
 		Type.UNDERGROUND_BELT_EXIT:
-			# Stub (Task 2): orientation only. Pairing, tunnel slots, and tick
-			# membership are Task 5 — nothing here may grow behaviour before then.
-			return Building.new(Type.UNDERGROUND_BELT_EXIT, pos, {"dir": dir})
+			# Task 5: the exit is PASSIVE — orientation only, no lane, no
+			# tunnel, no tick case. Draw + footprint + being found by the
+			# entry's pairing scan is its whole job.
+			return Underground.make_exit(pos, dir)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1253,6 +1254,12 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			# Pass 1: self-only lane shift, gated on Belt.is_advance_tick().
 			# The splitter rides the same two-pass contract as BELT.
 			Splitter.tick(b, world)
+		Type.UNDERGROUND_BELT_ENTRY:
+			# Pass 1: self-only shift of the entry's surface lane and tunnel
+			# segments, gated on Belt.is_advance_tick(). UNDERGROUND_BELT_EXIT
+			# has NO case here on purpose — the exit is passive (draw +
+			# footprint only); the entry owns every slot the pair moves.
+			Underground.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
@@ -1264,6 +1271,12 @@ static func post_tick_one(b: Building, world: Node2D) -> void:
 			# second type this pass has ever dispatched — test_tick_loop_wiring
 			# pins the wiring; test_splitter pins what the dispatch does.
 			Splitter.post_tick(b, world)
+		Type.UNDERGROUND_BELT_ENTRY:
+			# Pass 2: recompute the pairing, hand the tunnel front into the
+			# belt BEYOND the paired exit (#14 feeder guard at the emit). The
+			# third type this pass dispatches; test_underground.gd pins what
+			# the dispatch does. The EXIT has no case — passive.
+			Underground.post_tick(b, world)
 
 static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	match b.type:
@@ -1578,6 +1591,12 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Accumulator.info_lines(b, world)
 		Type.SPLITTER:
 			return Splitter.info_lines(b)
+		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT:
+			# One shared handler; it branches on the type. The entry's line
+			# set reports the pairing via Underground.paired_exit — the SAME
+			# predicate the tick path uses (its two-caller contract), so the
+			# panel can never disagree with where items actually flow.
+			return Underground.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

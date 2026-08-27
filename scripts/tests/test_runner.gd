@@ -151,6 +151,13 @@ const TESTS: Array = [
 	# conservation, the #14 feeder guard + input-edge refusals, and the
 	# next_out save/load resume.
 	preload("res://scripts/tests/test_splitter.gd"),
+	# Belt Logistics Session 1 Task 5: the underground belt core — the
+	# recomputed pairing scan and its non-pairing literals (span pin, facing,
+	# nearest-wins, poison controls), the lane+tunnel trajectory against a
+	# surface-twin control, refuse-when-unpaired backpressure (#19), whole-
+	# layout conservation, mid-transit re-pair both directions, the #14 emit
+	# guard, and the input-edge refusals.
+	preload("res://scripts/tests/test_underground.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

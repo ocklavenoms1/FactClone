@@ -100,13 +100,25 @@ static func post_tick(b: Building, world: Node2D) -> void:
 			next_slots[0] = slots[front_idx]
 			slots[front_idx] = -1
 	elif next_b.type == Buildings.Type.SPLITTER:
-		# The ONE splitter branch Pass 2 gains (Belt Logistics Session 1,
-		# Task 3 — the design record caps it at exactly this). try_accept is
-		# the splitter's single acceptance gate: it takes the item only when
-		# this belt sits on the splitter's INPUT EDGE pushing along its flow;
-		# side-feeds and head-on pushes into other cells are refused and the
-		# item stays here — visible backpressure, same as a jammed belt.
+		# The splitter branch (Belt Logistics Session 1, Task 3 — the design
+		# record's "exactly one Pass-2 branch" was Task-3 scope; the standing
+		# rule it protected, #17's never-feed-by-Pass-1-pull, binds the entry
+		# branch below the same way). try_accept is the splitter's single
+		# acceptance gate: it takes the item only when this belt sits on the
+		# splitter's INPUT EDGE pushing along its flow; side-feeds and head-on
+		# pushes into other cells are refused and the item stays here —
+		# visible backpressure, same as a jammed belt.
 		if Splitter.try_accept(next_b, int(slots[front_idx]), b.anchor, dir):
+			slots[front_idx] = -1
+	elif next_b.type == Buildings.Type.UNDERGROUND_BELT_ENTRY:
+		# The SECOND consumer branch Pass 2 gains (Belt Logistics Session 1,
+		# Task 5), under the same #17 rule as the splitter's. try_accept is
+		# the entry's single acceptance gate: it takes the item only when this
+		# belt sits on the entry's INPUT EDGE (its rear) pushing along the
+		# flow AND the entry is PAIRED — an unpaired entry acts full (the
+		# Q7/#19 decision), so the item stays here and the line backs up:
+		# visible backpressure, never a silent sink.
+		if Underground.try_accept(next_b, int(slots[front_idx]), b.anchor, dir, world):
 			slots[front_idx] = -1
 	# Mill / chest / etc. consumers will land here once they exist.
 

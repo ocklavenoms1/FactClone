@@ -13,23 +13,27 @@ extends RefCounted
 ##   Pass 2 (handoff): each belt's FRONT slot tries to push into the next
 ##                     consumer.
 ##
-## Re-derived against this commit (Belt Logistics S1 Task 3 — the citations
-## below were refreshed when post_tick grew its one splitter branch):
+## Re-derived against this commit (Belt Logistics S1 Task 5 — the citations
+## below were refreshed when post_tick grew its splitter branch at Task 3 and
+## its underground-entry branch at Task 5):
 ##   Pass 1  `Belt.tick`       belt.gd:68-75  — reads/writes `b.state["slots"]`
 ##                                              and NOTHING else. Self only.
-##   Pass 2  `Belt.post_tick`  belt.gd:78-111 — the only place a belt touches a
-##                                              neighbour (a downstream BELT, or
+##   Pass 2  `Belt.post_tick`  belt.gd:78-123 — the only place a belt touches a
+##                                              neighbour (a downstream BELT,
 ##                                              since Task 3 a SPLITTER's input
-##                                              edge — test_splitter.gd's
-##                                              subject, not this file's).
+##                                              edge, and since Task 5 an
+##                                              UNDERGROUND_BELT_ENTRY's —
+##                                              test_splitter.gd's and
+##                                              test_underground.gd's subjects,
+##                                              not this file's).
 ##                                              No-neighbour early return
 ##                                              belt.gd:87-88, opposite-facing
 ##                                              guard belt.gd:96, handoff clear
 ##                                              belt.gd:101.
 ##   Advance gate `Belt.is_advance_tick` belt.gd:63-64; TICKS_PER_SLOT = 4
 ##                                       (belt.gd:36), SLOTS_PER_TILE = 4 (:35).
-##   Dispatch    `Buildings.tick_one` buildings.gd:1206 /
-##               `Buildings.post_tick_one` buildings.gd:1258, driven by the two
+##   Dispatch    `Buildings.tick_one` buildings.gd:1207 /
+##               `Buildings.post_tick_one` buildings.gd:1265, driven by the two
 ##               loops in `GridWorld._on_tick` grid_world.gd:751-754.
 ##
 ## WHY THIS WENT UNTESTED, AND WHY EVERY ASSERTION BELOW IS AN EXACT EQUALITY.
