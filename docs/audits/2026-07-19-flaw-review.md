@@ -125,9 +125,12 @@ the running total, and the CLOSED table below is the authority for which is whic
 | 2026-08-25 | #25 — another TEST-GAP row: `recipes.gd` is correct and untouched; what landed is `test_processor_recipes.gd`. **The finding's "no test ticks these nine" is stale for exactly one row** — `test_inserter_shared_input_cap.gd` has ticked `oven_bread` since #3 closed, but behind LOWER BOUNDS that a ratio or duration change walks straight through. Measured; see the note below | **36 closed / 48 live** |
 | 2026-08-26 | #31 | **37 closed / 47 live** — WONTFIX-with-rationale; the split is deliberate, the comment was the defect; #29/#32 unblocked |
 | 2026-08-26 | #29 (measured first: 1,010 µs/frame idle → 0.20 µs) at `5f02f7d` | **38 closed / 46 live** — #32 was measured in the same pass and every prescribed cache was **DECLINED with numbers**; it stays LIVE—MEDIUM, narrowed. See the #29/#32 measurement note |
+| 2026-08-26 | #30 — **NOT closed.** Measured at four scales, then split: the TERRAIN half is FIXED at `742cab2` (dict walk → visible-rect walk, 980-1,506 → 211-711 µs/frame, six-frame md5 pixel-identity); the BUILDINGS region index and the tint-pass bucketing are **DECLINED with numbers**. Stays LIVE—MEDIUM, narrowed to the buildings loop. See its row and the #30 measurement note | **38 closed / 46 live** |
 
-Arithmetic for the row above, re-derived by counting table rows rather than by
-incrementing: CLOSED 38 + LIVE—HIGH 0 + LIVE—MEDIUM 7 + LIVE—LOW 39 = **84**.
+Arithmetic for the rows above, re-derived by counting table rows rather than by
+incrementing (last re-counted 2026-08-26 after the #30 row, which changes no
+counts — #30 stays in LIVE—MEDIUM, narrowed): CLOSED 38 + LIVE—HIGH 0 +
+LIVE—MEDIUM 7 + LIVE—LOW 39 = **84**.
 Each section header was checked against its own row count in the same pass
 (38/0/7/39), and the 84 ids are distinct — no row lost, duplicated, or
 double-counted; the ids present are exactly 1..84, checked as a set rather
@@ -278,7 +281,7 @@ skip every scarred tile cures #5 and reddens the recovery sub-suite instead.
 |---|---|---|
 | 17 | pass-1 belt mutations make timing insertion-order dependent | `grid_world.gd:648-654` vs `CONVENTIONS.md:142` — **grid_world line is pre-#16 and unverified; see the +39 note above** |
 | 20 | zero-richness ghost rim ore tiles | `world_generator.gd:352-368` |
-| 30 | `_draw` walks every tile and building per frame | **re-derived 2026-08-26 at `5f02f7d`**: `queue_redraw()` `grid_world.gd:1271`, terrain loop `:1715`, buildings loop `:1805` — the row's previous figures (`:1191/:1598/:1688`) and the earlier re-derivation (`:1658`) were all stale again. **NOT affected by #31**: `queue_redraw()` stays in `_process` under every proposed fix |
+| 30 | `_draw` walks every building per frame (terrain half FIXED 2026-08-26) | **MEASURED 2026-08-26 at four scales; see the #30 measurement note.** Terrain half FIXED at `742cab2`: the pass iterates the visible rect with `tiles.get()` (`grid_world.gd:1731`), O(view), 980-1,506 → 211-711 µs/frame, pixel-identity pinned by six-frame md5 (ticks paused, input disabled). What remains of the title is the BUILDINGS loop (`:1820`, post-fix; was `:1805`): still a full-dict walk with per-entry footprint culling, kept deliberately — measured ~6.1 µs per DRAWN building + ~0.4-0.6 µs per culled entry, so the cull waste is 4-43 µs/frame at 150-500 buildings while the prescribed region index adds an invalidation surface (place/remove/load) AND reorders iteration, which is draw order — building draws overhang footprints (inserter arms reach 2 tiles), so a reorder is a z-order DESIGN change, not a perf fix. Revisit at multi-thousand-building factories: ~0.7 ms waste at 2,000, ~3.8 ms extrapolated at 10k — and take the z-order question to a design pass first. Tint passes (soil `:1759`, fert `:1771`, wasteland `:1788`) left per the fix text's own only-if-profiling gate: 113-441 µs, dominated by the drawn tiles not the cull. `queue_redraw()` `:1271` unchanged — NOT affected by #31 |
 | 32 | `_tick_soil_regen` rebuilds its active set from ALL buildings per frame | **MEASURED 2026-08-26; every prescribed cache DECLINED with numbers — see the #29/#32 measurement note before reaching for one.** Today's citation (post-`5f02f7d`): function `grid_world.gd:1322`, active-tiles rebuild `:1327-1336`, keys snapshot `:1343`. The title's mechanism is real but is **23-32% of the function's cost at every scale measured**; the dominant cost is the per-tile second pass, which is inherent work at the wall-clock rate R1 pinned. Fix item (3) — "move the whole pass from `_process` to the game tick" — is **WRONG by supervening decision**: it re-clocks, which #31's WONTFIX forbids and `test_tick_loop_wiring` 7-9 tripwire. The cost comment on the function now states the measured numbers. NOT the same unit as #29 (see the measurement note) |
 | 33 | per-tick transient allocations in processor pull/push — **MEASURED and NARROWED 2026-08-25; the caching fix is declined, one free part taken at `6083ff8`** | `processor.gd:158-159` (the `[]`/`{}` pair — **0.9% of a processor tick, not worth touching**), `processor.gd:176, 183` (pull sweep, deliberately left alone), `processor.gd:295` (push sweep, now hoisted to one `all_edge_cells` call); `buildings.gd:936-956` (`edge_cells`, **the actual cost — the finding's own last citation, and the only one that mattered**). See the profiling note below |
 | 34 | console.gd split trigger breached; NOTES says 657 lines | `NOTES.md:795, 799-805`. **The stale number is fixed; the finding is not.** The title's claim is the *breached trigger*, and the split has not been done — correcting 657 closes the paragraph and leaves the title true, so this stays LIVE with the split as its remaining work. **No figure is pinned in the NOTES paragraph any more**; it names `wc -l < scripts/ui/console.gd` instead, because 657 → 812 → 1068 → **1127** each went stale within a cluster or two. Measured 2026-08-25: 1127, i.e. 327 over "~800", up from 268 one cluster ago — it grows every time the file is touched. `console_commands.gd` does not exist (`ls scripts/ui/console_commands.gd`). The prescribed "~30-min refactor" was estimated at 657 lines and is **not** credible at 1127 — see the cluster J split assessment below. **#80 was the same two lines at LOW and is now CLOSED**; it was fixed in the same edit |
@@ -1080,6 +1083,107 @@ brief warned about. Fixed one, declined the other, separately.
 **Established in passing (do not act from here alone):** #30's sites,
 re-derived at `5f02f7d`: `queue_redraw()` `grid_world.gd:1271`, terrain loop
 `:1715`, buildings loop `:1805`. Its row is updated.
+
+### Measurement note — #30, profiled 2026-08-26; terrain pass inverted at `742cab2`, region index declined
+
+Measured where the cost lives: a **windowed off-screen run** (`--position 6000,6000
+--fixed-fps 60`, the boot-smoke pattern), because `_draw` is engine-called and the
+headless runner never yields a frame. Production was instrumented temporarily with
+`Time.get_ticks_usec` section timers inside `_draw` (file copied aside first,
+restored byte-identical after — md5 verified, 2,017 CRLF / 0 bare-LF), world
+regenerated on **seed 42** at first frame, scaled the way the #32 probe scaled:
+realistic 150 buildings / 300 modified tiles, stress 500 / 1,000, plus 2,000
+buildings for the slope. 100-frame averages after a 60-frame warmup, debug build,
+so upper bounds. Seed 42 re-derived: `tiles.size()` = **15,641** — the prior
+probe's figure exactly.
+
+**One trap found and excluded: the off-screen window still receives live mouse
+input.** Wheel notches mid-run changed zoom (one run drifted 1.5 → 5.23 → 0.85)
+and the hover indicator tracked the physical mouse. Every figure below is from a
+run whose six printed windows all read the same zoom; contaminated runs were
+rerun. (The lone exception: the 2,000-building BEFORE run's later windows were
+contaminated — its window 1, still at zoom 1.500 and consistent with the clean
+500-building slope, is the figure used, flagged.)
+
+**The decomposition (µs/frame, before → after the terrain inversion):**
+
+| scale, zoom | terr | soil | fert+waste | grid | bld | wires | TOTAL | vis tiles | bld drawn |
+|---|---|---|---|---|---|---|---|---|---|
+| fresh world, 1.5 | 980 → 221 | 1 | 1 | 12 | 0.4 | 3 | 1,005 → 245 | 21 | 0/0 |
+| 150 bld / 300 soil, 1.5 | 1,017 → 266 | 113 | 1 | 12 | 855 | 3 | 2,009 → 1,268 | 159 | 138/150 |
+| 500 / 1,000, 1.5 | 1,201 → 287 | 160 | 2 | 11 | 1,321 → 1,233 | 3 | 2,715 → 1,705 | 205 | 184/500 |
+| 150 / 300, zoom floor 0.85 | 1,302 → 594 | 220 | 2 | 18 | 926 | 4 | 2,486 → 1,790 | 195 | 150/150 |
+| 500 / 1,000, 0.85 | 1,506 → 709 | 433 | 2 | 17 | 2,433 → 2,393 | 4 | 4,411 → 3,558 | 431 | 385/500 |
+| 2,000 / 1,000, 1.5 | 1,362 → 290 | 165 | 2 | 12 | 1,883 → 1,761 | 4 | 3,440 → 2,241 | 205 | 184/2000 |
+
+**The ratio the win depends on, measured:** view rect 49×31 = 1,519 cells at
+default zoom, 79×49 = 3,871 at the 0.85 zoom floor, against 15,641-17,641 dict
+entries — total/visible is **10.3× (default) to 4.1× (floor)**, and the visible
+side is bounded by the zoom floor while the dict side grows with every paved tile
+(#38 feeds it too). The old walk cost ~0.063 µs/entry; a fix-shaped shadow pass
+(visible rect + `tiles.get`) timed in the same frames cost 90-125 µs at 1.5 and
+244-277 µs at the floor. There is no reachable configuration where the dict is
+small enough to win: worldgen seeds ~15k entries before the player exists.
+
+**Terrain half — FIXED, the finding's own item 1 taken as written (RIGHT class).**
+980-1,506 µs/frame — ~6-9% of a 60 fps frame from game start, the same magnitude
+that justified #29 (1,010 µs), spent discovering that 21-429 entries were visible.
+No cache, no invalidation edge, no state: an iteration inversion, so #29's
+"every edge loud" cache rule has nothing to bite on. Draw-order safety was
+verified, not assumed: every terrain draw stays inside its own tile rect (tree
+canopy max extent 0.495·TILE, checked in `_draw_tree`'s geometry), so no two
+tiles' draws overlap and dict-order vs row-major cannot show. **Pinned by the art
+probe's pixel-identity method: six frames, ticks paused, input disabled, HUD
+hidden, seed 42 — old loop and new loop produce byte-identical PNGs (all six
+md5 `d798e8ecf99dd6a2593c910808885cf2`).** A partial application of the hunk is
+a parse error (the whole block re-indents), not a silent half-state. No suite
+test ships with this: `_draw` remains unreachable headless (the recorded
+ceiling), the change adds no branch to pin, and a worldgen-density budget test
+would redden on legitimate worldgen changes — the 8000 µs lesson.
+
+**Buildings half — the region index DECLINED with numbers (the SHORT shape).**
+The buildings section's measured cost decomposes as **~6.1 µs per DRAWN building
++ ~0.4-0.6 µs per culled entry** (solved from the 150/500/2,000 runs; the 6.1 is
+`Buildings.draw_one`, which no cull structure touches). What would a region index
+NOT speed up? — everything the section actually spends: at 150 buildings the
+cull waste is **~4-7 µs of an 855 µs section (<1%)**; at 500, ~130-160 µs of
+1,321-2,433; even at 2,000 it is ~0.7 ms. Fixing the cited expression while
+~95% of the section's realistic-scale cost is visible-building drawing is #33's
+0.9%-vs-37% shape at a bigger font. Against that: the index is a second copy of
+`buildings`' spatial truth maintained across place/remove/load (the #1/#32
+invalidation family, where a missed edge is a building that silently stops
+rendering — this project's named failure shape), and it **reorders iteration,
+which IS draw order**: building draws overhang their footprints (long-reach
+inserter arms span 2 tiles; sprites and fallback markers draw in the same loop),
+so anchor-dict order vs region-bucket order changes which overlapping arm wins.
+That makes the prescribed fix a **z-order design change wearing a perf-fix
+label** — if factories reach multi-thousand buildings, take the z-order rule to
+a design pass first, then index to match it. The fix text's "keep the
+footprint_of lookup after the cull check" also mis-models the loop: the cull
+reads `fp`, so the lookup cannot follow it.
+
+**Tint passes — left, per the fix text's own gate** ("only when profiling shows
+they matter"): soil 113-441 µs (mostly `_soil_tint_for_tile` on visible tiles +
+the `keys()` snapshot, not the cull), fert/wasteland ≤2 µs. Profiling shows they
+do not matter yet; the gate holds.
+
+**Supervening-decision check (the third prescription question), all clear:**
+`queue_redraw()` stays in `_process` — call frequency untouched, so the R1/#31
+WONTFIX is not grazed (#31 excludes `queue_redraw` from its scope explicitly).
+The sprite path (`SpriteLibrary.draw_building` + fallback marker, post-audit)
+lives inside the buildings loop — untouched by the terrain fix, and one more
+thing a region-index rewrite would have had to preserve. The #16 extraction
+(`hover_preview_blocked`) sits in `_draw`'s hover tail — untouched.
+
+**Classification over #30's fix text, all four classes considered:** item 1
+(terrain inversion) **RIGHT** — taken nearly as written, second occurrence of
+that class after #29. Item 2 (region index) **SHORT at today's scale** — correct
+code that would close the row while recovering <1% of the section it names, with
+an unpriced z-order rider; declined, revisit threshold recorded. Item 3 (tint
+bucketing) self-gated on profiling — gate correctly predicted "not yet". Nothing
+here is WRONG or wrong-by-supervening-decision; #30 is the audit's
+best-prescribed cost finding so far, and it still needed the measurement to know
+which half to take.
 
 ### Routing note — cluster H's three findings, the fix that departs from its prescription, and the harness that made any of it testable
 
