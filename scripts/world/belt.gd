@@ -99,6 +99,15 @@ static func post_tick(b: Building, world: Node2D) -> void:
 		if int(next_slots[0]) < 0:
 			next_slots[0] = slots[front_idx]
 			slots[front_idx] = -1
+	elif next_b.type == Buildings.Type.SPLITTER:
+		# The ONE splitter branch Pass 2 gains (Belt Logistics Session 1,
+		# Task 3 — the design record caps it at exactly this). try_accept is
+		# the splitter's single acceptance gate: it takes the item only when
+		# this belt sits on the splitter's INPUT EDGE pushing along its flow;
+		# side-feeds and head-on pushes into other cells are refused and the
+		# item stays here — visible backpressure, same as a jammed belt.
+		if Splitter.try_accept(next_b, int(slots[front_idx]), b.anchor, dir):
+			slots[front_idx] = -1
 	# Mill / chest / etc. consumers will land here once they exist.
 
 static func _opposite(dir: int) -> int:

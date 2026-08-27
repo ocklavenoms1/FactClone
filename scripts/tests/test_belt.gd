@@ -13,19 +13,24 @@ extends RefCounted
 ##   Pass 2 (handoff): each belt's FRONT slot tries to push into the next
 ##                     consumer.
 ##
-## Re-derived against this commit:
-##   Pass 1  `Belt.tick`       belt.gd:54-61  — reads/writes `b.state["slots"]`
+## Re-derived against this commit (Belt Logistics S1 Task 3 — the citations
+## below were refreshed when post_tick grew its one splitter branch):
+##   Pass 1  `Belt.tick`       belt.gd:68-75  — reads/writes `b.state["slots"]`
 ##                                              and NOTHING else. Self only.
-##   Pass 2  `Belt.post_tick`  belt.gd:64-88  — the only place a belt touches a
-##                                              neighbour. No-neighbour early
-##                                              return belt.gd:73-74,
-##                                              opposite-facing guard belt.gd:82,
-##                                              handoff clear belt.gd:87.
-##   Advance gate `Belt.is_advance_tick` belt.gd:49-50; TICKS_PER_SLOT = 4
-##                                       (belt.gd:22), SLOTS_PER_TILE = 4 (:21).
-##   Dispatch    `Buildings.tick_one` buildings.gd:1081 /
-##               `Buildings.post_tick_one` buildings.gd:1129, driven by the two
-##               loops in `GridWorld._on_tick` grid_world.gd:694-697.
+##   Pass 2  `Belt.post_tick`  belt.gd:78-111 — the only place a belt touches a
+##                                              neighbour (a downstream BELT, or
+##                                              since Task 3 a SPLITTER's input
+##                                              edge — test_splitter.gd's
+##                                              subject, not this file's).
+##                                              No-neighbour early return
+##                                              belt.gd:87-88, opposite-facing
+##                                              guard belt.gd:96, handoff clear
+##                                              belt.gd:101.
+##   Advance gate `Belt.is_advance_tick` belt.gd:63-64; TICKS_PER_SLOT = 4
+##                                       (belt.gd:36), SLOTS_PER_TILE = 4 (:35).
+##   Dispatch    `Buildings.tick_one` buildings.gd:1206 /
+##               `Buildings.post_tick_one` buildings.gd:1258, driven by the two
+##               loops in `GridWorld._on_tick` grid_world.gd:751-754.
 ##
 ## WHY THIS WENT UNTESTED, AND WHY EVERY ASSERTION BELOW IS AN EXACT EQUALITY.
 ## Belts appear in the suite only as incidental transport, behind LOWER BOUNDS:
@@ -56,7 +61,7 @@ extends RefCounted
 ## That sequence is DERIVED from the two passes above, not copied from a run:
 ## Pass 1 advances one slot, Pass 2 then empties the front slot into the next
 ## belt's slot 0. The exception is the end of the line, where `post_tick`
-## early-returns for want of a neighbour (belt.gd:73-74) and the item does park
+## early-returns for want of a neighbour (belt.gd:87-88) and the item does park
 ## on a front slot — which is why case (1) asserts BOTH that slots 3 and 7 are
 ## never occupied and that slot 11 is.
 ##
@@ -154,7 +159,7 @@ static func run(parent: Node) -> Dictionary:
 ##     them in Pass 1 must be gone by the end of the same tick. Global slot 11
 ##     is a front slot WITHOUT a neighbour: the item must park there. Same slot
 ##     index within its belt, opposite outcome, and the only difference is the
-##     Pass-2 neighbour check at belt.gd:73-74.
+##     Pass-2 neighbour check at belt.gd:87-88.
 static func _case_single_item_advance(parent: Node, failures: Array) -> void:
 	var world = GridWorldScript.new()
 	parent.add_child(world)
@@ -223,7 +228,7 @@ static func _case_single_item_advance(parent: Node, failures: Array) -> void:
 	_cleanup(world)
 
 ## (2) JAM / COMPRESSION. Three-belt line with NO consumer past the head
-## (`post_tick` early-returns at belt.gd:73-74 when the next tile is empty).
+## (`post_tick` early-returns at belt.gd:87-88 when the next tile is empty).
 ##
 ## (2a) compression: four items inserted one per advance tick, then left to run.
 ## They must settle on the four HEAD slots and stop. Exact set, exact count.
@@ -307,7 +312,7 @@ static func _case_jam_compression(parent: Node, failures: Array) -> void:
 		"(2b) a full belt accepted a %dth item" % (capacity + 1))
 	_cleanup(world2)
 
-## (3) OPPOSITE-FACING GUARD (belt.gd:82).
+## (3) OPPOSITE-FACING GUARD (belt.gd:96).
 ##
 ## (3a) Two belts facing each other must NEVER hand off, in either direction —
 ## asserted every tick, not only at the end. Note the contrast with case (1):

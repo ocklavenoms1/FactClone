@@ -1191,10 +1191,7 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 		Type.ACCUMULATOR:
 			return Accumulator.make(pos)
 		Type.SPLITTER:
-			# Stub (Task 1 pull-forward): a plain Building carrying only its
-			# orientation. Splitter.gd, tick, and post_tick_one membership are
-			# Task 3+ — nothing here may grow behaviour before then.
-			return Building.new(Type.SPLITTER, pos, {"dir": dir})
+			return Splitter.make(pos, dir)
 		Type.UNDERGROUND_BELT_ENTRY:
 			# Stub (Task 2): orientation only. Pairing, tunnel slots, and tick
 			# membership are Task 5 — nothing here may grow behaviour before then.
@@ -1252,12 +1249,21 @@ static func tick_one(b: Building, world: Node2D) -> void:
 			Windmill.tick(b, world)
 		Type.STEAM_GENERATOR:
 			SteamGenerator.tick(b, world)
+		Type.SPLITTER:
+			# Pass 1: self-only lane shift, gated on Belt.is_advance_tick().
+			# The splitter rides the same two-pass contract as BELT.
+			Splitter.tick(b, world)
 		# PIPE and PUMP are passive — no per-tick logic in connectivity-only model.
 
 static func post_tick_one(b: Building, world: Node2D) -> void:
 	match b.type:
 		Type.BELT:
 			Belt.post_tick(b, world)
+		Type.SPLITTER:
+			# Pass 2: branch delivery (round-robin, #14 feeder guard). The
+			# second type this pass has ever dispatched — test_tick_loop_wiring
+			# pins the wiring; test_splitter pins what the dispatch does.
+			Splitter.post_tick(b, world)
 
 static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	match b.type:
@@ -1570,6 +1576,8 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return SteamGenerator.info_lines(b, world)
 		Type.ACCUMULATOR:
 			return Accumulator.info_lines(b, world)
+		Type.SPLITTER:
+			return Splitter.info_lines(b)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]
 	for k in b.state.keys():

@@ -145,6 +145,12 @@ const TESTS: Array = [
 	# enabler) — mechanism literals, rotated placement/occupancy/hover, and
 	# the rotated save round-trip.
 	preload("res://scripts/tests/test_dir_footprint.gd"),
+	# Belt Logistics Session 1 Task 3: the splitter core — the locked
+	# one-belt-tile lane (trajectory literals shared with test_belt.gd),
+	# labelled six-item round-robin, all-to-open under a jam, whole-layout
+	# conservation, the #14 feeder guard + input-edge refusals, and the
+	# next_out save/load resume.
+	preload("res://scripts/tests/test_splitter.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

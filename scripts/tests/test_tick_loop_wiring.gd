@@ -36,12 +36,17 @@ extends RefCounted
 ## So FOUR of the seven were genuinely undetectable: delete
 ## `Buildings.post_tick_one` and belt-to-belt handoff stops everywhere in the
 ## game while the suite prints "54 passed, 0 failed". Belt CHAINS are the
-## casualty and no suite noticed. What makes that possible: belt-to-belt
-## handoff is the ONLY thing `post_tick_one` dispatches, and every other
-## consumer takes items off a belt by pulling (`Chest.tick`,
-## `Processor._try_pull_inputs`, `Inserter._try_pickup`) rather than by being
-## pushed to. So a suite can run a belt end-to-end into a chest and never
-## exercise pass 2 at all.
+## casualty and no suite noticed. What made that possible AT THE TIME OF THE
+## MEASUREMENT: belt-to-belt handoff was the ONLY thing `post_tick_one`
+## dispatched, and every other consumer takes items off a belt by pulling
+## (`Chest.tick`, `Processor._try_pull_inputs`, `Inserter._try_pickup`)
+## rather than by being pushed to. So a suite could run a belt end-to-end
+## into a chest and never exercise pass 2 at all. Since Belt Logistics
+## Session 1 Task 3, SPLITTER is the second type the pass dispatches; its
+## case is covered by test_splitter.gd (measured: deleting the SPLITTER
+## case from `post_tick_one` reddens 16 of that file's assertions), so a
+## deleted `post_tick_one` CALL SITE now also reddens there — sub-case (4)
+## below remains the pin that names the call site rather than a symptom.
 ##
 ## The other three DO redden existing suites, but only with downstream
 ## symptoms — "expected ≥9 grain, got 0", "satisfaction should be 1.0, got
@@ -259,12 +264,16 @@ static func _case_3_tick_drives_building_pass_1(parent: Node, failures: Array) -
 # (4) BUILDING PASS 2 — `Buildings.post_tick_one(...)`, via a belt handing
 # its front item to the belt downstream.
 #
-# BELT is the only type `post_tick_one` dispatches, so this handoff is the
-# whole observable surface of pass 2. The item is seeded in the FRONT slot,
+# BELT was the only type `post_tick_one` dispatched when this was measured;
+# since Belt Logistics Session 1 Task 3 the pass also dispatches SPLITTER
+# (`Splitter.post_tick`, pinned by test_splitter.gd), so this belt handoff
+# is no longer the whole observable surface of pass 2 — it remains the
+# loop-level pin for the CALL SITE. The item is seeded in the FRONT slot,
 # which pass 1 cannot move (`Belt.tick` only fills empty slots from behind),
 # so a crossing item is pass 2 and nothing else — measured: deleting
 # `Buildings.tick_one` reddens sub-cases (3), (5) and (6) but leaves this one
-# green, and deleting `post_tick_one` reddens this one alone.
+# green, and deleting `post_tick_one` reddened this one alone (today it
+# would redden test_splitter.gd as well).
 #
 # This is the call site that was WHOLLY uncovered. Removing
 # `Buildings.post_tick_one` from _on_tick and running the pre-existing suite
