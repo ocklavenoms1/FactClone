@@ -383,7 +383,7 @@ static func load_asset(dir_path: String, base: String, expected_footprint_width:
 	if FileAccess.file_exists(glow_png):
 		# No ground-contact requirement — see `_load_texture`. A glow is an
 		# additive overlay on the hot part of a machine, not a silhouette.
-		var gtex: Dictionary = _load_texture(glow_png, sprite_px, false)
+		var gtex: Dictionary = _load_texture(glow_png, sprite_px)
 		if not bool(gtex["ok"]):
 			return fail.call("%s glow: %s" % [base, gtex["error"]])
 		glow_tex = gtex["texture"]
@@ -409,15 +409,30 @@ static func load_asset(dir_path: String, base: String, expected_footprint_width:
 ## Split out because "sprite_px disagreeing with the actual PNG" has to be
 ## checked on EVERY layer — body, shadow, glow — not just the first.
 ##
-## `require_ground_contact` applies the zero-padding rule (see
-## BOTTOM_ROW_MIN_ALPHA above). TRUE for body masters and for shadows: both are
-## ground-plane silhouettes, and the shadow shares the body's anchor by
-## contract, so if the body is flush the shadow must be too. FALSE for the glow,
-## and that is not an exemption granted to make things pass — a glow is an
-## additive overlay over the hot part of a machine, not a silhouette.
-## `smelter_glow.png` is legitimately empty for its bottom 12 rows because the
-## forge mouth is not on the floor.
-static func _load_texture(path: String, expect_px: Vector2i, require_ground_contact: bool = true) -> Dictionary:
+## ⚠ THE ZERO-PADDING RULE THAT USED TO LIVE HERE WAS REVERSED 2026-08-26.
+## Transparent bottom rows are DEPTH INFORMATION, not padding: a building does
+## not necessarily fill its tile front-to-back. The chest's plan is 1.549:1 —
+## 0.58 tiles deep, centred, so it sits ~0.21 tiles back from the tile's front
+## edge: predicted 6.71 px of empty rows, measured 7. The pole predicts 9.80,
+## measures 10. The depth is in the asset JSON all along
+## (`normalized_extent_tiles[1]`).
+##
+## `anchor_px` is a GROUND-CONTACT POINT, not ink — it may (and usually does)
+## point at a transparent pixel. Placement is
+## `footprint_bottom_centre − anchor_px` and NOTHING else; the empty rows are
+## irrelevant to it. The anchors were verified empirically by the art side: a
+## marker quad covering exactly the footprint, rendered through the identical
+## camera and downsample path, landed within a pixel on both axes for all
+## three assets.
+##
+## The reversed rule would have BEEN the defect it was meant to prevent —
+## every building drawn hard against its tile's front boundary, each by a
+## different per-asset error, invisible to any test — and it is unsatisfiable
+## once 4-way rotation ships (one cell unioned across four yaws cannot be
+## flush for all of them) and forbids front-edge overhang. Do not re-add an
+## opacity requirement on the bottom row; `test_sprite_manifest.gd` pins
+## padded bodies and shadows as LOADABLE from the other direction.
+static func _load_texture(path: String, expect_px: Vector2i) -> Dictionary:
 	var img := Image.new()
 	var err: int = img.load(path)
 	if err != OK:
@@ -426,21 +441,18 @@ static func _load_texture(path: String, expect_px: Vector2i, require_ground_cont
 	if got != expect_px:
 		return {"ok": false, "error": "%s is %dx%d on disk but the JSON says sprite_px %dx%d"
 			% [path, got.x, got.y, expect_px.x, expect_px.y], "texture": null}
-	if require_ground_contact:
-		var empty: int = empty_bottom_rows(img)
-		if empty > 0:
-			return {"ok": false, "error": "%s has %d bottom row%s below the alpha-%d opacity threshold (bottom row's strongest pixel is alpha %d of 255). anchor_px.y is the sprite's bottom edge AND its ground-contact row, so the silhouette must reach the bottom edge — re-export with no transparent bottom padding."
-				% [path, empty, "" if empty == 1 else "s", int(round(BOTTOM_ROW_MIN_ALPHA * 255.0)), int(round(_row_max_alpha(img, got.y - 1) * 255.0))], "texture": null}
 	return {"ok": true, "error": "", "texture": ImageTexture.create_from_image(img)}
 
 ## How many rows at the bottom of `img` carry no pixel at or above
-## BOTTOM_ROW_MIN_ALPHA. 0 means the artwork reaches the bottom edge, which is
-## the whole of the rule; the larger number is carried only so the failure
-## message can say HOW far off the export is rather than just that it is off.
-##
-## Public so `test_sprite_manifest.gd` can report the per-asset counts without
-## re-implementing the scan — one definition of "empty", so the rule and the
-## number in the message cannot drift apart.
+## BOTTOM_ROW_MIN_ALPHA. KEPT AFTER THE 2026-08-26 REVERSAL as a diagnostic,
+## not a rule: the count now measures the asset's DEPTH ENCODING (how far the
+## silhouette sits back from the tile's front edge), and
+## `test_sprite_manifest.gd`'s depth-consistency sub-case checks it against
+## the same asset's JSON `normalized_extent_tiles` — two artifacts of one
+## export that must agree. The alpha-8 threshold survives with it: the
+## designer endorsed it as the AA-noise floor (measured per-row maxima gap:
+## noise at 1/3/4, silhouette at 18+, nothing between 5 and 17), so any
+## future opacity-based check reuses it rather than re-deriving a floor.
 static func empty_bottom_rows(img: Image) -> int:
 	var h: int = img.get_size().y
 	var n: int = 0
