@@ -101,6 +101,13 @@ pause ticks first. A second trap: `add_child` from `_ready` fails **silently**
 ("Parent node is busy setting up children"), producing a flat grey frame that
 hashes identically across runs — a perfect "identical" result meaning nothing.
 
+A third trap, measured during #30's draw-cost pass (2026-08-26): **the off-screen
+window still receives live mouse input.** Wheel notches drifted zoom mid-measurement
+(one run went 1.5 → 5.23 → 0.85) and the hover indicator tracked the physical mouse
+across the invisible window. Any windowed measurement or capture must either disable
+input in the harness or verify per-run that the camera state printed constant — a
+drifted run does not fail, it just measures a different scene.
+
 ---
 
 ## Re-scoping the five items
