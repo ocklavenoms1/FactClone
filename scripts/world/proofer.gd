@@ -15,7 +15,7 @@ static func make(pos: Vector2i, dir: int = 0) -> Building:
 	return Building.new(Buildings.Type.PROOFER, pos, Processor.make_state(DEFAULT_RECIPE_ID, dir))
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	var w: float = float(tile_size * fp.x)
 	var h: float = float(tile_size * fp.y)
 	var s_min: float = min(w, h)

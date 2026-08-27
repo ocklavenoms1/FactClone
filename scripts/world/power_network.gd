@@ -190,8 +190,8 @@ static func poles_connected(world, anchor_a: Vector2i, anchor_b: Vector2i) -> bo
 ## which is invisible in tests built around a single orientation and obvious
 ## on screen. Footprint-to-footprint is orientation-independent.
 static func _pole_distance(a: Building, b: Building) -> int:
-	var fa: Vector2i = Buildings.footprint_of(a.type)
-	var fb: Vector2i = Buildings.footprint_of(b.type)
+	var fa: Vector2i = Buildings.footprint_of_building(a)
+	var fb: Vector2i = Buildings.footprint_of_building(b)
 	var dx: int = max(0, max(a.anchor.x - (b.anchor.x + fb.x - 1), b.anchor.x - (a.anchor.x + fa.x - 1)))
 	var dy: int = max(0, max(a.anchor.y - (b.anchor.y + fb.y - 1), b.anchor.y - (a.anchor.y + fa.y - 1)))
 	return max(dx, dy)
@@ -266,7 +266,7 @@ static func rebuild_topology(world) -> void:
 			# queries hit raw cells and cannot know a 2x2 substation's
 			# anchor, so without this map a multi-cell pole answers only
 			# from its top-left cell and its supply box sits off-centre.
-			var pole_fp: Vector2i = Buildings.footprint_of(world.buildings[p].type)
+			var pole_fp: Vector2i = Buildings.footprint_of_building(world.buildings[p])
 			for fy in range(pole_fp.y):
 				for fx in range(pole_fp.x):
 					world._pole_cells[p + Vector2i(fx, fy)] = p
@@ -575,7 +575,7 @@ static func wire_edges(world) -> Array:
 ## fp.x on an anchor at x means cells x .. x+fp.x-1, whose centre doubled is
 ## 2x + fp.x.
 static func _pole_centre_doubled(b: Building) -> Vector2i:
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	return Vector2i(2 * b.anchor.x + fp.x, 2 * b.anchor.y + fp.y)
 
 ## Squared Euclidean distance between two doubled centres. Exact ints, and only
@@ -762,7 +762,7 @@ static func _adjacent_component_id(world, b: Building) -> int:
 	# south-east quarter still returns the substation Building, whose `.anchor`
 	# is the key _pole_component holds. The consumer side has no Building to
 	# start from, only a raw cell, which is what _pole_cells exists for.
-	for cell in Buildings.all_edge_cells(b.type, b.anchor):
+	for cell in Buildings.all_edge_cells(b.type, b.anchor, Buildings.dir_of(b)):
 		if not world.has_building_at(cell):
 			continue
 		var nb: Building = world.building_at(cell)
@@ -796,7 +796,7 @@ static func _adjacent_component_id(world, b: Building) -> int:
 ## the difference real. Same documented v1 simplification
 ## _adjacent_component_id carries.
 static func _supply_component_id(world, b: Building) -> int:
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	for fy in range(fp.y):
 		for fx in range(fp.x):
 			var comp_id: int = _covering_component_id(world, b.anchor + Vector2i(fx, fy))

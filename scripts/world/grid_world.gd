@@ -214,6 +214,11 @@ var hover_arrow_dir: int = -1
 ## When the hotbar selection is a building, main.gd sets this so the hover
 ## preview shows the full footprint (e.g. 2×2 for Mixer). -1 = single tile.
 var hover_building_type: int = -1
+## The player's current ROTATION INTENT for the held building (main.gd's
+## placement_direction, R-key). 0 = canonical. Only meaningful while
+## hover_building_type >= 0; the preview feeds it to footprint_for and
+## hover_preview_blocked so a rotated 2×1 previews the rect it would occupy.
+var hover_building_dir: int = 0
 
 ## Failure reasons set by set_overlay / clear_tile / can_place_building.
 ## main.gd reads these to surface a user-friendly toast.
@@ -423,23 +428,36 @@ func building_at(pos: Vector2i) -> Building:
 		return null
 	return buildings.get(occupied[pos], null)
 
-## Footprint cells for a building of given type with anchor at `pos`.
-func _footprint_cells(t: int, pos: Vector2i) -> Array:
-	var fp: Vector2i = Buildings.footprint_of(t)
+## Footprint cells for a building of given type with anchor at `pos`, in the
+## orientation `dir` (Belt.DIR_*). The anchor is the top-left cell of the
+## ROTATED rect — Buildings.footprint_for owns the swap convention; this loop
+## only changes which SIZE it is fed. `dir` is deliberately NOT defaulted:
+## every caller inside this file must decide whether it is asking about a
+## proposed placement (the caller's dir) or an existing building (that
+## building's own Buildings.dir_of).
+func _footprint_cells(t: int, pos: Vector2i, dir: int) -> Array:
+	var fp: Vector2i = Buildings.footprint_for(t, dir)
 	var cells: Array = []
 	for dx in fp.x:
 		for dy in fp.y:
 			cells.append(Vector2i(pos.x + dx, pos.y + dy))
 	return cells
 
-## Can a building of `type` be placed with anchor at `pos`?
+## Can a building of `type` be placed with anchor at `pos`, facing `dir`?
 ## Checks footprint vacancy + overlay compatibility, plus type-specific
 ## constraints (e.g. Pump must have an adjacent water tile).
 ## On failure, sets last_building_place_error to a user-friendly reason.
-func can_place_building(t: int, pos: Vector2i) -> bool:
+##
+## `dir` DEFAULTS TO 0 (canonical), and the default is only PROVABLY correct
+## for square footprints, where footprint_for(t, dir) == footprint_of(t) at
+## every dir. Every pre-existing caller places a square type, which is why
+## none of them had to change. Any caller asking about a NON-SQUARE type
+## (today: SPLITTER) must pass the real placement dir — place_building does,
+## and test_dir_footprint's asymmetry cases redden if it stops.
+func can_place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
 	last_building_place_error = ""
 	var allowed_overlays: Array = Buildings.requires_overlay(t)
-	for cell in _footprint_cells(t, pos):
+	for cell in _footprint_cells(t, pos, dir):
 		if has_building_at(cell):
 			last_building_place_error = "%s: tile already occupied" % Buildings.name_of(t)
 			return false
@@ -513,15 +531,27 @@ func can_place_building(t: int, pos: Vector2i) -> bool:
 ## The premise is asserted, not assumed — that suite's (E2) reddens if any
 ## reading function ever becomes a coroutine, which is the condition that would
 ## make the save/restore necessary.
-func hover_preview_blocked(building_type: int, anchor: Vector2i) -> bool:
+## `dir` is the player's CURRENT ROTATION INTENT for the held building
+## (main.gd's placement_direction, mirrored into hover_building_dir), so the
+## preview asks about the same rotated rect the placement would occupy. Same
+## default-is-only-square-safe contract as can_place_building above.
+func hover_preview_blocked(building_type: int, anchor: Vector2i, dir: int = 0) -> bool:
 	if building_type < 0:
 		return false
-	return not can_place_building(building_type, anchor)
+	return not can_place_building(building_type, anchor, dir)
 
 ## `extra` is forwarded to Buildings.make for type-specific payload
 ## (currently only PLANTER uses it — for crop_type).
 func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
-	if not can_place_building(t, pos):
+	# Normalize FIRST: a type that does not support direction never stores one
+	# (its make() drops `dir`, so Buildings.dir_of reads 0). Without this line
+	# a dir-carrying call for such a type would VALIDATE and OCCUPY one rect
+	# while removal — which reads the building's own dir_of — frees another.
+	# Square types are immune either way; this keeps the invariant airtight
+	# for any future non-square type, not just polite callers.
+	if not Buildings.supports_direction(t):
+		dir = 0
+	if not can_place_building(t, pos, dir):
 		return false
 	var b: Building = Buildings.make(t, pos, dir, extra)
 	if b == null:
@@ -532,7 +562,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 	# Oven, MiningDrill, etc.) consistently nullify regrowth where they sit.
 	# Defensive: only cancels for "regrowth_remaining" specifically; doesn't
 	# touch ore richness or other resource_state fields.
-	for cell in _footprint_cells(t, pos):
+	for cell in _footprint_cells(t, pos, dir):
 		if resource_state.has(cell):
 			var rs: Dictionary = resource_state[cell]
 			if rs.has("regrowth_remaining"):
@@ -542,7 +572,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 				# erases above — a surviving index entry faults _tick_regrowth.
 				_active_regrowth.erase(cell)
 	buildings[pos] = b
-	for cell in _footprint_cells(t, pos):
+	for cell in _footprint_cells(t, pos, dir):
 		occupied[cell] = pos
 	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
 		_fluid_network_dirty = true
@@ -562,7 +592,9 @@ func remove_building_at(pos: Vector2i) -> bool:
 	var b: Building = buildings.get(anchor, null)
 	if b == null:
 		return false
-	for cell in _footprint_cells(b.type, anchor):
+	# The building's OWN orientation — a rotated 2x1 must free the same cells
+	# it occupied, or removal strands a phantom `occupied` entry.
+	for cell in _footprint_cells(b.type, anchor, Buildings.dir_of(b)):
 		occupied.erase(cell)
 	buildings.erase(anchor)
 	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
@@ -626,7 +658,7 @@ func fluid_available_at(pos: Vector2i, _fluid_type: int = Fluids.Type.WATER) -> 
 func fluid_available_for_building(b: Building, _fluid_type: int = Fluids.Type.WATER) -> bool:
 	if _fluid_network_dirty:
 		_rebuild_fluid_network()
-	for cell in Buildings.all_edge_cells(b.type, b.anchor):
+	for cell in Buildings.all_edge_cells(b.type, b.anchor, Buildings.dir_of(b)):
 		if _pipe_component.has(cell):
 			var comp_id: int = _pipe_component[cell]
 			if _component_has_pump.get(comp_id, false):
@@ -649,7 +681,7 @@ func is_pipe_in_pump_component(pos: Vector2i) -> bool:
 func fluid_available_for_building_edge(b: Building, world_dir: int, _fluid_type: int = Fluids.Type.WATER) -> bool:
 	if _fluid_network_dirty:
 		_rebuild_fluid_network()
-	for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+	for cell in Buildings.edge_cells(b.type, b.anchor, world_dir, Buildings.dir_of(b)):
 		if _pipe_component.has(cell):
 			var comp_id: int = _pipe_component[cell]
 			if _component_has_pump.get(comp_id, false):
@@ -1820,7 +1852,9 @@ func _draw() -> void:
 	for anchor_key in buildings:
 		var anchor: Vector2i = anchor_key
 		var b: Building = buildings[anchor]
-		var fp: Vector2i = Buildings.footprint_of(b.type)
+		# Instance footprint: culling a rotated 2×1 by its canonical rect
+		# would pop it while its actual second cell is still on screen.
+		var fp: Vector2i = Buildings.footprint_of_building(b)
 		# Cull: skip if entire footprint is offscreen.
 		if anchor.x + fp.x - 1 < min_tile.x or anchor.x > max_tile.x:
 			continue
@@ -1869,17 +1903,21 @@ func _draw() -> void:
 		var fp_size: Vector2i = Vector2i(1, 1)
 		var rect_anchor: Vector2i = hover_tile
 		if hover_building_type >= 0:
-			fp_size = Buildings.footprint_of(hover_building_type)
+			# The held building's ROTATED footprint — the rect the placement
+			# would actually occupy at the player's current rotation intent.
+			fp_size = Buildings.footprint_for(hover_building_type, hover_building_dir)
 		elif occupied.has(hover_tile):
 			rect_anchor = occupied[hover_tile]
 			var existing: Building = buildings.get(rect_anchor, null)
 			if existing != null:
-				fp_size = Buildings.footprint_of(existing.type)
+				# The existing building's OWN orientation, so hovering a
+				# rotated 2×1 outlines the cells it really covers.
+				fp_size = Buildings.footprint_of_building(existing)
 		var hover_rect: Rect2 = Rect2(rect_anchor.x * TILE_SIZE, rect_anchor.y * TILE_SIZE, TILE_SIZE * fp_size.x, TILE_SIZE * fp_size.y)
 		# Red if this placement would be refused. The rule lives in
 		# hover_preview_blocked() and NOT here, because nothing headless can
 		# reach a _draw body — see that method's header.
-		var blocked: bool = hover_preview_blocked(hover_building_type, rect_anchor)
+		var blocked: bool = hover_preview_blocked(hover_building_type, rect_anchor, hover_building_dir)
 		var hover_color: Color = Color(1.0, 0.4, 0.4, 0.6) if blocked else Color(1.0, 1.0, 1.0, 0.5)
 		# Hover outline width: 2 world units AT zoom >= 1 (so it scales
 		# with the tile and stays exactly aligned with tile boundaries),
@@ -2010,7 +2048,9 @@ func _draw_power_wires() -> void:
 ## not have (mast crossarm versus body centre).
 func _pole_wire_anchor(anchor: Vector2i) -> Vector2:
 	var b: Building = buildings.get(anchor, null)
-	var fp: Vector2i = Vector2i(1, 1) if b == null else Buildings.footprint_of(b.type)
+	# Instance footprint: every pole is square today, but a wire must always
+	# terminate over the cells the building ACTUALLY covers.
+	var fp: Vector2i = Vector2i(1, 1) if b == null else Buildings.footprint_of_building(b)
 	var x: float = (float(anchor.x) + float(fp.x) * 0.5) * float(TILE_SIZE)
 	if fp.y == 1:
 		return Vector2(x, float(anchor.y) * float(TILE_SIZE) + float(TILE_SIZE) * MAST_WIRE_Y)

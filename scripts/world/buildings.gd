@@ -143,6 +143,14 @@ enum Type {
 	# integer value.
 	MEDIUM_POLE,
 	SUBSTATION,
+	# Belt Logistics Session 1 — pulled forward from Task 2 by Task 1 so the
+	# dir-aware footprint mechanism can be exercised through the REAL
+	# placement / occupancy / hover / save stack rather than a synthetic
+	# route. Task 1 ships enum + DATA + a stub make/draw ONLY: the first
+	# NON-SQUARE footprint in the registry (2×1 canonical, rotatable).
+	# Lane behaviour, hotbar slot, and post_tick_one membership are Task 3+.
+	# Appended at the END so every previously-saved type keeps its integer.
+	SPLITTER,
 }
 
 const DATA: Dictionary = {
@@ -774,6 +782,23 @@ const DATA: Dictionary = {
 		"walkable": false,
 		# No slot_layout — passive infrastructure, Q-inspect only.
 	},
+	Type.SPLITTER: {
+		"name": "Splitter",
+		"swatch_color": Color(0.72, 0.62, 0.28),    # brass — belt-family metal
+		# CANONICAL footprint, i.e. the shape at dir = Belt.DIR_E (0). This is
+		# the FIRST NON-SQUARE row in this table: reading "footprint" (or
+		# footprint_of) for a placed INSTANCE of this type is wrong whenever
+		# its dir is S or N — use footprint_for(t, dir) or
+		# footprint_of_building(b), which swap axes on the quarter turns.
+		"footprint": Vector2i(2, 1),
+		# Belt-family ground rules: same overlays as BELT.
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,
+		"player_drainable": false,
+		# Walkable like BELT — the player walks over belt-level logistics.
+		"walkable": true,
+		# No slot_layout — passive belt infrastructure, same as BELT/PIPE.
+	},
 	Type.WATER_WHEEL: {
 		"name": "Water Wheel",
 		"swatch_color": Color(0.40, 0.55, 0.65),    # wet wood-teal
@@ -875,6 +900,43 @@ static func swatch_color_of(t: int) -> Color:
 static func footprint_of(t: int) -> Vector2i:
 	return DATA[t]["footprint"]
 
+## ORIENTATION-AWARE footprint (Belt Logistics Session 1, Task 1).
+##
+## THE CONVENTION, in one place: DATA's "footprint" is the CANONICAL shape —
+## the rect the building occupies at dir = Belt.DIR_E (0), the same canonical
+## orientation recipes declare their ports in (see world_dir below). A SQUARE
+## footprint is identical at every dir and returns unchanged. A NON-SQUARE
+## footprint keeps the canonical shape at DIR_E (0) / DIR_W (2) and SWAPS AXES
+## at DIR_S (1) / DIR_N (3) — the quarter turns.
+##
+## THE ANCHOR IS ALWAYS THE TOP-LEFT CELL OF THE *ROTATED* RECT. Occupied
+## cells are anchor .. anchor + footprint_for(t, dir) - (1, 1) — exactly the
+## derivation GridWorld._footprint_cells has always used, so rotation changes
+## WHICH SIZE that loop is fed, never how cells are derived from it.
+##
+## footprint_of stays for genuinely orientation-independent uses: asserting
+## the DATA row itself, art-manifest checks pinned to canonical sprite
+## dimensions, and per-type (not per-instance) bookkeeping. Any question
+## about a placed INSTANCE's cells must come through here (or the instance
+## form footprint_of_building) — for the 2×1 SPLITTER the two answers differ.
+static func footprint_for(t: int, dir: int) -> Vector2i:
+	var fp: Vector2i = DATA[t]["footprint"]
+	if fp.x == fp.y:
+		return fp
+	if dir == 1 or dir == 3:  # Belt.DIR_S / Belt.DIR_N — quarter turns
+		return Vector2i(fp.y, fp.x)
+	return fp
+
+## The orientation a placed building actually has. Buildings that never carry
+## a "dir" key (chests, poles, old saves) read 0 = canonical — the same
+## default world_dir uses, so the two rotation readers cannot disagree.
+static func dir_of(b: Building) -> int:
+	return int(b.state.get("dir", 0))
+
+## Instance form of footprint_for: the rect this building occupies RIGHT NOW.
+static func footprint_of_building(b: Building) -> Vector2i:
+	return footprint_for(b.type, dir_of(b))
+
 static func requires_overlay(t: int) -> Array:
 	return DATA[t]["requires_overlay"]
 
@@ -927,14 +989,18 @@ static func has_interaction_ui(t: int) -> bool:
 ## For a 1×1 building, returns one cell (= anchor + DIR_VECS[dir]).
 ## For a 2×2 building, returns 2 cells along the edge. Generalizes to any size.
 ##
-##   anchor = top-left footprint cell, footprint size from DATA[t].
+##   anchor = top-left footprint cell; footprint size from footprint_for(t,
+##   orient) — `orient` is the BUILDING'S ORIENTATION (Belt.DIR_*), distinct
+##   from `dir`, which names WHICH EDGE. The default 0 (canonical) is only
+##   provably correct for square footprints; call sites with a Building in
+##   scope pass Buildings.dir_of(b).
 ##
 ##   N edge: cells at y = anchor.y - 1, x ∈ [anchor.x .. anchor.x + size.x - 1]
 ##   E edge: cells at x = anchor.x + size.x, y ∈ [anchor.y .. anchor.y + size.y - 1]
 ##   S edge: cells at y = anchor.y + size.y, x ∈ [anchor.x .. anchor.x + size.x - 1]
 ##   W edge: cells at x = anchor.x - 1, y ∈ [anchor.y .. anchor.y + size.y - 1]
-static func edge_cells(t: int, anchor: Vector2i, dir: int) -> Array:
-	var size: Vector2i = footprint_of(t)
+static func edge_cells(t: int, anchor: Vector2i, dir: int, orient: int = 0) -> Array:
+	var size: Vector2i = footprint_for(t, orient)
 	var cells: Array = []
 	match dir:
 		0:  # DIR_E
@@ -958,17 +1024,18 @@ static func edge_cells(t: int, anchor: Vector2i, dir: int) -> Array:
 ## True when `cell` lies INSIDE the footprint of type `t` anchored at `anchor`.
 ## The complement of edge_cells' "immediately outside" — used to ask whether a
 ## neighbouring belt is pointing AT this building (i.e. feeding it).
-static func footprint_contains(t: int, anchor: Vector2i, cell: Vector2i) -> bool:
-	var size: Vector2i = footprint_of(t)
+## `orient` = the building's orientation, same contract as edge_cells above.
+static func footprint_contains(t: int, anchor: Vector2i, cell: Vector2i, orient: int = 0) -> bool:
+	var size: Vector2i = footprint_for(t, orient)
 	return cell.x >= anchor.x and cell.x < anchor.x + size.x \
 		and cell.y >= anchor.y and cell.y < anchor.y + size.y
 
 ## All cells immediately outside the footprint, all 4 edges. Useful for
 ## "scan all neighbors of this building" when no edge is specified.
-static func all_edge_cells(t: int, anchor: Vector2i) -> Array:
+static func all_edge_cells(t: int, anchor: Vector2i, orient: int = 0) -> Array:
 	var cells: Array = []
 	for dir in 4:
-		cells.append_array(edge_cells(t, anchor, dir))
+		cells.append_array(edge_cells(t, anchor, dir, orient))
 	return cells
 
 ## Rotate a recipe-declared direction (DIR_E/S/W/N) by the building's
@@ -1075,6 +1142,11 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return SteamGenerator.make(pos, dir)
 		Type.ACCUMULATOR:
 			return Accumulator.make(pos)
+		Type.SPLITTER:
+			# Stub (Task 1 pull-forward): a plain Building carrying only its
+			# orientation. Splitter.gd, tick, and post_tick_one membership are
+			# Task 3+ — nothing here may grow behaviour before then.
+			return Building.new(Type.SPLITTER, pos, {"dir": dir})
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1196,6 +1268,17 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			SteamGenerator.draw(b, canvas, world_pos, tile_size)
 		Type.ACCUMULATOR:
 			Accumulator.draw(b, canvas, world_pos, tile_size)
+		Type.SPLITTER:
+			# Stub draw (Task 1 pull-forward): a flat brass plate over the
+			# building's ACTUAL (orientation-aware) footprint with a heavy
+			# trim, so a placed splitter is visible and cell-honest before
+			# Task 3 ships the real visual. Deliberately uses the instance
+			# footprint — drawing the canonical rect for a rotated splitter
+			# would paint a cell the building does not occupy.
+			var fp_sp: Vector2i = footprint_of_building(b)
+			var rect_sp: Rect2 = Rect2(world_pos, Vector2(tile_size * fp_sp.x, tile_size * fp_sp.y))
+			canvas.draw_rect(rect_sp, DATA[Type.SPLITTER]["swatch_color"], true)
+			canvas.draw_rect(rect_sp, _MULTITILE_BORDER_COLOR, false, 2.0)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
 	# moving them out of per-type draws keeps the visual language consistent.
@@ -1216,7 +1299,9 @@ const _PORT_OUTLINE: Color = Color(0.05, 0.04, 0.03)
 ## already paints a tile-bound trim border). Width scales inversely with
 ## zoom at overview so the border stays visible at ~40-tile factory views.
 static func _draw_multitile_border(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var fp: Vector2i = footprint_of(b.type)
+	# Instance footprint: a rotated 2×1's border must trace the rect it
+	# actually occupies, not the canonical row.
+	var fp: Vector2i = footprint_of_building(b)
 	if fp.x <= 1 and fp.y <= 1:
 		return
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size * fp.x, tile_size * fp.y))
@@ -1247,7 +1332,7 @@ static func _draw_port_indicators(b: Building, canvas: CanvasItem, tile_size: in
 			continue
 		var dir: int = world_dir(b, canonical_dir)
 		var item_type: int = int(pair[0])
-		for cell in edge_cells(b.type, b.anchor, dir):
+		for cell in edge_cells(b.type, b.anchor, dir, dir_of(b)):
 			var active: bool = _solid_input_active(canvas, cell, item_type)
 			_draw_port_dot(canvas, cell, dir, tile_size, _PORT_COLOR_ITEM, active)
 
@@ -1258,7 +1343,7 @@ static func _draw_port_indicators(b: Building, canvas: CanvasItem, tile_size: in
 			continue
 		var dir: int = world_dir(b, canonical_dir)
 		var item_type: int = int(pair[0])
-		for cell in edge_cells(b.type, b.anchor, dir):
+		for cell in edge_cells(b.type, b.anchor, dir, dir_of(b)):
 			var active: bool = _solid_output_active(canvas, cell, item_type)
 			_draw_port_dot(canvas, cell, dir, tile_size, _PORT_COLOR_ITEM, active)
 
@@ -1273,13 +1358,13 @@ static func _draw_port_indicators(b: Building, canvas: CanvasItem, tile_size: in
 		var canonical_dir: int = int(pair[2]) if pair.size() >= 3 else -1
 		if canonical_dir >= 0:
 			var dir: int = world_dir(b, canonical_dir)
-			for cell in edge_cells(b.type, b.anchor, dir):
+			for cell in edge_cells(b.type, b.anchor, dir, dir_of(b)):
 				var active: bool = _fluid_active(canvas, cell)
 				_draw_port_dot(canvas, cell, dir, tile_size, _PORT_COLOR_FLUID, active)
 		else:
 			# Any-edge: highlight only active connections.
 			for d in 4:
-				for cell in edge_cells(b.type, b.anchor, d):
+				for cell in edge_cells(b.type, b.anchor, d, dir_of(b)):
 					if _fluid_active(canvas, cell):
 						_draw_port_dot(canvas, cell, d, tile_size, _PORT_COLOR_FLUID, true)
 

@@ -141,6 +141,10 @@ const TESTS: Array = [
 	# suite pins the index and every one of its six invalidation edges,
 	# each mutation-verified. See the file header.
 	preload("res://scripts/tests/test_regrowth_index.gd"),
+	# Belt Logistics Session 1 Task 1: dir-aware footprints (the 2x1 SPLITTER
+	# enabler) — mechanism literals, rotated placement/occupancy/hover, and
+	# the rotated save round-trip.
+	preload("res://scripts/tests/test_dir_footprint.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

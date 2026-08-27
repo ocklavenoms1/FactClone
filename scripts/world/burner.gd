@@ -62,7 +62,7 @@ static func try_pull_fuel(b: Building, world, fuel_edge_dir: int = -1) -> bool:
 		return false
 	var dirs: Array = [fuel_edge_dir] if fuel_edge_dir >= 0 else [Belt.DIR_E, Belt.DIR_S, Belt.DIR_W, Belt.DIR_N]
 	for d in dirs:
-		for cell in Buildings.edge_cells(b.type, b.anchor, d):
+		for cell in Buildings.edge_cells(b.type, b.anchor, d, Buildings.dir_of(b)):
 			if _try_pull_fuel_at_cell(b, world, cell, current):
 				return true
 	return false

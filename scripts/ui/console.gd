@@ -847,7 +847,7 @@ func _cmd_place(args: Array) -> String:
 			# Proofer, Packager) could ever be console-placed on grass — the
 			# retry failed on the three cells nobody painted, and `help place`
 			# went on claiming "Bypasses overlay check" (audit #23).
-			var painted: Array = _paint_footprint(btype, pos, picked_overlay, requires_overlay)
+			var painted: Array = _paint_footprint(btype, pos, picked_overlay, requires_overlay, dir)
 			if painted[0] and grid_world.place_building(btype, pos, dir):
 				return "Placed %s at %s (auto-set %s overlay)." % [Buildings.name_of(btype), str(pos), Terrain.overlay_name(picked_overlay)]
 			# Placement still fails. Report the reason it failed THIS time —
@@ -868,8 +868,11 @@ func _cmd_place(args: Array) -> String:
 ## last, and is valid to hand to `_unpaint_footprint` whether or not every cell
 ## succeeded — a cell can refuse the paint (a deposit, a tree, another
 ## building's tile) and the ones already painted still have to come back.
-func _paint_footprint(btype: int, pos: Vector2i, overlay: int, allowed: Array) -> Array:
-	var fp: Vector2i = Buildings.footprint_of(btype)
+## `dir` is the command's placement direction: the paint must cover the
+## ROTATED rect place_building is about to validate, or a console-placed
+## S-facing splitter fails on the unpainted cell nobody's overlay reached.
+func _paint_footprint(btype: int, pos: Vector2i, overlay: int, allowed: Array, dir: int) -> Array:
+	var fp: Vector2i = Buildings.footprint_for(btype, dir)
 	var undo: Array = []
 	for dx in fp.x:
 		for dy in fp.y:

@@ -81,7 +81,7 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
 	# Render the 2×2 mini-grid: each cell colored by its ore type and
 	# labeled with remaining richness, OR neutral if no ore there.
-	var fp: Vector2i = Buildings.footprint_of(building.type)
+	var fp: Vector2i = Buildings.footprint_of_building(building)
 	for dx in fp.x:
 		for dy in fp.y:
 			var cell_pos: Vector2i = Vector2i(building.anchor.x + dx, building.anchor.y + dy)

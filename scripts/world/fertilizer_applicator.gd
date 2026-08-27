@@ -173,7 +173,7 @@ static func _try_pull_input(b: Building, world) -> void:
 	if _buffer_total(b.state.get("in_buffer", [])) >= INPUT_BUFFER_CAPACITY:
 		return
 	var input_dir: int = Buildings.world_dir(b, INPUT_PORT_DIR)
-	for cell in Buildings.edge_cells(Buildings.Type.FERTILIZER_APPLICATOR, b.anchor, input_dir):
+	for cell in Buildings.edge_cells(Buildings.Type.FERTILIZER_APPLICATOR, b.anchor, input_dir, Buildings.dir_of(b)):
 		if not world.has_building_at(cell):
 			continue
 		var neighbor: Building = world.building_at(cell)

@@ -755,10 +755,17 @@ func _process(delta: float) -> void:
 	else:
 		grid_world.hover_arrow_dir = -1
 	# Footprint preview for multi-tile buildings (Mixer/Oven/Proofer/Packager).
+	# The dir travels WITH the type: a rotated 2×1 previews (and validates)
+	# the rect it would actually occupy at the player's current R-key intent.
+	# 0 (not -1) for non-directional holds — this value feeds footprint_for,
+	# where 0 means canonical; -1 is hover_arrow_dir's no-arrow sentinel and
+	# must not leak here.
 	if hotbar.current_kind() == "building":
 		grid_world.hover_building_type = hotbar.current_value()
+		grid_world.hover_building_dir = placement_direction if Buildings.supports_direction(hotbar.current_value()) else 0
 	else:
 		grid_world.hover_building_type = -1
+		grid_world.hover_building_dir = 0
 
 	if Input.is_action_just_pressed("rotate_placement"):
 		# Three cases for R:
@@ -766,10 +773,14 @@ func _process(delta: float) -> void:
 		#   2. Holding a non-rotatable building → toast (silent no-op feels
 		#      like a bug; tell the player why nothing happened).
 		#   3. Hand empty / non-building selection → rotate the placed
-		#      building under the cursor in-place if it's rotatable. Lets
-		#      the player adjust port orientations without rebuilding —
-		#      Factorio convention. Square footprint (1×1, 2×2) means
-		#      rotation only swaps port directions, no cell relocation.
+		#      building under the cursor in-place if it's rotatable AND
+		#      square. For square footprints (1×1, 2×2) rotation only swaps
+		#      port directions, no cell relocation — Factorio convention.
+		#      A NON-SQUARE building (SPLITTER, 2×1) changes SHAPE when it
+		#      rotates: an in-place state["dir"] write would relocate its
+		#      cells without re-validating them or updating `occupied`,
+		#      desyncing the world silently. Until a remove-revalidate-
+		#      replace path ships (Task 3+), refuse with a toast.
 		var holding_building: bool = hotbar.current_kind() == "building"
 		if holding_building and Buildings.supports_direction(hotbar.current_value()):
 			placement_direction = (placement_direction + 1) % 4
@@ -777,7 +788,12 @@ func _process(delta: float) -> void:
 			_show_toast("%s has no directional ports" % Buildings.name_of(hotbar.current_value()))
 		elif grid_world.has_building_at(hover_tile):
 			var hovered: Building = grid_world.building_at(hover_tile)
-			if Buildings.supports_direction(hovered.type):
+			var hovered_fp: Vector2i = Buildings.footprint_of(hovered.type)
+			if Buildings.supports_direction(hovered.type) and hovered_fp.x != hovered_fp.y:
+				# See case-3 comment above: rotating a non-square building
+				# in place would relocate its cells behind `occupied`'s back.
+				_show_toast("%s changes shape when rotated — remove and re-place it instead" % Buildings.name_of(hovered.type))
+			elif Buildings.supports_direction(hovered.type):
 				hovered.state["dir"] = (int(hovered.state.get("dir", 0)) + 1) % 4
 				_show_toast("%s rotated to %s" % [Buildings.name_of(hovered.type), Belt.DIR_NAMES[int(hovered.state["dir"])]])
 			else:
@@ -1008,7 +1024,11 @@ func _try_place(pos: Vector2i) -> void:
 			# bypass this check (devs accept the consequences). Belts skip the
 			# check via the walkable flag — players can pave a belt under
 			# themselves and walk off freely.
-			var fp_check: Vector2i = Buildings.footprint_of(t)
+			# The dir is resolved BEFORE the footprint: the player-trap check
+			# and the dirty-marking below must both walk the ROTATED rect the
+			# placement will occupy, not the canonical row.
+			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
+			var fp_check: Vector2i = Buildings.footprint_for(t, dir)
 			if not Buildings.is_walkable(t):
 				var player_tile: Vector2i = grid_world.world_to_tile(player.global_position)
 				for dx in fp_check.x:
@@ -1016,7 +1036,6 @@ func _try_place(pos: Vector2i) -> void:
 						if Vector2i(pos.x + dx, pos.y + dy) == player_tile:
 							_rate_limited_fail_toast("Can't place %s on yourself — step off first." % Buildings.name_of(t))
 							return
-			var dir: int = placement_direction if Buildings.supports_direction(t) else 0
 			var extra = hotbar.current_extra()
 			if not grid_world.place_building(t, pos, dir, extra):
 				_rate_limited_fail_toast(grid_world.last_building_place_error)
@@ -1335,7 +1354,9 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 ## Manhattan ≤ 1 from any cell of building b's footprint (any direction
 ## including the building tile itself).
 static func _is_adjacent_to_building(b: Building, player_tile: Vector2i) -> bool:
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	# Instance footprint — adjacency to a rotated 2×1 is measured against the
+	# cells it actually covers.
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	for dx in fp.x:
 		for dy in fp.y:
 			var cell: Vector2i = Vector2i(b.anchor.x + dx, b.anchor.y + dy)

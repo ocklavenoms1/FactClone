@@ -93,6 +93,10 @@ static func run(parent: Node) -> Dictionary:
 		# info_lines, but there is nothing to put items into. MEDIUM_POLE and
 		# SUBSTATION joined in Electricity Session 3.
 		Buildings.Type.POWER_POLE, Buildings.Type.MEDIUM_POLE, Buildings.Type.SUBSTATION,
+		# SPLITTER joined in Belt Logistics Session 1 Task 1 (registry row
+		# pulled forward from Task 2): belt-family passive infrastructure,
+		# no slot_layout — same standing as BELT/PIPE above.
+		Buildings.Type.SPLITTER,
 	]
 	for type_value in Buildings.DATA.keys():
 		var t: int = int(type_value)

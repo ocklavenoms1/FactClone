@@ -80,7 +80,7 @@ static func make(pos: Vector2i, dir: int = 0) -> Building:
 ## tiles (grass, depleted-tree-stumps, depleted-ore-stumps) are skipped.
 static func refresh_covered_deposits(b: Building, world) -> void:
 	var deposits: Array = []
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	for dx in fp.x:
 		for dy in fp.y:
 			var pos: Vector2i = Vector2i(b.anchor.x + dx, b.anchor.y + dy)
@@ -233,7 +233,7 @@ static func _try_push_outputs(b: Building, world) -> void:
 		var count: int = int(entry[1])
 		if count <= 0:
 			continue
-		for cell in Buildings.edge_cells(b.type, b.anchor, output_dir):
+		for cell in Buildings.edge_cells(b.type, b.anchor, output_dir, Buildings.dir_of(b)):
 			if _try_push_to(world, cell, item_type):
 				entry[1] = count - 1
 				if int(entry[1]) <= 0:
@@ -316,7 +316,7 @@ static func info_lines(b: Building, world) -> Array:
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	# 2×2 footprint: cover the full 64×64 area centered at world_pos.
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size * fp.x, tile_size * fp.y))
 	# Body color tinted by state.
 	var s: int = int(b.state.get("state", STATE_IDLE))

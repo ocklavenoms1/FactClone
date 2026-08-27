@@ -562,6 +562,14 @@ static func draw_building(b: Building, canvas: CanvasItem, world_pos: Vector2, t
 	var e = _entries.get(declared()[b.type], null)
 	if e == null:
 		return false
+	# CANONICAL footprint, deliberately — art is authored in canonical
+	# orientation and test_sprite_manifest pins each asset's cell_tiles to
+	# footprint_of(t).x. This is SAFE ONLY while no declared() type is
+	# non-square-and-rotatable: drawing a rotated 2×1 SPLITTER from here
+	# would paint the canonical rect over cells it does not occupy. Before
+	# declaring art for such a type, this path (and draw_fallback_marker /
+	# GlowLayer below) needs a rotate-or-per-dir-asset decision — an art
+	# pipeline call, not a default-dir substitution. Belt Logistics S1 T1.
 	var fp: Vector2i = Buildings.footprint_of(b.type)
 	var scale: float = float(tile_size) / float(SPRITE_PX_PER_TILE)
 	var size: Vector2 = Vector2(e["sprite_px"]) * scale

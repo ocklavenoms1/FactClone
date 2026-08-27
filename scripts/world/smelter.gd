@@ -210,7 +210,7 @@ static func _maybe_select_recipe(b: Building, world) -> void:
 			return
 	# (2) port peek.
 	var ore_dir: int = Buildings.world_dir(b, Belt.DIR_W)
-	for cell in Buildings.edge_cells(b.type, b.anchor, ore_dir):
+	for cell in Buildings.edge_cells(b.type, b.anchor, ore_dir, Buildings.dir_of(b)):
 		var src: Building = world.building_at(cell)
 		if src == null or src.type != Buildings.Type.BELT:
 			continue
@@ -302,7 +302,7 @@ static func _fmt_buffer(buf: Array) -> String:
 # ---------- rendering ----------
 
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
-	var fp: Vector2i = Buildings.footprint_of(b.type)
+	var fp: Vector2i = Buildings.footprint_of_building(b)
 	var rect: Rect2 = Rect2(world_pos, Vector2(tile_size * fp.x, tile_size * fp.y))
 	# Body color tinted by state.
 	var s: int = int(b.state.get("state", STATE_IDLE))

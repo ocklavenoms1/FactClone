@@ -46,7 +46,7 @@ static func tick(b: Building, world) -> void:
 ## True if any perimeter cell of the wheel's footprint is over a water
 ## terrain tile.
 static func _has_water_adjacent(b: Building, world) -> bool:
-	for cell in Buildings.all_edge_cells(b.type, b.anchor):
+	for cell in Buildings.all_edge_cells(b.type, b.anchor, Buildings.dir_of(b)):
 		if world.tiles.has(cell):
 			var tile: Tile = world.tiles[cell]
 			if tile != null and tile.base == Terrain.Base.WATER:

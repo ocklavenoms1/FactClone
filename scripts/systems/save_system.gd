@@ -791,7 +791,12 @@ static func load_game(grid_world: Node2D, player: Node2D, player_inventory: Inve
 			skipped += 1
 			continue
 		grid_world.buildings[b.anchor] = b
-		var fp: Vector2i = Buildings.footprint_of(b.type)
+		# The building's OWN orientation (state dir round-trips inside "s").
+		# Rebuilding from the canonical type row would give a rotated 2×1 the
+		# wrong second cell after every load — occupancy must round-trip the
+		# cells the building held at save time. test_dir_footprint (7) pins
+		# this with literal cells.
+		var fp: Vector2i = Buildings.footprint_of_building(b)
 		for dx in fp.x:
 			for dy in fp.y:
 				grid_world.occupied[Vector2i(b.anchor.x + dx, b.anchor.y + dy)] = b.anchor

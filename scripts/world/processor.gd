@@ -173,14 +173,14 @@ static func _try_pull_inputs(b: Building, world: Node2D, recipe: Dictionary) -> 
 	# Pinned inputs first: scan their (rotated) declared edge only.
 	for world_dir in per_dir_accept.keys():
 		var accept: Array = per_dir_accept[world_dir]
-		for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+		for cell in Buildings.edge_cells(b.type, b.anchor, world_dir, Buildings.dir_of(b)):
 			if _try_pull_from_cell(b, world, cell, accept):
 				return  # one pull per tick
 
 	# Default-scan inputs: scan all 4 edges.
 	if not default_accept.is_empty():
 		for dir in 4:
-			for cell in Buildings.edge_cells(b.type, b.anchor, dir):
+			for cell in Buildings.edge_cells(b.type, b.anchor, dir, Buildings.dir_of(b)):
 				if _try_pull_from_cell(b, world, cell, default_accept):
 					return
 
@@ -286,13 +286,13 @@ static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) ->
 
 		if world_dir >= 0:
 			# Strict: try only the (rotated) preferred edge's cells.
-			for cell in Buildings.edge_cells(b.type, b.anchor, world_dir):
+			for cell in Buildings.edge_cells(b.type, b.anchor, world_dir, Buildings.dir_of(b)):
 				if _try_push_to_cell(b, world, item_type, cell):
 					return
 			# Push failed — item waits.
 		else:
 			# No preference: chests first across all edges, then belts.
-			var cells: Array = Buildings.all_edge_cells(b.type, b.anchor)
+			var cells: Array = Buildings.all_edge_cells(b.type, b.anchor, Buildings.dir_of(b))
 			for cell in cells:
 				if _try_push_chest_to_cell(b, world, item_type, cell):
 					return
@@ -323,7 +323,7 @@ static func _try_push_outputs(b: Building, world: Node2D, recipe: Dictionary) ->
 ## building's type and anchor. No dict iteration, no build order.
 static func _belt_feeds_building(belt: Building, b: Building) -> bool:
 	var d: int = int(belt.state.get("dir", 0))
-	return Buildings.footprint_contains(b.type, b.anchor, belt.anchor + Belt.DIR_VECS[d])
+	return Buildings.footprint_contains(b.type, b.anchor, belt.anchor + Belt.DIR_VECS[d], Buildings.dir_of(b))
 
 ## Try to push one `item_type` to whatever building is at `cell`. Accepts
 ## chests (direct insert) and belts (try_insert). Returns true on success.

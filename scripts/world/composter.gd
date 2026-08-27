@@ -102,7 +102,7 @@ static func _maybe_select_recipe(b: Building, world) -> void:
 			return
 	# (2) port peek — all 4 sides.
 	for d in [Belt.DIR_E, Belt.DIR_S, Belt.DIR_W, Belt.DIR_N]:
-		for cell in Buildings.edge_cells(Buildings.Type.COMPOSTER, b.anchor, d):
+		for cell in Buildings.edge_cells(Buildings.Type.COMPOSTER, b.anchor, d, Buildings.dir_of(b)):
 			var src: Building = world.building_at(cell)
 			if src == null or src.type != Buildings.Type.BELT:
 				continue
