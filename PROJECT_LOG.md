@@ -9,6 +9,48 @@ Each entry has three sections:
 
 ---
 
+## Ground Rendering Phase 1 — the grass shader
+
+**Tag:** `session-ground-phase-1` · **Suite:** 79 suites, all green (this arc adds none — its verification is a capture harness plus a mechanical checker) · **Save:** untouched
+
+### What shipped
+
+- **`scripts/shaders/ground_grass.gdshader`** on the `Main/Background` ColorRect: three octaves of world-sampled value noise over a base colour, plus a hash-placed fleck scatter. Eleven parameters, all uniforms, no material overrides — the designer tunes every knob in the inspector with no re-render cycle.
+- **The shipped green is candidate A, `#2E3A26`**, set in three places that must agree: the shader default, the ColorRect's fallback colour (which renders only if the shader fails to compile), and `ground_verify.py`'s `SHIPPED_GREEN`.
+- **`scripts/tools/ground_capture.gd` + `scenes/ground_capture.tscn`**: an off-screen windowed harness honouring all three recorded Route C traps — ticks paused rather than warmed, deferred scene assembly with a non-flatness assertion, input disabled with a per-frame camera-state guard.
+- **`scripts/tools/ground_verify.py`**: six mechanical gates over the captured PNGs — luminance spread, verdigris saturation and value, uniform-scale invariance, hue separation, composite freshness, and the world-lock scroll diff.
+
+### Decisions
+
+- **Where the shader sits.** Default grass was never drawn per-tile: `terrain.gd` stores tiles sparsely and the flat ground was the Background ColorRect. The shader replaces exactly that — beneath the whole overlay stack, with `GridWorld._draw()` untouched. Opaque overlays render byte-identically; the two semi-transparent compositors now sit on noise, which was photographed rather than assumed. Damaged soil reads as stained ground, and a depleted ore tile's alpha fade reads *better* over texture than over flat colour.
+- **The constraint arc, in four moves, because the first three were wrong in instructive ways.**
+  1. *The original rule failed its own candidates.* "Darker and less saturated than wrought iron `#46504E`" — measured, all three candidate greens are MORE saturated than the iron (0.34–0.46 against 0.125), because a near-neutral grey excludes green by construction. The rule was unsatisfiable by the very colours it was written to judge. Nothing was desaturated to force a pass; it was measured and reported.
+  2. *Restated against what it protected.* Verdigris `#4E7A66` — the only saturated accent in the palette and the one electrical signifier. Ground saturation must not exceed it, ground value must sit well below it. Both are now named constants with the ruling cited, so a constraint that drifted once cannot drift silently again.
+  3. *Made structural.* The scatter darkened by SUBTRACTION, and subtracting a constant from all three channels raises `(mx-mn)/mx` — the flecks were the most saturated pixels in the frame. Switched to multiplicative (`col *= 1 - darkness*mask`, knob rescaled 0.05 → 0.22 to hold the fleck read at 26.3% below field, against 28.1% before). Every shader stage is now a uniform RGB multiply, so saturation is invariant by construction. Designer's reasoning: *a tolerance is an accidental pass; multiplicative makes the saturation constraint hold by construction, same as the octaves already do — nothing to re-check when the green changes or the scatter density moves. That B measures exactly zero is the tell the invariant form is reachable.*
+  4. *Then the dimension none of them expressed.* See below.
+- **The green: A, and B is the worked example.** Designer's reasoning, verbatim, both halves:
+  - *B disqualified on hue — 145.7° against verdigris at 152.7°, a 7° separation that puts the whole map inside the accent's hue family. B passed every saturation and value check and is still wrong. Record that explicitly: the mechanical constraints filter, they don't decide — B is the worked example.*
+  - *A beats C at the tightest adjacency — contrast 1.44 vs 1.37 against wrought iron, and 12% darker overall (rel. luminance 0.0375 vs 0.0421), which helps the chest, currently the weakest read. C is fallback if A looks wrong live. B is not a fallback.*
+
+  Every one of those numbers was re-derived independently before shipping and matched. The hue gate now exists *because* B passed everything else: `MIN_HUE_SEPARATION_DEG = 30`, placed at the width of a colour-wheel family, between the measured cases (B at 7.0° rejected, A at 56.7° and C at 61.1° accepted) rather than tuned to let either squeak past. B's hex is its mutation case.
+- **Assert the construction, not the outcome.** The ruling asked for max-over-pixels saturation to EQUAL field saturation with no tolerance. Measured, that test is false on correct code — 8-bit rounding perturbs saturation by up to ~0.017, so ~42% of pixels in a correct render sit a hair above base. A check that fails on correct code gets relaxed into a tolerance by whoever meets it next, which is the accidental pass the ruling existed to prevent. Shipped instead: every pixel must be a quantized uniform scale of the base colour, parameter-free and exact, forbidding any additive term anywhere in the shader. Strictly stronger — reverting the scatter to subtractive reddens all three candidates, where the outcome check caught only two.
+- **The scatter parameters are load-bearing again.** At the old subtractive 0.05 the flecks sat near the noise floor and `scatter_radius` had little to act on; at multiplicative 0.22 the radius and density knobs govern a visible texture, so they are now tuning surface rather than vestigial. (Recorded as the state of the parameters at ship, not as a distinct earlier event.)
+
+### Lessons
+
+- **A value that must equal another value is a silent-compensation site.** The harness kept its own copy of the shipped green to restore between frames; when the pick changed, the composite and both scroll frames silently rendered the rejected colour — three of six deliverables wrong, no error, and no way to see it by looking. Fixed by reading the shader's default via `RenderingServer.shader_get_parameter_default` so the duplicate cannot exist, with a verify gate asserting the composite's ground against the shipped green as the backstop. Sixth instance in NOTES.
+- **When an exact assertion fails on correct code, the answer is a different assertion, not a looser one.**
+- **A byte-identical recapture is a free determinism proof** — the mutation cycle produces one anyway, since you re-capture to undo the mutation. All six PNGs reproduced byte-identically across independent runs, which is the proof the paused-tick discipline holds and makes any future pixel diff signal.
+- **The world-coordinate gotcha was real and is now pinned mechanically**, not by care: the scroll pair's 240 px overlap (1.8 M pixels) diffs byte-identical, and the shader samples `MODEL_MATRIX * VERTEX` in the vertex stage with `UV`/`SCREEN_UV` appearing nowhere.
+
+### Still open
+
+- 5 pixels in candidate A exceed verdigris saturation by 0.001 (0.3617 vs 0.3607) — pure byte rounding, not construction: A's base sits 0.016 below verdigris while quantization spans ~0.017. A cannot satisfy "no pixel exceeds verdigris" at 8 bits whatever the scatter does. Prints RULING NEEDED rather than passing quietly.
+- The always-on tile grid (`GRID_COLOR`, light green at 0.6 alpha) means players see the ground through grid lines; the ground-alone frames are cleaner than reality. Retuning it against A is a follow-up.
+- Phase 2 (soil, terrain transitions, a TileSet) deliberately unbuilt — one terrain type does not need a tile system.
+
+---
+
 ## Electricity Session 4 — Electric Processors
 
 **Tag:** `session-electricity-processors` · **Suite:** 76 → 79 suites, all green · **Save:** v18 unchanged (append-only enums 37/38; NO_POWER state ints smelter=4 / drill=5 pinned by literal)

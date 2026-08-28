@@ -20,7 +20,15 @@ shader_type canvas_item;
 // Base grass colour. #2A3830 — the cool-lean candidate. The capture
 // harness overrides this uniform per frame to photograph all three
 // candidates (#2E3A26 / #2A3830 / #333D2A).
-uniform vec4 base_color : source_color = vec4(0.164706, 0.219608, 0.188235, 1.0);
+// THE SHIPPED GREEN: candidate A, #2E3A26 (designer pick 2026-08-28).
+// Chosen over B on HUE, which no mechanical constraint expressed: B sits at
+// 145.7 deg against verdigris at 152.7 deg -- a 7 deg separation that puts
+// the whole map inside the accent's hue family. A is 96.0 deg (56.7 deg of
+// separation). Chosen over C on the tightest adjacency: contrast 1.44 vs
+// 1.37 against wrought iron, and darker overall (rel-luminance 0.0375 vs
+// 0.0421), which helps the chest -- currently the weakest read.
+// C is the fallback if A ever reads wrong live. B is NOT a fallback.
+uniform vec4 base_color : source_color = vec4(0.180392, 0.227451, 0.149020, 1.0);
 
 // Must match GridWorld.TILE_SIZE (verified: 32).
 uniform float tile_size = 32.0;
@@ -36,11 +44,17 @@ uniform float fine_amplitude = 0.02;
 
 // Dark-fleck scatter. Cell-based: one candidate point per
 // scatter_cell_tiles x scatter_cell_tiles tile cell, drawn only when the
-// cell's hash passes scatter_density. Darkness is subtractive and LOW
+// cell's hash passes scatter_density. Darkness is MULTIPLICATIVE and LOW
 // contrast by default; radius is in world pixels.
+//
+// scatter_darkness is a FRACTION of the pixel value, not an absolute
+// subtraction: 0.22 reproduces the read of the old subtractive 0.05 against
+// these base values (0.05 taken off a value near 0.22 is a ~23% darkening).
+// Designer ceiling: do not push past ~0.28 chasing the old look -- flecks are
+// texture, not features.
 uniform float scatter_cell_tiles = 6.0;
 uniform float scatter_density : hint_range(0.0, 1.0) = 1.0;
-uniform float scatter_darkness = 0.05;
+uniform float scatter_darkness = 0.22;
 uniform float scatter_radius = 2.5;
 
 varying vec2 world_pos;
@@ -105,9 +119,18 @@ void fragment() {
 	float n = octave(world_pos, low_period_tiles, low_amplitude)
 			+ octave(world_pos, mid_period_tiles, mid_amplitude)
 			+ octave(world_pos, fine_period_tiles, fine_amplitude);
-	// Value-only modulation: uniform RGB scale keeps hue/saturation
-	// stable; the scatter darkening subtracts on top (brief's formula).
+	// Value-only modulation THROUGHOUT: both the octaves and the scatter are
+	// uniform RGB scales, so HSV saturation is invariant BY CONSTRUCTION -- no
+	// pixel can out-saturate base_color, whatever the green, the amplitudes or
+	// the scatter density (8-bit rounding aside; ground_verify.py pins that).
+	//
+	// The scatter was SUBTRACTIVE until 2026-08-28, and subtracting a constant
+	// from all three channels raises (mx-mn)/mx -- the flecks were the most
+	// saturated pixels in the frame, 0.04% of them above verdigris. Designer
+	// ruling: a tolerance is an accidental pass; multiplicative makes the
+	// saturation constraint hold by construction, with nothing to re-check
+	// when the green changes or the density moves.
 	vec3 col = base_color.rgb * (1.0 + n);
-	col -= vec3(scatter_darkness * scatter_mask(world_pos));
+	col *= (1.0 - scatter_darkness * scatter_mask(world_pos));
 	COLOR = vec4(max(col, vec3(0.0)), 1.0);
 }

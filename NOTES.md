@@ -1512,6 +1512,28 @@ chased with its own test. The hazard this note guards against is the future
 "simplification" that removes the outer gate believing the inner one is covered —
 the inner gate's mutation record says it is covered ONLY while the outer gate stands.
 
+### Sixth instance (2026-08-28, Ground Phase 1): A DUPLICATE OF A SHIPPED VALUE
+
+The capture harness kept its own copy of "the shipped green" to restore between
+frames (`set_shader_parameter("base_color", GREEN_B)`). When the designer picked a
+different candidate, the three candidate frames were still correct — they override
+the uniform explicitly — but the composite and BOTH scroll frames silently kept
+rendering the rejected colour. Three of six deliverables wrong, no error, no
+failing check, and the frames look entirely plausible: you cannot tell a ground
+render is the wrong green by looking at it, only by comparing it to a value held
+somewhere else.
+
+Same shape as the Background ColorRect's fallback colour found the day before, and
+the fix is the shape to copy: **the harness now READS the shader's default**
+(`RenderingServer.shader_get_parameter_default`) instead of holding a copy, so the
+duplicate cannot exist rather than being watched. Where a duplicate genuinely
+cannot be removed, `ground_verify.py` shows the fallback: assert the artefact
+against the source (the composite's modal ground pixel must be the shipped green),
+mutation-proved by pointing the constant at a different candidate.
+
+**The rule:** a value that must equal another value is a silent-compensation site.
+Read it, don't copy it; if you must copy it, assert the copy.
+
 ### The detection question
 
 **For each system: if it silently stopped running, what would notice — and how would the
@@ -2662,3 +2684,41 @@ generator count too and re-derive — do not leave the midpoint approximate.
 Its real lesson is cheaper than the rig: **the human gate went from "construct
 the scenario, then look" to "look".** Most of a PAUSE gate's cost was never the
 looking. Build the rig FIRST next time, before the gate, not after the tier.
+
+---
+
+## Ground Phase 1: what capture-based verification can and cannot prove
+
+Two lessons from the ground shader's harness, both about the gap between a
+constraint as stated and a constraint as checkable through a PNG.
+
+**1. Eight-bit quantization is a floor on what a capture can assert, and it
+breaks "exact" checks in the direction that looks rigorous.** The designer's
+ruling asked for the strongest possible form: max-over-pixels saturation must
+EQUAL field saturation, no tolerance, because "a tolerance is an accidental
+pass". Measured, that test is **false on correct code**: rounding each channel to
+a byte perturbs `(mx-mn)/mx` by up to ~0.017, so ~42% of pixels in a perfectly
+uniform-scaled render sit a hair above the base saturation. Shipping it would
+have failed the good build, and the next person to meet a check that fails on
+correct code relaxes it into a tolerance — arriving exactly at the accidental
+pass the ruling existed to prevent.
+
+The way out is to assert the CONSTRUCTION rather than the OUTCOME. Every stage of
+the shader is a uniform RGB multiply, so every pixel must be `base * k` for some
+scalar k, up to byte rounding — testable exactly, by intersecting the three
+per-channel intervals of k that round to the observed bytes. That form is
+parameter-free, forbids *any* additive term anywhere in the shader, and is true.
+It is also strictly stronger than the outcome check it replaced: reverting the
+scatter to subtractive reddens all three candidates (757 / 661 / 700 pixels),
+where the outcome check caught only two of them.
+
+**When an exact assertion fails on correct code, the answer is a different
+assertion, not a looser one.**
+
+**2. A byte-identical recapture is a free determinism proof, and the mutation
+cycle hands it to you.** Reverting the shader, re-capturing, restoring it and
+re-capturing reproduced all six PNGs byte-identically. That is the proof the
+paused-tick discipline actually holds (Route C trap 1) — worth more than the
+assertion that it should, and it means any future pixel diff is signal rather
+than noise. Make the restore-and-recapture a standing step of any capture
+harness: you were going to run it anyway to undo the mutation.

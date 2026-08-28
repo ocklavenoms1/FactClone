@@ -170,8 +170,20 @@ func _run() -> void:
 		var ok: bool = await _capture(String(pair[0]))
 		if not ok:
 			return
-	# Restore the authored default for the remaining shots.
-	mat.set_shader_parameter("base_color", GREEN_B)
+	# Restore the SHIPPED green for the remaining shots -- read from the
+	# shader's own default, never a copy held here. This line used to be
+	# `set_shader_parameter("base_color", GREEN_B)`, and when the designer
+	# picked A it silently rendered the composite and BOTH scroll frames on
+	# the disqualified green: a harness-side duplicate of a shipped value,
+	# the same stale-fallback shape as the Background ColorRect's colour.
+	# Reading the default makes the duplicate impossible rather than watched.
+	var shipped: Variant = RenderingServer.shader_get_parameter_default(
+			mat.shader.get_rid(), "base_color")
+	if shipped == null:
+		_fail("could not read the shader's base_color default - refusing to guess the shipped green")
+		return
+	mat.set_shader_parameter("base_color", shipped)
+	print("GROUND_CAPTURE: shipped green (from shader default) = %s" % str(shipped))
 
 	# ---------- capture 2: composite ----------
 	var anchor: Vector2i = _find_clean_composite_patch()

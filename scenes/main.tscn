@@ -52,7 +52,7 @@ offset_left = -10000.0
 offset_top = -10000.0
 offset_right = 10000.0
 offset_bottom = 10000.0
-color = Color(0.12, 0.18, 0.12, 1)
+color = Color(0.180392, 0.227451, 0.14902, 1)
 mouse_filter = 2
 
 [node name="GridWorld" type="Node2D" parent="."]

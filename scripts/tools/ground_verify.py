@@ -61,6 +61,42 @@ VERDIGRIS_VAL = max(VERDIGRIS) / 255.0                               # 0.4784
 # floor that still catches a ground drifting up toward the accent.
 VALUE_HEADROOM = 0.75
 
+# The three candidate greens, by capture file. Needed because the STRUCTURAL
+# check below re-derives invariance from whatever base a frame was rendered
+# with, rather than from a number someone typed.
+BASE_BY_FILE = {
+    "ground_green_a.png": (0x2E, 0x3A, 0x26),
+    "ground_green_b.png": (0x2A, 0x38, 0x30),
+    "ground_green_c.png": (0x33, 0x3D, 0x2A),
+}
+
+# Byte-rounding slack for the structural check, in LSBs. NOT a tolerance on
+# the constraint - it is arithmetic hygiene. A pixel is accepted if SOME
+# uniform scale k of the base rounds to it; the interval that k must lie in
+# is +/- 0.5 LSB by the definition of rounding, and this widens it to 1.0 to
+# absorb GPU float32 rounding at an exact .5 boundary. Measured cost of that
+# widening: one pixel in 6,220,800 needed it (ground_green_c, px (977,303),
+# off by 0.04 of an LSB). Measured margin it leaves: the SUBTRACTIVE scatter
+# this check was written to forbid moves every channel by ~13 LSB
+# (0.05 x 255), so the guard has ~13x the slack it grants.
+SCALE_SLACK_LSB = 1.0
+
+# THE SHIPPED GREEN. Must equal the shader's base_color default and the
+# Background ColorRect's fallback colour - all three move together or the
+# render, the fallback and this check disagree. Candidate A, picked
+# 2026-08-28.
+SHIPPED_GREEN = (0x2E, 0x3A, 0x26)
+
+# Hue separation from the accent. The saturation and value constraints did
+# not express hue at all, and candidate B passed every one of them while
+# being wrong: B sits 7.0 deg from verdigris, inside the accent's own hue
+# family, which would have put the entire map in the electrical signifier's
+# hue. The threshold is placed between the measured cases (B 7.0 deg
+# rejected; A 56.7 deg and C 61.1 deg accepted) at the width of a colour-
+# wheel family, ~30 deg - deliberately NOT tuned to let either case squeak
+# past. Moving it is a designer decision, not a maintenance one.
+MIN_HUE_SEPARATION_DEG = 30.0
+
 
 def decode_png(path):
     """Minimal PNG decoder: 8-bit RGB(A), non-interlaced. Returns
@@ -128,6 +164,85 @@ def decode_png(path):
 
 def lum(r, g, b):
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+
+
+def hue_deg(rgb):
+    """HSV hue in degrees. Pure arithmetic - no colorsys dependency."""
+    r, g, b = [c / 255.0 for c in rgb]
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    if d == 0:
+        return 0.0
+    if mx == r:
+        h = 60.0 * (((g - b) / d) % 6.0)
+    elif mx == g:
+        h = 60.0 * (((b - r) / d) + 2.0)
+    else:
+        h = 60.0 * (((r - g) / d) + 4.0)
+    return h % 360.0
+
+
+def hue_separation(rgb_a, rgb_b):
+    """Shortest angular distance between two hues, in degrees."""
+    d = abs(hue_deg(rgb_a) - hue_deg(rgb_b)) % 360.0
+    return min(d, 360.0 - d)
+
+
+def modal_pixel(w, h, ch, px):
+    """Most common RGB triple - the ground colour in a mostly-ground frame."""
+    counts = {}
+    stride = w * ch
+    for y in range(0, h, 2):
+        row = px[y * stride:(y + 1) * stride]
+        for x in range(0, stride, ch * 2):
+            k = (row[x], row[x + 1], row[x + 2])
+            counts[k] = counts.get(k, 0) + 1
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+def uniform_scale_violations(w, h, ch, px, base, slack=SCALE_SLACK_LSB):
+    """Count pixels that are NOT a quantized uniform scale of `base`.
+
+    THE STRUCTURAL FORM OF THE SATURATION CONSTRAINT (designer ruling
+    2026-08-28: "a tolerance is an accidental pass"). Every stage of the
+    shader is a uniform RGB multiply - the three noise octaves and, since
+    the scatter went multiplicative, the flecks too. So every rendered pixel
+    must be base * k for SOME scalar k, up to byte rounding. Uniform scaling
+    leaves HSV saturation exactly invariant, so proving this proves the
+    saturation constraint holds by construction: it cannot be violated by
+    changing the green, the amplitudes, the density, or the fleck depth.
+
+    Why this and not "max_sat <= field_sat": at 8 bits that stricter-looking
+    test is FALSE ON CORRECT CODE. Rounding each channel to a byte perturbs
+    (mx-mn)/mx by up to ~0.017, so ~42% of pixels in a correct render sit a
+    hair above the base saturation. A check that fails on correct code gets
+    relaxed to a tolerance by the next person - which is the accidental pass
+    the ruling was written to prevent. This form is stricter in the way that
+    matters (it forbids ANY additive term, anywhere in the shader) and true.
+
+    Implementation: for each channel, the set of k that rounds to the
+    observed byte is an interval. The pixel conforms iff the three intervals
+    intersect.
+    """
+    bad = 0
+    worst = None
+    stride = w * ch
+    for y in range(h):
+        row = px[y * stride:(y + 1) * stride]
+        for x in range(0, stride, ch):
+            lo, hi = 0.0, 1e9
+            for i in range(3):
+                c = row[x + i]
+                bc = base[i]
+                if bc == 0:
+                    continue
+                lo = max(lo, (c - slack) / bc)
+                hi = min(hi, (c + slack) / bc)
+            if lo >= hi:
+                bad += 1
+                if worst is None:
+                    worst = (x // ch, y, row[x], row[x + 1], row[x + 2])
+    return bad, worst
 
 
 def image_stats(w, h, ch, px):
@@ -304,16 +419,79 @@ def main():
             print(f"    RULING NEEDED: {st['over_verdigris']} px ({pct:.4f}%) exceed verdigris "
                   f"saturation, max {st['max_sat']:.4f} - scatter flecks only.")
     print()
-    print("  WHY TWO BASES, and why they disagree: the noise octaves are a uniform")
-    print("  RGB multiply, which leaves HSV saturation exactly invariant - so the")
-    print("  FIELD (median) saturation reproduces the base colour's to the digit,")
-    print("  and that is the basis the ruling's own numbers are quoted on. The")
-    print("  scatter layer darkens by SUBTRACTION, and subtracting a constant from")
-    print("  all three channels RAISES (mx-mn)/mx: the flecks are the most saturated")
-    print("  pixels in the frame. Making the scatter multiplicative would leave the")
-    print("  whole field saturation-invariant BY CONSTRUCTION - the constraint could")
-    print("  then not be violated at all, rather than being checked after the fact.")
-    print("  That changes the look, so it is the designer's call, not this script's.")
+
+    # ---- 2b. THE STRUCTURAL FORM: uniform-scale invariance ----
+    print("== saturation invariance BY CONSTRUCTION (scatter multiplicative since 2026-08-28) ==")
+    print("  Every shader stage is a uniform RGB multiply, so every pixel must be")
+    print("  base * k for some scalar k, up to byte rounding. Uniform scaling leaves")
+    print("  HSV saturation exactly invariant - proving this proves the constraint")
+    print("  cannot be violated by any green, amplitude, density or fleck depth.")
+    for name, base in BASE_BY_FILE.items():
+        w2, h2, ch2, px2, st = images[name]
+        bad, worst = uniform_scale_violations(w2, h2, ch2, px2, base)
+        base_sat = (max(base) - min(base)) / max(base)
+        if bad:
+            failures.append(f"{name}: {bad} px are not a uniform scale of base {base}")
+        print(f"  {name}: base {base} sat {base_sat:.4f} | non-conforming px {bad} "
+              f"({'PASS' if bad == 0 else 'FAIL'})" + (f" first at {worst[:2]}" if worst else ""))
+    print()
+    print("  NOTE on the form of this check. The ruling asked for 'max-over-pixels")
+    print("  saturation must EQUAL field saturation, not a tolerance'. That exact")
+    print("  test is false on correct code at 8 bits: byte rounding perturbs")
+    print("  (mx-mn)/mx by up to ~0.017, so ~42% of pixels in a CORRECT render sit a")
+    print("  hair above base saturation. A check that fails on correct code gets")
+    print("  relaxed into a tolerance by whoever meets it next - the accidental pass")
+    print("  the ruling exists to prevent. The uniform-scale test above is the")
+    print("  stronger true form: it forbids ANY additive term anywhere in the shader,")
+    print("  which is the thing that actually broke the invariant.")
+    print()
+
+    # ---- 2c. hue separation from the accent, and the shipped green ----
+    print("== hue separation from verdigris (designer ruling 2026-08-28) ==")
+    vh = hue_deg(VERDIGRIS)
+    print(f"  verdigris hue {vh:.1f} deg | minimum separation {MIN_HUE_SEPARATION_DEG:.0f} deg")
+    ship_sep = hue_separation(SHIPPED_GREEN, VERDIGRIS)
+    ship_ok = ship_sep >= MIN_HUE_SEPARATION_DEG
+    if not ship_ok:
+        failures.append(
+            f"shipped green {SHIPPED_GREEN} is {ship_sep:.1f} deg from verdigris, "
+            f"inside the accent's hue family (minimum {MIN_HUE_SEPARATION_DEG:.0f})")
+    print(f"  SHIPPED {SHIPPED_GREEN} hue {hue_deg(SHIPPED_GREEN):.1f} deg | "
+          f"separation {ship_sep:.1f} deg ({'PASS' if ship_ok else 'INSIDE ACCENT FAMILY: FAIL'})")
+    for name, base in BASE_BY_FILE.items():
+        sep = hue_separation(base, VERDIGRIS)
+        tag = "  <- SHIPPED" if base == SHIPPED_GREEN else (
+            "  <- rejected on hue; passed every saturation and value gate"
+            if sep < MIN_HUE_SEPARATION_DEG else "")
+        print(f"    {name}: hue {hue_deg(base):.1f} deg  separation {sep:.1f} deg{tag}")
+    print()
+    print("  WHY THIS GATE EXISTS: candidate B passed the luminance-spread ceiling,")
+    print("  the verdigris saturation ceiling, the value headroom AND the structural")
+    print("  invariance - every mechanical check in this file - and was still the")
+    print("  wrong green, because none of them expressed hue. The constraints filter;")
+    print("  they do not decide. B is the worked example, kept here deliberately.")
+    print()
+
+    # ---- 2d. the composite renders on the SHIPPED green, not a stale copy ----
+    w3, h3, ch3, px3, _ = images["ground_composite.png"]
+    modal = modal_pixel(w3, h3, ch3, px3)
+    lo, hi = 0.0, 1e9
+    for i in range(3):
+        lo = max(lo, (modal[i] - SCALE_SLACK_LSB) / SHIPPED_GREEN[i])
+        hi = min(hi, (modal[i] + SCALE_SLACK_LSB) / SHIPPED_GREEN[i])
+    comp_ok = lo < hi
+    if not comp_ok:
+        failures.append(
+            f"ground_composite.png ground colour {modal} is not the shipped green "
+            f"{SHIPPED_GREEN} - the capture is stale")
+    print("== composite renders on the shipped green ==")
+    print(f"  modal ground pixel {modal} vs shipped {SHIPPED_GREEN}: "
+          f"{'PASS' if comp_ok else 'STALE CAPTURE: FAIL'}")
+    print("  The harness used to hold its own copy of the shipped green and restore")
+    print("  THAT for the composite and both scroll frames; when the pick changed,")
+    print("  three of six deliverables silently kept rendering the old colour. The")
+    print("  harness now reads the shader's default instead, and this check is what")
+    print("  would catch it coming back.")
     print()
 
     # ---- 3. scroll diff (the swim test) ----
