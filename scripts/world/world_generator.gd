@@ -247,16 +247,16 @@ func generate(world: GridWorld, seed: int) -> void:
 # ---------- pass 1: lakes ----------
 
 func _place_lakes(world: GridWorld, seed: int) -> void:
-	var count_roll: float = _hash3_unit(seed + SEED_OFFSET_LAKE_COUNT, 0, 0)
+	var count_roll: float = hash3_unit(seed + SEED_OFFSET_LAKE_COUNT, 0, 0)
 	var count: int = LAKE_COUNT_MIN + int(count_roll * float(LAKE_COUNT_MAX - LAKE_COUNT_MIN + 1))
 	count = clamp(count, LAKE_COUNT_MIN, LAKE_COUNT_MAX)
 
 	for i in count:
 		# Position: anywhere in the world, leaving margin equal to max radius.
 		var margin: int = LAKE_RADIUS_MAX
-		var x_roll: float = _hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 1, 0)
-		var y_roll: float = _hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 0, 1)
-		var size_roll: float = _hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 2, 2)
+		var x_roll: float = hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 1, 0)
+		var y_roll: float = hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 0, 1)
+		var size_roll: float = hash3_unit(seed + SEED_OFFSET_LAKE_BASE + i, 2, 2)
 		var cx: int = WORLD_MIN + margin + int(x_roll * float(WORLD_MAX - WORLD_MIN - 2 * margin))
 		var cy: int = WORLD_MIN + margin + int(y_roll * float(WORLD_MAX - WORLD_MIN - 2 * margin))
 		var radius: float = lerp(float(LAKE_RADIUS_MIN), float(LAKE_RADIUS_MAX), size_roll)
@@ -284,7 +284,7 @@ func _place_lake_patch(world: GridWorld, center: Vector2i, radius: float) -> voi
 
 func _consider_region(world: GridWorld, seed: int, rx: int, ry: int) -> void:
 	# Roll: does this region get a patch?
-	var presence: float = _hash3_unit(seed + SEED_OFFSET_REGION_PRESENCE, rx, ry)
+	var presence: float = hash3_unit(seed + SEED_OFFSET_REGION_PRESENCE, rx, ry)
 	if presence >= PATCH_PROBABILITY:
 		return
 
@@ -301,8 +301,8 @@ func _consider_region(world: GridWorld, seed: int, rx: int, ry: int) -> void:
 
 	# Patch center: random position within the region (margin of 4 from edges
 	# so most patches stay inside their home region).
-	var x_roll: float = _hash3_unit(seed + SEED_OFFSET_REGION_X, rx, ry)
-	var y_roll: float = _hash3_unit(seed + SEED_OFFSET_REGION_Y, rx, ry)
+	var x_roll: float = hash3_unit(seed + SEED_OFFSET_REGION_X, rx, ry)
+	var y_roll: float = hash3_unit(seed + SEED_OFFSET_REGION_Y, rx, ry)
 	var px: int = rx * REGION_SIZE + 4 + int(x_roll * float(REGION_SIZE - 8))
 	var py: int = ry * REGION_SIZE + 4 + int(y_roll * float(REGION_SIZE - 8))
 	var patch_center := Vector2i(px, py)
@@ -314,7 +314,7 @@ func _consider_region(world: GridWorld, seed: int, rx: int, ry: int) -> void:
 
 	# Patch base radius: lerp(MIN, MAX) by size roll, then scaled by distance.
 	# Distance multiplier: 1 + sqrt(d/SIZE_SCALE_TILES). Bigger patches farther.
-	var size_roll: float = _hash3_unit(seed + SEED_OFFSET_REGION_SIZE, rx, ry)
+	var size_roll: float = hash3_unit(seed + SEED_OFFSET_REGION_SIZE, rx, ry)
 	var base_radius: float = lerp(BASE_RADIUS_MIN, BASE_RADIUS_MAX, size_roll)
 	var size_multiplier: float = 1.0 + sqrt(center_distance / SIZE_SCALE_TILES)
 	var radius: float = base_radius * size_multiplier
@@ -333,7 +333,7 @@ func _pick_resource_type(seed: int, rx: int, ry: int, region_distance: float) ->
 		eligible.append([t, total_weight])
 	if eligible.is_empty():
 		return ResourceNodes.Type.NONE
-	var roll_int: int = int(floor(_hash3_unit(seed + SEED_OFFSET_REGION_TYPE, rx, ry) * float(total_weight)))
+	var roll_int: int = int(floor(hash3_unit(seed + SEED_OFFSET_REGION_TYPE, rx, ry) * float(total_weight)))
 	for entry in eligible:
 		if roll_int < int(entry[1]):
 			return int(entry[0])
@@ -375,15 +375,15 @@ func _place_patch(world: GridWorld, center: Vector2i, type: int, base_radius: fl
 # ---------- pass 3: forest clusters ----------
 
 func _place_forests(world: GridWorld, seed: int) -> void:
-	var count_roll: float = _hash3_unit(seed + SEED_OFFSET_FOREST_COUNT, 0, 0)
+	var count_roll: float = hash3_unit(seed + SEED_OFFSET_FOREST_COUNT, 0, 0)
 	var count: int = FOREST_COUNT_MIN + int(count_roll * float(FOREST_COUNT_MAX - FOREST_COUNT_MIN + 1))
 	count = clamp(count, FOREST_COUNT_MIN, FOREST_COUNT_MAX)
 
 	for i in count:
 		var margin: int = FOREST_RADIUS_MAX
-		var x_roll: float = _hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 1, 0)
-		var y_roll: float = _hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 0, 1)
-		var size_roll: float = _hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 2, 2)
+		var x_roll: float = hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 1, 0)
+		var y_roll: float = hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 0, 1)
+		var size_roll: float = hash3_unit(seed + SEED_OFFSET_FOREST_BASE + i, 2, 2)
 		var cx: int = WORLD_MIN + margin + int(x_roll * float(WORLD_MAX - WORLD_MIN - 2 * margin))
 		var cy: int = WORLD_MIN + margin + int(y_roll * float(WORLD_MAX - WORLD_MIN - 2 * margin))
 		var radius: float = lerp(float(FOREST_RADIUS_MIN), float(FOREST_RADIUS_MAX), size_roll)
@@ -403,7 +403,7 @@ func _place_forest_cluster(world: GridWorld, seed: int, center: Vector2i, radius
 				continue
 			# Density falloff: PEAK at center, 0 at edge (quadratic).
 			var density: float = FOREST_DENSITY_PEAK * (1.0 - pow(dist / radius, 2.0))
-			var roll: float = _hash3_unit(seed + SEED_OFFSET_TREE, pos.x, pos.y)
+			var roll: float = hash3_unit(seed + SEED_OFFSET_TREE, pos.x, pos.y)
 			if roll < density:
 				world.tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
 				# Trees default to fully grown — no resource_state entry needed.
@@ -430,7 +430,7 @@ func _place_ambient_trees(world: GridWorld, seed: int) -> void:
 			var density_multiplier: float = 0.5 + norm * 1.5                     # 0.5..2.0
 			var probability: float = AMBIENT_BASE_PROBABILITY * density_multiplier
 			# Per-tile spawn roll.
-			var roll: float = _hash3_unit(seed + SEED_OFFSET_AMBIENT_TREE, x, y)
+			var roll: float = hash3_unit(seed + SEED_OFFSET_AMBIENT_TREE, x, y)
 			if roll < probability:
 				world.tiles[pos] = Tile.new(Terrain.Base.GRASS, Terrain.Overlay.NONE, ResourceNodes.Type.TREE)
 
@@ -556,7 +556,21 @@ func _in_bounds(pos: Vector2i) -> bool:
 ## Deterministic 3-input hash returning a float in [0, 1).
 ## Pure function of (seed, x, y) — used for per-region rolls and per-tile
 ## tree spawn within forest clusters.
-static func _hash3_unit(seed: int, x: int, y: int) -> float:
+##
+## PUBLIC AS OF GROUND PHASE 2 SESSION 1, and public in ONE place. `Doodads`
+## needed a deterministic per-cell roll and there must be exactly one hash in
+## this project: two hashes are two things that can drift apart, and the drift
+## is invisible (a second hash produces a perfectly plausible ground). It was
+## renamed here rather than copied there — the underscore was the only thing
+## that made it look private, and copying the body to dodge a naming
+## convention is how the drift starts.
+##
+## CONTRACTED CALLERS: this file's region/lake/forest/tree rolls, and
+## `Doodads.selection_at`. Changing the mixing constants re-rolls every world
+## that has ever been generated AND every doodad anyone has ever seen;
+## `test_doodads.gd`'s golden literals are deliberately positioned to redden
+## if you do.
+static func hash3_unit(seed: int, x: int, y: int) -> float:
 	var h: int = seed
 	h = (h * 73856093) ^ (x * 19349663)
 	h = (h * 83492791) ^ (y * 122949829)

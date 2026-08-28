@@ -186,6 +186,15 @@ const TESTS: Array = [
 	# lever, the boot-order precondition as its own named check, and
 	# adopt-or-refuse on occupied ground.
 	preload("res://scripts/tests/test_processor_rig.gd"),
+	# Ground Phase 2 Session 1: ground doodads. The layout is a PURE FUNCTION
+	# of (world_seed, cell) and nothing about it is persisted, so the purity
+	# group is the whole guard — a hash that picks up an order-, frame- or
+	# state-dependent input makes doodads flicker between two frames that must
+	# be identical, and no other suite, capture or save round-trip would
+	# notice. Suppression shares place_building's own footprint source, so the
+	# non-anchor cell of a 2x2 is its own sub-case. Draw ORDER is pinned
+	# against the source (route A), comment-aware.
+	preload("res://scripts/tests/test_doodads.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

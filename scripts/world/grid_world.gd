@@ -1849,6 +1849,17 @@ func _draw() -> void:
 		var y_pos: float = y * TILE_SIZE
 		draw_line(Vector2(min_tile.x * TILE_SIZE, y_pos), Vector2(max_tile.x * TILE_SIZE, y_pos), GRID_COLOR, 1.0)
 
+	# Ground doodad pass (Ground Phase 2 Session 1) — ONE dedicated pass with a
+	# defined layer, HERE and nowhere else: after the grid lines, before every
+	# building. Doodads go UNDER buildings, and a pebble drawn on top of a
+	# smelter is not a subtle defect.
+	#
+	# This must NOT be folded into the per-building loop and must NOT touch the
+	# deferred depth sort or the z-order finding — like _draw_power_wires and
+	# _draw_underground_pair_indicators, cross-tile drawing rides its own pass.
+	# test_doodads.gd (E) pins the position at grep level, comment-aware.
+	_draw_ground_doodads(min_tile, max_tile)
+
 	# Buildings.
 	for anchor_key in buildings:
 		var anchor: Vector2i = anchor_key
@@ -1960,6 +1971,36 @@ func _draw() -> void:
 # How far down its tile a 1x1 pole's wires attach, as a fraction of TILE_SIZE.
 # Matches power_pole.gd's crossarm offset exactly. See _pole_wire_anchor.
 const MAST_WIRE_Y: float = 0.16
+
+## Ground doodads — pebbles, tufts and twigs on the grass. A DEDICATED pass,
+## called from _draw between the grid lines and the buildings loop, never from
+## the per-building loop (the z-order finding: cross-tile drawing rides its own
+## defined layer). See scripts/world/doodads.gd for the design.
+##
+## THIS FUNCTION OWNS NO PART OF THE RULE. Which cell carries which doodad, and
+## whether it is suppressed, are both decided by Doodads.doodad_at — one call,
+## which ANDs the pure per-cell selection with the single suppression
+## predicate. Re-deriving either half here is how the drawn ground and the
+## queried ground drift apart, and the drift is invisible: a doodad under a
+## chest looks like a rendering quirk, not a disagreement between two
+## derivations. test_doodads.gd (E) pins both the pass's position and this
+## delegation at grep level.
+##
+## The walk is the same VISIBLE-RECT walk the terrain pass uses (audit #30) —
+## O(view), never O(world).
+func _draw_ground_doodads(min_tile: Vector2i, max_tile: Vector2i) -> void:
+	for dy in range(min_tile.y, max_tile.y + 1):
+		for dx in range(min_tile.x, max_tile.x + 1):
+			var cell: Vector2i = Vector2i(dx, dy)
+			var d: Dictionary = Doodads.doodad_at(self, cell)
+			if not bool(d["present"]):
+				continue
+			# Integral by construction on both terms: the tile origin is a
+			# multiple of TILE_SIZE and offset_px is a Vector2i out of the pure
+			# selection. Nothing is rounded here because nothing here is
+			# fractional — see doodads.gd on integer-pixel snapping.
+			var at: Vector2 = tile_to_world_origin(cell) + Vector2(d["offset_px"])
+			Doodads.draw_one(self, at, int(d["variant"]), bool(d["mirrored"]))
 
 ## Draw wires between poles: the GABRIEL GRAPH of each component, restricted to
 ## reachable pairs. A wire is drawn between two in-range poles unless a third
