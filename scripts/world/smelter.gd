@@ -16,16 +16,29 @@ extends RefCounted
 ##   N edge: unused
 ## All ports rotate together via Buildings.world_dir().
 ##
-## State machine (4 states):
+## State machine (5 states):
 ##   IDLE             - no recipe-eligible inputs OR waiting for room/fuel
 ##   SMELTING         - running; fuel committed; progress incrementing
-##   NO_FUEL          - has inputs and room, but fuel_buffer == 0
+##   NO_FUEL          - has inputs and room, but fuel_buffer == 0 (burner only)
 ##   BLOCKED_OUTPUT   - has inputs and fuel, but output buffer full
+##   NO_POWER         - electric only: network satisfaction <= POWER_EPSILON;
+##                      progress is HELD, belt pulls and output pushes keep
+##                      running (see the power gate in tick())
 ##
 ## Fuel: 1 fuel unit per ingot (committed at IDLE→SMELTING transition via
 ## Burner.consume_tick(b, 1)). 1 wood = 1 ingot, 1 coal = 4, 1 briquette = 8.
 ## Smelting is 8× more fuel-per-output than drilling — reflects the energy
 ## cost of sustained heat vs mechanical extraction.
+##
+## ELECTRIC VARIANT (session-electricity-processors, Task 3): the same state
+## machine, parametrised — NOT a second module (duplicating a shipped state
+## machine is the #15/#18 drift shape, refused at design time). Every Burner
+## call site is gated on is_electric(b); the Burner.make_state() merge in
+## make() deliberately STAYS ungated (locked Q4: fuel fields present-but-
+## unused on the electric variant — the shape assertion in the test suite
+## pins the key set). Speed: electric runs the shared 40-tick recipes in
+## ceil(40 × ELECTRIC_SPEED_RATIO) = 32 ticks, stretched by network
+## satisfaction — see _effective_target.
 
 # State enum (smelter-specific; mirrors Processor's IDLE/RUNNING/BLOCKED_OUTPUT
 # plus burner-specific NO_FUEL).
@@ -33,6 +46,11 @@ const STATE_IDLE: int            = 0
 const STATE_SMELTING: int        = 1
 const STATE_NO_FUEL: int         = 2
 const STATE_BLOCKED_OUTPUT: int  = 3
+# APPEND-ONLY from here: the state int round-trips through saves, so the
+# values above can never be renumbered. NO_POWER is the ELECTRIC variant's
+# stall state (a burner can never reach it), written by the power gate in
+# tick() when network satisfaction is at or below POWER_EPSILON.
+const STATE_NO_POWER: int        = 4
 
 # Fuel input port direction (canonical orientation; rotates with b.dir).
 # NOT a recipe field — Burner is generic infrastructure, not recipe-aware.
@@ -40,6 +58,45 @@ const FUEL_PORT_DIR: int = Belt.DIR_S
 
 # Fuel cost — 1 unit per ingot, paid up-front at IDLE→SMELTING.
 const FUEL_PER_INGOT: int = 1
+
+# ---------------------------------------------------------------------------
+# Electric variant (session-electricity-processors, Task 3).
+# ---------------------------------------------------------------------------
+
+# The single source of truth for "is this smelter power-driven": is_electric
+# is DERIVED from membership, so "draws power" and "is not a burner" cannot
+# drift apart — the shipped electric-inserter shape (inserter.gd's table).
+#
+# 10 units — 2× the electric inserter's 5, locked at the design pass: four
+# electric smelters = 40 = exactly two steam generators or four water
+# wheels. Flagged as the likeliest playtest retune.
+#
+# The draw is CONSTANT, never duty-cycled — an IDLE electric smelter still
+# draws its full 10. PowerNetwork.update_supply_demand is a pre-pass that
+# runs BEFORE the building tick loop, so any activity state it sampled would
+# be one tick stale; gating demand on activity would close a delayed-
+# feedback loop (undamped — the network sizing itself to last tick's
+# activity) and lamps sharing the component would flicker. See the
+# ELECTRIC_SMELTER arm in power_network.gd Stage 1.
+const POWER_DEMAND_BY_TYPE: Dictionary = {
+	Buildings.Type.ELECTRIC_SMELTER: 10,
+}
+
+# Floor on the satisfaction divisor in _effective_target, AND the NO_POWER
+# cutoff (`sat <= POWER_EPSILON` parks the machine). Documented-equal to
+# Inserter.POWER_EPSILON: 0.05 is the ELECTRIC_LAMP's on/off threshold, so
+# "too dark to bother" and "too weak to run" stay the SAME point on the dial
+# across every electric consumer. A test literal pins 0.05, so drift from
+# the inserter's value reddens instead of silently re-rating the brownout.
+const POWER_EPSILON: float = 0.05
+
+# Electric speed multiplier — the machine-side half of the locked speed
+# decision: electric smelts the shared recipes in ceil(40 × 0.8) = 32 ticks
+# vs the burner's 40, ratio 0.8. MACHINE-SIDE MULTIPLIER ONLY: recipes.gd's
+# shared time_ticks 40 stays untouched (the ELECTRIC_SMELTER DATA row
+# records the same numbers for the next balance pass). If the user ever
+# corrects the balance base, only this multiplier moves.
+const ELECTRIC_SPEED_RATIO: float = 0.8
 
 # Item-type → recipe-id map for runtime recipe selection. Hardcoded for v1
 # (only 2 recipes). Adding a third smelter recipe = add one entry here AND
@@ -59,8 +116,51 @@ const TINT_SMELTING: Color = Color(1.5, 0.8, 0.5)       # orange-red glow
 const TINT_NO_FUEL: Color = Color(0.6, 0.6, 1.0)        # cool blue
 const TINT_BLOCKED: Color = Color(1.0, 0.95, 0.4)       # yellow
 
+## Power units this smelter draws from its network per tick. 0 for the
+## burner (lookup miss). Read by PowerNetwork.update_supply_demand Stage 1
+## to accumulate component demand. Takes the TYPE, not the building: the
+## demand is a property of the registry row, and Stage 1's arm has the type
+## in hand.
+static func power_demand(t: int) -> int:
+	return int(POWER_DEMAND_BY_TYPE.get(t, 0))
+
+## True if this smelter is power-driven rather than fuel-driven. Derived
+## from POWER_DEMAND_BY_TYPE membership on purpose — one source of truth,
+## see the table's docstring. Gates every Burner call site in tick() and
+## info_lines().
+static func is_electric(b: Building) -> bool:
+	return POWER_DEMAND_BY_TYPE.has(b.type)
+
+## The tick count a batch must reach before it emits — the brownout rule
+## (target-stretch, locked at the design pass): int progress accumulates 1
+## per tick while SMELTING, and THIS TARGET is recomputed every tick from
+## live satisfaction, so elapsed work is revalued when satisfaction changes.
+## No float progress, no rate scaling.
+##
+##   burner:   recipe time_ticks, UNCHANGED — returned BEFORE the
+##             satisfaction lookup runs. The early return is load-bearing,
+##             not a micro-optimisation: a world with no power network
+##             reports satisfaction 0.0 everywhere, and a burner that fell
+##             through would crawl at ceil(40 / 0.05) = 800 ticks.
+##   electric: ceil(ceil(time_ticks × 0.8) / max(POWER_EPSILON, sat))
+##             sat 1.00 → 32    sat 0.50 → 64    sat 0.05 → 640 (the floor)
+##
+## The form is copied from the shipped inserter
+## (Inserter.effective_cycle_ticks, inserter.gd) — NOT from the stale
+## Session-1 formula comments in power_network.gd (Task 7 fixes those).
+static func _effective_target(b: Building, world, recipe: Dictionary) -> int:
+	var base_ticks: int = int(recipe["time_ticks"])
+	if not is_electric(b):
+		return base_ticks
+	base_ticks = int(ceil(float(base_ticks) * ELECTRIC_SPEED_RATIO))
+	var sat: float = world.power_satisfaction_at(b.anchor)
+	return int(ceil(float(base_ticks) / maxf(POWER_EPSILON, sat)))
+
 ## Build initial smelter state. Recipe defaults to "" (auto-selected on first
-## tick). Burner state merged in.
+## tick). Burner state merged in — for BOTH variants: the electric smelter
+## deliberately keeps the burner's full state shape, fuel fields present-
+## but-unused (locked Q4; the test suite's shape assertion pins the key
+## set, and the fuel-sentinel case pins that the fields stay dead).
 ##
 ## `b_type` (Electric Processors Task 2, the Inserter.make pattern): the
 ## ELECTRIC_SMELTER dispatch arm passes its own enum so the building dict
@@ -79,10 +179,21 @@ static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.SMELT
 		state[k] = Burner.make_state()[k]
 	return Building.new(b_type, pos, state)
 
-## Per-tick logic. Dispatched from Buildings.tick_one.
+## Per-tick logic. Dispatched from Buildings.tick_one — both SMELTER and
+## ELECTRIC_SMELTER route here; the differences are the `electric` gates on
+## the Burner call sites and the power gate above the state machine.
 static func tick(b: Building, world) -> void:
-	# Step 1: fuel pull (S edge, rotated).  [BURNER LINE 2/N]
-	Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR))
+	# The electric variant is not a burner: no fuel slot in DATA, no fuel
+	# pull, no fuel commit, and it must never show a fuel state. Every
+	# Burner call site below is gated on this one flag (the shipped
+	# electric-inserter pattern).
+	var electric: bool = is_electric(b)
+
+	# Step 1: fuel pull (S edge, rotated) — burner only. Ungated, an
+	# electric smelter would eat wood arriving on its (nonexistent) fuel
+	# port — the source-tile-as-fuel bug from the other direction.
+	if not electric:
+		Burner.try_pull_fuel(b, world, Buildings.world_dir(b, FUEL_PORT_DIR))  # [BURNER LINE 2/N]
 
 	# Step 1b: release a pin the registry can no longer resolve. Must run BEFORE
 	# the IDLE gate below AND before step 3's `recipe.is_empty(): return`,
@@ -108,21 +219,67 @@ static func tick(b: Building, world) -> void:
 
 	# Step 5: state machine.
 	var s: int = int(b.state.get("state", STATE_IDLE))
+
+	# Step 5a (electric only): the POWER GATE. At or below POWER_EPSILON —
+	# `<=`, the exact comparison the electric inserter and the lamp's glow
+	# share, so every electric consumer gives up at the same point on the
+	# dial — the machine PARKS: the match below is skipped (STATE_NO_POWER
+	# is deliberately named in no arm), so the int progress is HELD exactly
+	# where the outage found it. The park is a state label plus a skipped
+	# match and NOTHING else: step 4 above and step 6 below keep running,
+	# so belt pulls into in_buffer and output pushes continue through the
+	# outage (locked stall scope, mirroring burner NO_FUEL's minimal diff).
+	#
+	# RESUME (power back while parked): progress > 0 means a committed
+	# batch was frozen mid-flight — re-enter SMELTING directly, consuming
+	# NOTHING; the elapsed work resumes at the live effective target.
+	# Routing the resume through the IDLE arm instead would re-commit the
+	# batch: progress reset to 1 AND a second set of inputs consumed — the
+	# reset-AND-double-consume hazard the test suite's wall-clock
+	# completion identity pins against. progress == 0 means the outage
+	# caught the machine BETWEEN batches; IDLE is then the correct
+	# re-entry and commits normally.
+	if electric:
+		if world.power_satisfaction_at(b.anchor) <= POWER_EPSILON:
+			b.state["state"] = STATE_NO_POWER
+			s = STATE_NO_POWER
+		elif s == STATE_NO_POWER:
+			s = STATE_SMELTING if int(b.state.get("progress", 0)) > 0 else STATE_IDLE
+			b.state["state"] = s
+
 	match s:
 		STATE_IDLE:
 			if Processor._has_all_inputs(b, recipe) and Processor._has_room_for_outputs(b, recipe):
-				# Try to commit 1 fuel unit. If consume_tick returns false, no
-				# fuel — set NO_FUEL and don't consume inputs (recipe waits).
-				if Burner.consume_tick(b, FUEL_PER_INGOT):       # [BURNER LINE 3/N]
+				# Burner: try to commit 1 fuel unit up front; on failure,
+				# NO_FUEL and don't consume inputs (recipe waits).
+				# Electric: the commit is free — its cost is the CONSTANT
+				# network demand, already registered by the pre-pass, never
+				# a per-batch debit (the fuel-sentinel test pins that
+				# consume_tick is never even called).
+				var fuel_ok: bool = true
+				if not electric:
+					fuel_ok = Burner.consume_tick(b, FUEL_PER_INGOT)  # [BURNER LINE 3/N]
+				if fuel_ok:
 					Processor._consume_inputs(b, recipe)
 					b.state["progress"] = 1
 					b.state["state"] = STATE_SMELTING
-				else:
+				elif not electric:
+					# `elif not electric`, not a bare `else`: NO_FUEL is a
+					# burner-only state — an electric machine must never
+					# show 2. With the commit gate above intact this guard
+					# is unreachable for the electric variant; it exists so
+					# a future edit that breaks that gate cannot ALSO park
+					# an electric machine in a fuel state it has no way to
+					# leave. The electric stall is STATE_NO_POWER, written
+					# by the power gate above the match.
 					b.state["state"] = STATE_NO_FUEL              # [BURNER LINE 4/N]
 		STATE_SMELTING:
 			var p: int = int(b.state.get("progress", 0)) + 1
 			b.state["progress"] = p
-			if p >= int(recipe["time_ticks"]):
+			# EFFECTIVE, not rated: recomputed every tick from live
+			# satisfaction for the electric variant (target-stretch), the
+			# rated time_ticks unchanged for the burner.
+			if p >= _effective_target(b, world, recipe):
 				Processor._emit_outputs(b, recipe)
 				b.state["progress"] = 0
 				b.state["state"] = STATE_IDLE if Processor._has_room_for_outputs(b, recipe) else STATE_BLOCKED_OUTPUT
@@ -130,7 +287,12 @@ static func tick(b: Building, world) -> void:
 			# Re-check fuel each tick. As soon as fuel arrives AND we still
 			# have inputs+room, restart the cycle.
 			if Processor._has_all_inputs(b, recipe) and Processor._has_room_for_outputs(b, recipe):
-				if Burner.consume_tick(b, FUEL_PER_INGOT):        # [BURNER LINE 6/N]
+				# `electric or`: no writer puts an electric machine in
+				# NO_FUEL, but a hand-edited save can carry state 2. The
+				# gate keeps "no Burner call ever runs for an electric
+				# machine" true even then — the arm commits for free and
+				# the machine self-heals into SMELTING.
+				if electric or Burner.consume_tick(b, FUEL_PER_INGOT):        # [BURNER LINE 6/N]
 					Processor._consume_inputs(b, recipe)
 					b.state["progress"] = 1
 					b.state["state"] = STATE_SMELTING
@@ -243,6 +405,11 @@ static func info_lines(b: Building, world) -> Array:
 			status = "NO FUEL"
 		STATE_BLOCKED_OUTPUT:
 			status = "Output blocked"
+		STATE_NO_POWER:
+			# Electric only. Without this arm a parked machine would fall
+			# through to "Idle" — the exact lie the inserter panel work
+			# exists to prevent (the panels' own arms are Task 5).
+			status = "NO POWER"
 	lines.append("Status: %s" % status)
 
 	# Currently smelting — prominent. Reflects auto-selected recipe.
@@ -262,9 +429,12 @@ static func info_lines(b: Building, world) -> Array:
 	lines.append("In:  %s" % _fmt_buffer(b.state.get("in_buffer", [])))
 	lines.append("Out: %s" % _fmt_buffer(b.state.get("out_buffer", [])))
 
-	# Fuel from Burner.                                            [BURNER LINE 7/N]
-	for line in Burner.info_lines(b):                              # [BURNER LINE 8/N]
-		lines.append(line)
+	# Fuel from Burner — burner only: the electric variant's deliberately-
+	# kept-but-dead fuel fields would otherwise render as a live fuel gauge
+	# on a machine with no fuel slot.                              [BURNER LINE 7/N]
+	if not is_electric(b):
+		for line in Burner.info_lines(b):                          # [BURNER LINE 8/N]
+			lines.append(line)
 
 	# Port assignments — visible so player knows where to place belts.
 	if not recipe.is_empty():
@@ -287,9 +457,13 @@ static func info_lines(b: Building, world) -> Array:
 		if not output_ports.is_empty():
 			lines.append("Output ports: %s" % ", ".join(output_ports))
 
-	# Fuel port (always shown; not recipe-dependent).
-	var fuel_world: int = Buildings.world_dir(b, FUEL_PORT_DIR)
-	lines.append("Fuel port: ← %s" % Belt.DIR_NAMES[fuel_world])
+	# Fuel port (burner only, always shown; not recipe-dependent). The
+	# electric variant has no fuel path — advertising a port it refuses
+	# (test sub-case 13 pins the refusal) would send a player belting wood
+	# into a wall.
+	if not is_electric(b):
+		var fuel_world: int = Buildings.world_dir(b, FUEL_PORT_DIR)
+		lines.append("Fuel port: ← %s" % Belt.DIR_NAMES[fuel_world])
 
 	# Facing.
 	lines.append("Facing: %s (R to rotate before placing)" % Belt.DIR_NAMES[int(b.state.get("dir", 0))])

@@ -685,6 +685,19 @@ static func update_supply_demand(world) -> void:
 			# tick's activity — and lamps sharing the component would
 			# visibly flicker. An idle electric inserter draws full power.
 			world._component_demand[ins_comp] = int(world._component_demand.get(ins_comp, 0)) + Inserter.power_demand(b)
+		elif b.type == Buildings.Type.ELECTRIC_SMELTER:
+			# CONSUMER rule (_supply_component_id — a Chebyshev supply
+			# radius over every footprint cell), same as lamps and the
+			# electric inserter; NOT the generator/accumulator touching-pole
+			# rule. Demand is UNCONDITIONAL — no activity gate — for the
+			# same pre-pass staleness reason the ELECTRIC_INSERTER arm
+			# documents above: an IDLE electric smelter draws its full 10
+			# (Electric Processors Task 3, locked at the design pass). The
+			# number lives in Smelter.POWER_DEMAND_BY_TYPE, keyed by type.
+			var sm_comp: int = _supply_component_id(world, b)
+			if sm_comp < 0:
+				continue
+			world._component_demand[sm_comp] = int(world._component_demand.get(sm_comp, 0)) + Smelter.power_demand(b.type)
 		elif b.type == Buildings.Type.ACCUMULATOR:
 			var acc_comp: int = _adjacent_component_id(world, b)
 			if acc_comp < 0:
