@@ -39,7 +39,64 @@ const COLOR_DRILLING: Color = Color(1.00, 0.85, 0.30)
 const COLOR_NO_FUEL: Color = Color(0.50, 0.65, 1.00)
 const COLOR_BLOCKED: Color = Color(1.00, 0.95, 0.40)
 const COLOR_DEPLETED: Color = Color(0.55, 0.55, 0.55)
+# NO POWER (electric variant). Warm amber against COLOR_NO_FUEL's cool blue —
+# the two stalls have different causes and different fixes, so the status
+# line must distinguish them by colour as well as by text. Copied verbatim
+# from inserter_panel.gd's COLOR_NO_POWER (the shipped precedent);
+# test_electric_drill.gd pins the literal.
+const COLOR_NO_POWER: Color = Color(1.00, 0.62, 0.25)
 const COLOR_IDLE: Color = Color(0.75, 0.75, 0.75)
+
+## The panel's state → status-line mapping. PURE, and static, so it can be
+## asserted without a font, a frame or a window — the drill-panel sub-cases
+## of test_electric_drill.gd are the assertion. It used to live inline in
+## _draw_building_specific, where no suite could reach it (test_runner.gd
+## never yields a frame, so no CanvasItem receives NOTIFICATION_DRAW during a
+## headless run — docs/scoping/visual-verification.md route A, the
+## InserterPanel.status_line precedent).
+##
+## Returns { "text": String, "color": Color }.
+##
+## The fallback arm preserves the pre-Task-5 inline default EXACTLY: an
+## unmatched state (including STATE_IDLE's 0) reads "Status: Idle". The
+## inserter panel's loud magenta "Status: ?" fallback is the better shape,
+## but adopting it here changes what an out-of-range state renders, and
+## Task 5's burner contract is byte-identity — left for a scoped session.
+static func status_line(state: int) -> Dictionary:
+	match state:
+		MiningDrill.STATE_DRILLING:
+			return {"text": "Status: Drilling", "color": COLOR_DRILLING}
+		MiningDrill.STATE_NO_FUEL:
+			return {"text": "Status: NO FUEL — feed wood, coal, or fuel briquette", "color": COLOR_NO_FUEL}
+		MiningDrill.STATE_BLOCKED_OUTPUT:
+			return {"text": "Status: Output blocked", "color": COLOR_BLOCKED}
+		MiningDrill.STATE_DEPLETED:
+			return {"text": "Status: Depleted — relocate drill", "color": COLOR_DEPLETED}
+		MiningDrill.STATE_NO_POWER:
+			# Its own arm, not folded into NO_FUEL: distinct text and distinct
+			# colour are the entire point of the line. ⚠ MiningDrill's
+			# NO_POWER is 5 — its 4 is DEPLETED, and the SMELTER's NO_POWER
+			# is 4 — always the MODULE constant here, never a literal shared
+			# with the smelter panel.
+			return {"text": "Status: NO POWER", "color": COLOR_NO_POWER}
+	return {"text": "Status: Idle", "color": COLOR_IDLE}
+
+## Whether the fuel LABEL/units row renders. The fuel slot RECT already
+## vanishes on its own for the electric variant (no "fuel" slot_def in
+## ELECTRIC_DRILL's slot_layout — pinned by test_electric_drill.gd (3));
+## this predicate is the text half of the same fact. Gated on the MODULE's
+## is_electric, never a local type check — one source of truth.
+static func shows_fuel_row(b: Building) -> bool:
+	return not MiningDrill.is_electric(b)
+
+## The denominator the "Drill progress: N / M" sub-line renders against.
+## Burner: the rated DRILL_TICKS_PER_ORE (40), unchanged — _effective_target
+## early-returns it before any satisfaction lookup. Electric: the EFFECTIVE
+## target — recomputed from live satisfaction, the same number the machine
+## itself races (target-stretch), so a brownout visibly stretches the
+## sub-line instead of it lying about time remaining.
+static func progress_target(b: Building, world_ref) -> int:
+	return MiningDrill._effective_target(b, world_ref)
 
 ## Override slot positions for drill's row layout. Output sub-slots in a
 ## horizontal row, fuel below.
@@ -53,7 +110,11 @@ func _building_slot_rects() -> Array:
 	# Output row sits below the coverage panel and currently-mining text.
 	var output_row_y: float = area.position.y + COVERAGE_CELL * 2 + 50
 	var output_row_x: float = area.position.x + 24
-	# Fuel row sits below outputs.
+	# Fuel row sits below outputs. The electric variants inherit this row
+	# layout; the empty fuel-row gap is DELIBERATE (user decision 2026-08-27)
+	# — do not compact it blind: the gap is where the burner's fuel slot
+	# sits, and compaction is a design decision, not a cleanup.
+	# test_electric_smelter.gd (21) pins this comment's phrase.
 	var fuel_row_y: float = output_row_y + SlotWidget.SIZE + 30
 	var fuel_x: float = area.position.x + 24
 
@@ -139,10 +200,11 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 		draw_string(font, Vector2(info_x, info_y + 18),
 			"%d / %d richness" % [richness, orig],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
-		# Drill progress sub-line.
+		# Drill progress sub-line. The denominator comes from progress_target
+		# (pure, static) so the suite can assert it — route A.
 		var dprog: int = int(building.state.get("drill_progress", 0))
 		draw_string(font, Vector2(info_x, info_y + 36),
-			"Drill progress: %d / 40" % dprog,
+			"Drill progress: %d / %d" % [dprog, progress_target(building, world)],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
 	# Active deposits list — sorted by richness desc, max 4 lines.
 	draw_string(font, Vector2(info_x, info_y + 60), "Active deposits:",
@@ -164,38 +226,28 @@ func _draw_building_specific(area: Rect2, font: Font) -> void:
 	draw_string(font, Vector2(area.position.x + 24, output_row_y - 6),
 		"Output:", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT_COLOR)
 
-	# Fuel slot label.
+	# Fuel slot label. The slot RECT is layout-driven and vanishes on its own
+	# for the electric variant; the label is drawn here, so it carries its
+	# own gate.
 	var fuel_row_y: float = output_row_y + SlotWidget.SIZE + 30
-	var fuel_label_x: float = area.position.x + 24 + FUEL_SLOT_SIZE + 16
-	var fuel_units: int = int(building.state.get("fuel_buffer", 0))
-	var fuel_cap: int = int(Burner.FUEL_BUFFER_CAPACITY)
-	draw_string(font, Vector2(fuel_label_x, fuel_row_y + 18),
-		"Fuel: %d / %d units" % [fuel_units, fuel_cap],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, TEXT_COLOR)
-	draw_string(font, Vector2(fuel_label_x, fuel_row_y + 36),
-		"(accepts: Wood, Coal, Briquette)",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
+	if shows_fuel_row(building):
+		var fuel_label_x: float = area.position.x + 24 + FUEL_SLOT_SIZE + 16
+		var fuel_units: int = int(building.state.get("fuel_buffer", 0))
+		var fuel_cap: int = int(Burner.FUEL_BUFFER_CAPACITY)
+		draw_string(font, Vector2(fuel_label_x, fuel_row_y + 18),
+			"Fuel: %d / %d units" % [fuel_units, fuel_cap],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, TEXT_COLOR)
+		draw_string(font, Vector2(fuel_label_x, fuel_row_y + 36),
+			"(accepts: Wood, Coal, Briquette)",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TEXT_DIM)
 
-	# Status row.
+	# Status row. The mapping lives in status_line (pure, static) so the
+	# suite can assert it — route A.
 	var status_y: float = fuel_row_y + FUEL_SLOT_SIZE + 18
 	var s: int = int(building.state.get("state", 0))
-	var status_text: String = "Status: Idle"
-	var status_color: Color = COLOR_IDLE
-	match s:
-		1:    # DRILLING
-			status_text = "Status: Drilling"
-			status_color = COLOR_DRILLING
-		2:    # NO_FUEL
-			status_text = "Status: NO FUEL — feed wood, coal, or fuel briquette"
-			status_color = COLOR_NO_FUEL
-		3:    # BLOCKED_OUTPUT
-			status_text = "Status: Output blocked"
-			status_color = COLOR_BLOCKED
-		4:    # DEPLETED
-			status_text = "Status: Depleted — relocate drill"
-			status_color = COLOR_DEPLETED
+	var status: Dictionary = status_line(s)
 	draw_string(font, Vector2(area.position.x + 24, status_y),
-		status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, status_color)
+		String(status["text"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, status["color"])
 
 ## Sorted active deposits (richness desc, tiebreak topmost-leftmost — same
 ## logic as MiningDrill._pick_best_deposit). Returns Array of [pos, ore_type,

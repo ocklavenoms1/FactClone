@@ -56,6 +56,7 @@ extends RefCounted
 
 const GridWorldScript = preload("res://scripts/world/grid_world.gd")
 const ColourMath = preload("res://scripts/tests/test_inserter_body_colours.gd")
+const DrillPanelScript = preload("res://scripts/ui/drill_panel.gd")
 
 # Distinct filename from every other suite's save path so round-trip tests
 # cannot collide if the runner order ever changes.
@@ -178,7 +179,7 @@ const DEPLETED_RUN_TICKS: int = 40
 const DEPLETED_OUTAGE_TICKS: int = 10
 
 static func test_name() -> String:
-	return "electric drill (registry row + power tables + effective target + trajectories + epsilon boundary + constant demand + fuel sentinels + freeze dual-pin + make() shape + save round-trip + DEPLETED precedence)"
+	return "electric drill (registry row + power tables + effective target + trajectories + epsilon boundary + constant demand + fuel sentinels + freeze dual-pin + make() shape + save round-trip + DEPLETED precedence + panel decisions)"
 
 static func run(parent: Node) -> Dictionary:
 	var failures: Array = []
@@ -200,8 +201,12 @@ static func run(parent: Node) -> Dictionary:
 	_case_16_make_shape(failures)
 	_case_17_save_roundtrip(parent, failures)
 	_case_18_depleted_precedence(parent, failures)
+	_case_19_panel_status_map(failures)
+	_case_20_panel_fuel_gate(failures)
+	_case_21_panel_progress_denominator(failures)
+	_case_22_panel_reachability(failures)
 	if failures.is_empty():
-		return { "ok": true, "message": "18 sub-cases pass: registry row (1-6) + power tables + effective target + both trajectories + epsilon boundary + constant demand + fuel sentinel + wood-belt guard + freeze dual-pin + make() shape + save round-trip + DEPLETED precedence" }
+		return { "ok": true, "message": "22 sub-cases pass: registry row (1-6) + power tables + effective target + both trajectories + epsilon boundary + constant demand + fuel sentinel + wood-belt guard + freeze dual-pin + make() shape + save round-trip + DEPLETED precedence + panel status map + fuel-row gate + progress denominator + E-key reachability" }
 	return { "ok": false, "message": "%d failures: %s" % [failures.size(), " | ".join(failures.slice(0, 16))] }
 
 # ===========================================================================
@@ -705,13 +710,140 @@ static func _case_18_depleted_precedence(parent: Node, failures: Array) -> void:
 		"(18) no ore can appear after depletion, got %d" % _out_count(dr))
 	_disconnect(world); world.queue_free()
 
+# ===========================================================================
+# (19) PANEL STATUS MAP (Task 5, route A — the mapping, not pixels). Every
+# burner arm is pinned VERBATIM (the burner contract is byte-identity) and
+# the electric stall gets its own arm — without it the panel renders
+# "Status: Idle", the exact lie the inserter-panel work exists to prevent.
+# Text, colour and the state ints are all THIS FILE'S literals.
+#
+# ⚠ THE TWO MODULES' NO_POWER INTS DIFFER: MiningDrill 5, Smelter 4 — and
+# the drill's 4 is DEPLETED. Both module constants are pinned as int
+# literals, and 4 is asserted to stay DEPLETED, so a cross-wired panel
+# (this one matching the smelter's 4) reddens HERE, not in a playtest.
+# ===========================================================================
+static func _case_19_panel_status_map(failures: Array) -> void:
+	_check(failures, int(MiningDrill.STATE_NO_POWER) == 5,
+		"(19) MiningDrill.STATE_NO_POWER must be the int literal 5, got %d — the panel arm and every save carrying state 5 hang off it" % int(MiningDrill.STATE_NO_POWER))
+	_check(failures, int(Smelter.STATE_NO_POWER) == 4,
+		"(19) Smelter.STATE_NO_POWER must be the int literal 4, got %d — the two modules' NO_POWER ints DIFFER by design, and 4 is THIS module's DEPLETED" % int(Smelter.STATE_NO_POWER))
+	# The electric stall arm: state 5 → warm amber "Status: NO POWER".
+	var got: Dictionary = DrillPanelScript.status_line(5)
+	_check(failures, String(got["text"]) == "Status: NO POWER",
+		"(19) status_line(5) → \"%s\", expected \"Status: NO POWER\" — an unpowered electric drill must not read as anything else (\"Status: Idle\" here is the silent-compensation lie; a drill panel reading the SMELTER's 4 lands exactly there)" % String(got["text"]))
+	_check(failures, got["color"] == Color(1.00, 0.62, 0.25),
+		"(19) status_line(5) colour is %s, expected the warm amber literal Color(1.00, 0.62, 0.25) — COLOR_NO_POWER copied verbatim from inserter_panel.gd, distinct from COLOR_NO_FUEL's cool blue" % str(got["color"]))
+	# The burner arms, verbatim — including 4 staying DEPLETED: the smelter's
+	# NO_POWER int is this module's permanent-fact state, and a panel that
+	# borrowed the smelter's constant would repaint every depleted drill as a
+	# power problem.
+	var burner_rows: Array = [
+		[0, "Status: Idle", Color(0.75, 0.75, 0.75)],
+		[1, "Status: Drilling", Color(1.00, 0.85, 0.30)],
+		[2, "Status: NO FUEL — feed wood, coal, or fuel briquette", Color(0.50, 0.65, 1.00)],
+		[3, "Status: Output blocked", Color(1.00, 0.95, 0.40)],
+		[4, "Status: Depleted — relocate drill", Color(0.55, 0.55, 0.55)],
+	]
+	for row in burner_rows:
+		var r: Dictionary = DrillPanelScript.status_line(int(row[0]))
+		_check(failures, String(r["text"]) == str(row[1]),
+			"(19) status_line(%d) → \"%s\", expected the pre-Task-5 string \"%s\" verbatim" % [int(row[0]), String(r["text"]), str(row[1])])
+		_check(failures, r["color"] == row[2],
+			"(19) status_line(%d) colour is %s, expected %s verbatim" % [int(row[0]), str(r["color"]), str(row[2])])
+
+# ===========================================================================
+# (20) FUEL-ROW GATE. The fuel slot RECT vanishes on its own for the
+# electric variant (no "fuel" slot_def in the layout — sub-case 3 pins the
+# id list); the LABEL ("Fuel: N / 16 units" + the accepts line) is drawn
+# code and needs this predicate. Gated on MiningDrill.is_electric(building)
+# in the panel, never a local type check.
+# ===========================================================================
+static func _case_20_panel_fuel_gate(failures: Array) -> void:
+	var burner: Building = MiningDrill.make(Vector2i(0, 0), Belt.DIR_E)
+	_check(failures, DrillPanelScript.shows_fuel_row(burner) == true,
+		"(20) shows_fuel_row(burner drill) must stay true — the burner's fuel row is load-bearing UI")
+	var elec: Building = MiningDrill.make(Vector2i(0, 0), Belt.DIR_E, Buildings.Type.ELECTRIC_DRILL)
+	_check(failures, DrillPanelScript.shows_fuel_row(elec) == false,
+		"(20) shows_fuel_row(electric drill) must be false — a \"Fuel: 0 / 16 units\" label over no slot invites feeding fuel to a machine that cannot eat it")
+
+# ===========================================================================
+# (21) PROGRESS DENOMINATOR. The pre-Task-5 sub-line hardcoded "/ 40"; for
+# the electric variant it must show the EFFECTIVE target (target-stretch —
+# "10 / 40" during a brownout while the machine needs 64 is a lie about
+# time remaining). Denominators are literals: 40 / 32 / 64 / 640, the same
+# family sub-case 8 pins on the module.
+# ===========================================================================
+static func _case_21_panel_progress_denominator(failures: Array) -> void:
+	var burner: Building = MiningDrill.make(Vector2i(0, 0), Belt.DIR_E)
+	var elec: Building = MiningDrill.make(Vector2i(0, 0), Belt.DIR_E, Buildings.Type.ELECTRIC_DRILL)
+	# The burner-denominator literal: rated 40 at ANY satisfaction. The stub
+	# reports 0.0 on purpose — a burner routed through the satisfaction
+	# divisor would render "0 / 640" here.
+	var burner_t: int = DrillPanelScript.progress_target(burner, StubPowerWorld.new(0.0))
+	_check(failures, burner_t == 40,
+		"(21) burner panel denominator must be the rated literal 40 at ANY satisfaction, got %d — 640 means the burner's sub-line was routed through the satisfaction divisor" % burner_t)
+	# Electric: the effective target, three literals.
+	var e100: int = DrillPanelScript.progress_target(elec, StubPowerWorld.new(1.0))
+	_check(failures, e100 == 32,
+		"(21) electric panel denominator at satisfaction 1.00 must be the literal 32, got %d — the burner's 40 here means the panel ignores the effective target" % e100)
+	var e050: int = DrillPanelScript.progress_target(elec, StubPowerWorld.new(0.5))
+	_check(failures, e050 == 64,
+		"(21) electric panel denominator at satisfaction 0.50 must be the literal 64, got %d — the brownout must stretch the sub-line, not just the machine" % e050)
+	var e000: int = DrillPanelScript.progress_target(elec, StubPowerWorld.new(0.0))
+	_check(failures, e000 == 640,
+		"(21) electric panel denominator at satisfaction 0.00 must be the floor literal 640, got %d" % e000)
+
+# ===========================================================================
+# (22) PANEL REACHABILITY (user disposition 2026-08-27) — STRUCTURAL, the
+# indicator-contract pattern: main.gd's E-key dispatch is read as TEXT and
+# the ELECTRIC_DRILL arm must exist and open this panel. An unreachable
+# panel is dead code with a green suite — the silent-compensation shape in
+# UI. Line-based and comment-aware, so a commented-out arm reddens exactly
+# like a deleted one. The PAUSE gate re-checks the same fact live.
+# ===========================================================================
+static func _case_22_panel_reachability(failures: Array) -> void:
+	var src: String = FileAccess.get_file_as_string("res://scripts/main.gd")
+	if src == "":
+		failures.append("(22) could not read res://scripts/main.gd — the reachability pin cannot run")
+		return
+	_check(failures, _dispatch_arm_opens(src, "Buildings.Type.ELECTRIC_DRILL", "drill_panel.open("),
+		"(22) main.gd has no live dispatch arm routing Buildings.Type.ELECTRIC_DRILL to drill_panel.open(...) — the electric drill's panel is unreachable dead code (the Task-2 arm was deleted or commented out), and every green panel sub-case above is asserting a panel no player can open")
+
+## TRUE if a NON-COMMENT line of `src` mentions `type_token` and the arm's
+## body — the same line, or the next few non-comment lines — calls
+## `open_token`. Line-based so a commented-out arm does NOT count: the
+## reachability pin must redden when the dispatch arm is deleted OR
+## commented out, and a raw substr window would keep matching commented
+## text.
+static func _dispatch_arm_opens(src: String, type_token: String, open_token: String) -> bool:
+	var lines: PackedStringArray = src.split("\n")
+	for i in lines.size():
+		var t: String = lines[i].strip_edges()
+		if t.begins_with("#") or t.find(type_token) < 0:
+			continue
+		if t.find(open_token) >= 0:
+			return true
+		# The arm body: scan at most the next 4 non-comment lines, enough to
+		# cross the match arm's one-line body plus formatting drift.
+		var steps: int = 0
+		var j: int = i + 1
+		while j < lines.size() and steps < 4:
+			var body: String = lines[j].strip_edges()
+			j += 1
+			if body == "" or body.begins_with("#"):
+				continue
+			steps += 1
+			if body.find(open_token) >= 0:
+				return true
+	return false
+
 # ---------- helpers (house style, mirroring test_electric_smelter.gd) ----------
 
 ## Duck-typed stand-in for GridWorld reporting a satisfaction of the test's
 ## choosing — _effective_target calls exactly one method on `world`, so a
 ## two-line RefCounted is a complete implementation of the interface under
-## test. Used ONLY for the pure arithmetic in sub-case 8; everything about
-## behaviour runs on a real GridWorld with real poles.
+## test. Used ONLY for the pure arithmetic in sub-cases 8 and 21; everything
+## about behaviour runs on a real GridWorld with real poles.
 class StubPowerWorld extends RefCounted:
 	var sat: float = 1.0
 	func _init(s: float) -> void:
