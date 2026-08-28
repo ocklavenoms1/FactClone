@@ -1274,9 +1274,15 @@ func _try_open_building_ui(hover_tile: Vector2i, player_tile: Vector2i) -> void:
 		_show_toast("(No interaction UI yet for %s — coming in a future session.)" % Buildings.name_of(b.type))
 		return
 	match b.type:
-		Buildings.Type.SMELTER:
+		# Electric Processors Task 2: the electric variants open the SAME
+		# panels — today they run the burner machine verbatim (fuel demand
+		# included), so the burner panel is the truthful UI. Task 5 makes
+		# both panels electric-aware (NO_POWER arm, no fuel row) and pins
+		# this dispatch structurally; without these arms the E-key would be
+		# a silent no-op on a type has_interaction_ui says is openable.
+		Buildings.Type.SMELTER, Buildings.Type.ELECTRIC_SMELTER:
 			smelter_panel.open(b, grid_world)
-		Buildings.Type.MINING_DRILL:
+		Buildings.Type.MINING_DRILL, Buildings.Type.ELECTRIC_DRILL:
 			drill_panel.open(b, grid_world)
 		Buildings.Type.CHEST:
 			chest_panel.open(b, grid_world)

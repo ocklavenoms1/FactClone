@@ -171,6 +171,15 @@ const TESTS: Array = [
 	# _draw_power_wires (the defined layer), and it answers pairing ONLY via
 	# Underground.paired_exit (the predicate's contracted second caller).
 	preload("res://scripts/tests/test_underground_indicator_contract.gd"),
+	# Electric Processors Task 2: the two registry rows — on-disk enum ints
+	# 37/38 as literals, burner-mirroring DATA shapes MINUS the fuel slot,
+	# make()-type pins (both burner make()s hardcoded their enum), swatch
+	# colour pins with their own ΔE floor (test_inserter_body_colours.gd's
+	# floor covers inserter tiers only), and the drill's ore-coverage
+	# placement rule extended to type 38. Tasks 3/4 extend both files with
+	# the power state machine cases.
+	preload("res://scripts/tests/test_electric_smelter.gd"),
+	preload("res://scripts/tests/test_electric_drill.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

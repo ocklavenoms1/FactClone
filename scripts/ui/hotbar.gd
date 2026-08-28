@@ -188,6 +188,10 @@ func _build_categories() -> void:
 		"slots": [
 			{ "kind": "building", "value": Buildings.Type.MINING_DRILL },
 			{ "kind": "building", "value": Buildings.Type.SMELTER },
+			# Electric Processors Task 2: powered variants beside the burner
+			# originals, in the same drill-then-smelter order. 4 of 9.
+			{ "kind": "building", "value": Buildings.Type.ELECTRIC_DRILL },
+			{ "kind": "building", "value": Buildings.Type.ELECTRIC_SMELTER },
 		],
 		"selected": 0,
 	})

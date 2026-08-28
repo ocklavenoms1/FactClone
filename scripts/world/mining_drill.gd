@@ -58,7 +58,11 @@ const DEFAULT_RECIPE_ID: String = ""   # drill is NOT recipe-driven
 ## after placement (which has access to the world). make() can't see the
 ## world from here, so we initialize empty and refresh in place_building's
 ## post-hook.
-static func make(pos: Vector2i, dir: int = 0) -> Building:
+##
+## `b_type` (Electric Processors Task 2, the Inserter.make pattern): the
+## ELECTRIC_DRILL dispatch arm passes its own enum so the building dict
+## carries the on-disk 38; every existing caller keeps the burner default.
+static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.MINING_DRILL) -> Building:
 	var state: Dictionary = {
 		"dir": dir,
 		"drill_progress": 0,
@@ -69,7 +73,7 @@ static func make(pos: Vector2i, dir: int = 0) -> Building:
 	# Merge in burner state (fuel_buffer, fuel_burn_progress).
 	for k in Burner.make_state().keys():
 		state[k] = Burner.make_state()[k]
-	return Building.new(Buildings.Type.MINING_DRILL, pos, state)
+	return Building.new(b_type, pos, state)
 
 ## Scan the building's 2×2 footprint, collect positions of ore tiles into
 ## `covered_deposits`. Called once at placement. Cached so tick doesn't
@@ -94,9 +98,14 @@ static func refresh_covered_deposits(b: Building, world) -> void:
 ## Placement validation: check Q9 rules. Called from main.gd or
 ## Buildings.can_place_building extension.
 ##
+## `b_type` (Electric Processors Task 2): the rule is shared by both drill
+## types — grid_world passes the type being placed so the footprint scan
+## follows the right DATA row (both are 2x2 today; the parameter keeps that
+## an accident of data rather than a hidden dependency).
+##
 ## Returns "" on valid; otherwise a player-facing error string for toast.
-static func validate_placement(world, anchor: Vector2i) -> String:
-	var fp: Vector2i = Buildings.footprint_of(Buildings.Type.MINING_DRILL)
+static func validate_placement(world, anchor: Vector2i, b_type: int = Buildings.Type.MINING_DRILL) -> String:
+	var fp: Vector2i = Buildings.footprint_of(b_type)
 	var has_ore: bool = false
 	for dx in fp.x:
 		for dy in fp.y:

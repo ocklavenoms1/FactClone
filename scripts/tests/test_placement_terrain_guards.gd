@@ -41,6 +41,12 @@ const GUARDED: Array = [
 	# was already protected on registration; this line makes the COVERAGE
 	# match the protection instead of asserting it by absence.
 	Buildings.Type.ELECTRIC_INSERTER,
+	# Electric Processors Task 2 — accepts Overlay.NONE, protected by the
+	# same generic guard; coverage line per the ELECTRIC_INSERTER precedent
+	# above. ELECTRIC_DRILL is deliberately NOT here: like MINING_DRILL it
+	# is exempt from the resource-node rule (it must sit on ore) — its own
+	# suite pins the ore-coverage rule instead.
+	Buildings.Type.ELECTRIC_SMELTER,
 ]
 
 static func test_name() -> String:

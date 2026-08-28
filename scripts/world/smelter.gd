@@ -61,7 +61,11 @@ const TINT_BLOCKED: Color = Color(1.0, 0.95, 0.4)       # yellow
 
 ## Build initial smelter state. Recipe defaults to "" (auto-selected on first
 ## tick). Burner state merged in.
-static func make(pos: Vector2i, dir: int = 0) -> Building:
+##
+## `b_type` (Electric Processors Task 2, the Inserter.make pattern): the
+## ELECTRIC_SMELTER dispatch arm passes its own enum so the building dict
+## carries the on-disk 37; every existing caller keeps the burner default.
+static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.SMELTER) -> Building:
 	var state: Dictionary = {
 		"recipe_id": "",                # auto-selected by _maybe_select_recipe
 		"state": STATE_IDLE,
@@ -73,7 +77,7 @@ static func make(pos: Vector2i, dir: int = 0) -> Building:
 	# Merge Burner fields (fuel_buffer, fuel_burn_progress).  [BURNER LINE 1/N]
 	for k in Burner.make_state().keys():
 		state[k] = Burner.make_state()[k]
-	return Building.new(Buildings.Type.SMELTER, pos, state)
+	return Building.new(b_type, pos, state)
 
 ## Per-tick logic. Dispatched from Buildings.tick_one.
 static func tick(b: Building, world) -> void:

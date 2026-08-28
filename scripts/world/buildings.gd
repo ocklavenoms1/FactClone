@@ -161,6 +161,16 @@ enum Type {
 	# Appended at the END so every previously-saved type keeps its integer.
 	UNDERGROUND_BELT_ENTRY,
 	UNDERGROUND_BELT_EXIT,
+	# Electric Processors (session-electricity-processors, Task 2): powered
+	# variants of the two burner processors. Registry rows only today —
+	# Tasks 3/4 make smelter.gd / mining_drill.gd power-aware; until then
+	# both variants run the burner state machine verbatim through the same
+	# modules (they demand fuel, which is expected and temporary).
+	# Appended at the END so every previously-saved type keeps its integer:
+	# ELECTRIC_SMELTER = 37, ELECTRIC_DRILL = 38 — pinned by the save format
+	# and by the two suites' literal assertions.
+	ELECTRIC_SMELTER,
+	ELECTRIC_DRILL,
 }
 
 const DATA: Dictionary = {
@@ -891,6 +901,90 @@ const DATA: Dictionary = {
 		"walkable": false,
 		# No slot_layout — accumulator has no items; charge state is internal.
 	},
+	Type.ELECTRIC_SMELTER: {
+		"name": "Electric Smelter",
+		# Electric-family teal — the cyan language established by
+		# ELECTRIC_INSERTER (0.25, 0.75, 0.80), pulled down toward the
+		# smelter's dark furnace mass. The electric DRILL takes the pale end
+		# of the same family, so the two electric processors never read as
+		# shades of one another (both pairings pinned with a ΔE floor in
+		# test_electric_smelter.gd / test_electric_drill.gd).
+		"swatch_color": Color(0.10, 0.42, 0.50),
+		"footprint": Vector2i(2, 2),                 # matches the burner SMELTER
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE, Terrain.Overlay.PATH],
+		"supports_direction": true,                  # all 3 ports rotate together
+		"player_drainable": false,
+		# Electric Processors (session-electricity-processors, Task 2):
+		# registry row only today — the machine runs the burner state machine
+		# verbatim through Smelter.tick until Tasks 3/4 make smelter.gd
+		# power-aware. Locked decisions the Task-3 wiring must honour:
+		#   - Power demand will be 10 (2x the electric inserter's 5), wired
+		#     in Tasks 3/4 via smelter.gd's POWER_DEMAND_BY_TYPE.
+		#   - Speed: electric runs the burner recipe 20% FASTER — electric
+		#     32 ticks vs burner 40, ratio 0.8, as a machine-side multiplier
+		#     ONLY. NEVER an edit to the shared recipe rows: recipes.gd
+		#     time_ticks stays 40.
+		# DELIBERATELY NO fuel slot: the electric tier is not a Burner, it
+		# draws from the power network (Tasks 3/4 wire it). Same convention
+		# as ELECTRIC_INSERTER above. Input/output are the burner SMELTER's
+		# slots verbatim.
+		"slot_layout": [
+			{
+				"id": "input",
+				"kind": "input",
+				"accepts": [Items.Type.IRON_ORE, Items.Type.COPPER_ORE],
+				"max_stack": 8,                        # recipe input_capacity
+				"state_field": "in_buffer",
+			},
+			{
+				"id": "output",
+				"kind": "output",
+				"accepts": [Items.Type.IRON_INGOT, Items.Type.COPPER_INGOT],
+				"max_stack": 8,                        # recipe output_capacity
+				"state_field": "out_buffer",
+			},
+		],
+	},
+	Type.ELECTRIC_DRILL: {
+		"name": "Electric Drill",
+		# Pale cyan-green — the light end of the electric family (see the
+		# ELECTRIC_SMELTER row above for the pairing rationale).
+		"swatch_color": Color(0.48, 0.72, 0.68),
+		"footprint": Vector2i(2, 2),                 # matches the burner MINING_DRILL
+		# Same ground rules as the burner drill, including the custom
+		# placement check (>=1 covered ore tile, no water, no trees) — see
+		# MiningDrill.validate_placement, which grid_world routes both drill
+		# types through.
+		"requires_overlay": [Terrain.Overlay.NONE, Terrain.Overlay.STONE],
+		"supports_direction": true,                  # output port rotates
+		"player_drainable": false,
+		# Electric Processors (session-electricity-processors, Task 2):
+		# registry row only today — the machine runs the burner state machine
+		# verbatim through MiningDrill.tick until Tasks 3/4 make
+		# mining_drill.gd power-aware. Locked decisions the Task-4 wiring
+		# must honour:
+		#   - Power demand will be 10 (2x the electric inserter's 5), wired
+		#     in Tasks 3/4 via mining_drill.gd's POWER_DEMAND_BY_TYPE.
+		#   - Speed: electric runs the burner cycle 20% FASTER — electric 32
+		#     ticks vs burner 40 (DRILL_TICKS_PER_ORE), ratio 0.8, as a
+		#     machine-side multiplier ONLY. NEVER an edit to shared recipe
+		#     rows (recipes.gd time_ticks stays 40; the drill's base lives in
+		#     mining_drill.gd and stays 40 too).
+		# DELIBERATELY NO fuel slot: the electric tier is not a Burner, it
+		# draws from the power network (Tasks 3/4 wire it). Output is the
+		# burner MINING_DRILL's multi-stack slot verbatim.
+		"slot_layout": [
+			{
+				"id": "output",
+				"kind": "output_multi",
+				"accepts": [Items.Type.RAW_STONE, Items.Type.COAL, Items.Type.IRON_ORE,
+				             Items.Type.COPPER_ORE, Items.Type.CLAY],
+				"max_stack": 16,                       # OUTPUT_BUFFER_CAPACITY per type
+				"state_field": "output_buffer",
+				"multi_count": 5,                      # max simultaneous ore types
+			},
+		],
+	},
 }
 
 ## Every building type whose placement or removal changes the POWER topology
@@ -1201,6 +1295,13 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			# tunnel, no tick case. Draw + footprint + being found by the
 			# entry's pairing scan is its whole job.
 			return Underground.make_exit(pos, dir)
+		Type.ELECTRIC_SMELTER:
+			# The inserter-tier pattern: same module, type passed through so
+			# the building dict carries the on-disk 37 (Smelter.make's
+			# default stays the burner enum).
+			return Smelter.make(pos, dir, Type.ELECTRIC_SMELTER)
+		Type.ELECTRIC_DRILL:
+			return MiningDrill.make(pos, dir, Type.ELECTRIC_DRILL)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1219,9 +1320,14 @@ static func tick_one(b: Building, world: Node2D) -> void:
 		Type.PACKAGER, Type.BRIQUETTER, Type.YEAST_CULTURE, Type.SUGAR_PRESS, \
 		Type.RETTER, Type.LOOM, Type.TAILOR:
 			Processor.tick(b, world)
-		Type.MINING_DRILL:
+		# Electric Processors Task 2: the electric variants run the SAME
+		# modules — no new tick files (the #15/#18 drift shape, refused at
+		# design time). Today they run the burner state machine verbatim;
+		# Tasks 3/4 branch inside smelter.gd / mining_drill.gd on
+		# is_electric(b).
+		Type.MINING_DRILL, Type.ELECTRIC_DRILL:
 			MiningDrill.tick(b, world)
-		Type.SMELTER:
+		Type.SMELTER, Type.ELECTRIC_SMELTER:
 			Smelter.tick(b, world)
 		Type.COMPOSTER:
 			# Multi-recipe like Smelter — needs auto-select wrapper before
@@ -1316,9 +1422,12 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			Loom.draw(b, canvas, world_pos, tile_size)
 		Type.TAILOR:
 			Tailor.draw(b, canvas, world_pos, tile_size)
-		Type.MINING_DRILL:
+		# Electric variants share the burner draw modules (Task 2); a
+		# distinct electric body treatment is future work — map identity
+		# today is the swatch, the hotbar and the info panel.
+		Type.MINING_DRILL, Type.ELECTRIC_DRILL:
 			MiningDrill.draw(b, canvas, world_pos, tile_size)
-		Type.SMELTER:
+		Type.SMELTER, Type.ELECTRIC_SMELTER:
 			Smelter.draw(b, canvas, world_pos, tile_size)
 		Type.COMPOSTER:
 			Composter.draw(b, canvas, world_pos, tile_size)
@@ -1558,9 +1667,11 @@ static func info_lines_for(b: Building, world = null) -> Array:
 		Type.INSERTER, Type.FAST_INSERTER, Type.LONG_REACH_INSERTER, \
 		Type.ELECTRIC_INSERTER:
 			return Inserter.info_lines(b, world)
-		Type.MINING_DRILL:
+		# Electric variants share the burner info modules (Task 2); Task 3/4
+		# add the NO_POWER lines inside smelter.gd / mining_drill.gd.
+		Type.MINING_DRILL, Type.ELECTRIC_DRILL:
 			return MiningDrill.info_lines(b, world)
-		Type.SMELTER:
+		Type.SMELTER, Type.ELECTRIC_SMELTER:
 			return Smelter.info_lines(b, world)
 		# All three wire tiers share PowerPole.info_lines: it reads nothing
 		# tier-specific, only network membership at b.anchor via

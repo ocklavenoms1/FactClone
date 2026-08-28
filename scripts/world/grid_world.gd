@@ -470,9 +470,10 @@ func can_place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
 		if base_at(cell) == Terrain.Base.WATER:
 			last_building_place_error = "%s can't be placed on water" % Buildings.name_of(t)
 			return false
-		# MINING_DRILL is exempt — it must sit on ore. Its own
+		# Both drill types are exempt — a drill must sit on ore. Their shared
 		# validate_placement rejects water and trees in-footprint.
-		if t != Buildings.Type.MINING_DRILL and tiles.has(cell) \
+		if t != Buildings.Type.MINING_DRILL and t != Buildings.Type.ELECTRIC_DRILL \
+				and tiles.has(cell) \
 				and tiles[cell].resource_node != ResourceNodes.Type.NONE:
 			var rname: String = ResourceNodes.name_of(tiles[cell].resource_node)
 			if ResourceNodes.is_ore(tiles[cell].resource_node):
@@ -490,8 +491,8 @@ func can_place_building(t: int, pos: Vector2i, dir: int = 0) -> bool:
 	if t == Buildings.Type.PUMP and not Pump.is_valid_placement(self, pos):
 		last_building_place_error = "Pump must be placed adjacent to water"
 		return false
-	if t == Buildings.Type.MINING_DRILL:
-		var err: String = MiningDrill.validate_placement(self, pos)
+	if t == Buildings.Type.MINING_DRILL or t == Buildings.Type.ELECTRIC_DRILL:
+		var err: String = MiningDrill.validate_placement(self, pos, t)
 		if err != "":
 			last_building_place_error = err
 			return false
@@ -581,7 +582,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 	# Post-make placement hooks: building types that need world context to
 	# finish their initial state populate it here. (make() runs before the
 	# building is registered, so it can't see the world via has_building_at.)
-	if t == Buildings.Type.MINING_DRILL:
+	if t == Buildings.Type.MINING_DRILL or t == Buildings.Type.ELECTRIC_DRILL:
 		MiningDrill.refresh_covered_deposits(b, self)
 	return true
 
