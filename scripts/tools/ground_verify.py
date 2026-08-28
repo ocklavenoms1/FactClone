@@ -40,6 +40,7 @@ is 8-bit RGB/RGBA non-interlaced, decoded below.
 
 import json
 import struct
+import subprocess
 import sys
 import zlib
 from pathlib import Path
@@ -96,6 +97,47 @@ SHIPPED_GREEN = (0x2E, 0x3A, 0x26)
 # wheel family, ~30 deg - deliberately NOT tuned to let either case squeak
 # past. Moving it is a designer decision, not a maintenance one.
 MIN_HUE_SEPARATION_DEG = 30.0
+
+# ---------------------------------------------------------------------------
+# DOODAD GATES (Ground Phase 2 Session 1)
+# ---------------------------------------------------------------------------
+# The doodad contrast cap, duplicated on the far side of the art boundary as
+# art/doodads.json's "contrast_cap". Asserted equal below, never assumed.
+DOODAD_CONTRAST_CAP = 1.25
+
+# Where the art side's own doodad gate lives. We WRAP it; we do not
+# re-implement its statistic. It composites each doodad over the ground and
+# takes the p95 luminance ratio, which is a better basis than anything this
+# file would invent: compositing is what a 40%-alpha pixel actually puts on
+# screen, and p95 is the loudest mark large enough for an eye to catch, where
+# the mean dilutes with antialiased fringe and the max fires on one LANCZOS
+# outlier. Two implementations of one statistic is the two-bases failure that
+# already cost this project a full round trip on the saturation constraint.
+ART_DOODAD_GATE = Path("art") / "tools" / "assert_doodad_contrast.py"
+ART_DOODAD_MANIFEST = Path("art") / "doodads.json"
+
+# DORMANT. The doodad contrast gate is implemented and wired, and it is
+# EXCLUDED from the pass/fail roll-up. A gate tuned to pass friendly fixtures
+# has never been adversarial; this one is dormant instead of decorative.
+#
+# PROOF IT CAN REDDEN, which is the thing dormancy usually hides: it reddens
+# RIGHT NOW, on real committed assets - all four doodads fail at p95 1.82 to
+# 4.28:1 against the 1.25 cap. No synthetic too-bright fixture was needed
+# because real input already triggers it; what needed proving was that
+# DORMANCY, not brokenness, is what keeps this roll-up green, and that is
+# mutation-proved by arming it and watching the roll-up go red.
+#
+# ARMING STEP, NAMED: set this True when the designer rules on the cap.
+# NOT "when the first real asset lands" - that trigger has already fired, and
+# arming on it would gate our suite on someone else's open design decision.
+# The cap as written is unreachable by construction, which is the art side's
+# finding and not a defect in any asset: a cap of C admits a luminance window
+# C**2 wide (1.5625 at 1.25), a doodad cannot be fitted into a window narrower
+# than its own shading range because scaling slides a distribution rather than
+# narrowing it, and the locked rig's measured diffuse range is 2.72:1 - so the
+# floor under ANY cap is sqrt(2.72) = 1.65. Until the cap moves above that,
+# this gate reddens on a number nobody can act on.
+DOODAD_CONTRAST_GATE_ARMED = False
 
 
 def decode_png(path):
@@ -492,6 +534,58 @@ def main():
     print("  three of six deliverables silently kept rendering the old colour. The")
     print("  harness now reads the shader's default instead, and this check is what")
     print("  would catch it coming back.")
+    print()
+
+    # ---- 2e. doodad gates: one live, one dormant ----
+    print("== doodad gates ==")
+    if not ART_DOODAD_MANIFEST.exists():
+        print("  art/doodads.json absent - doodad gates skipped entirely.")
+    else:
+        man = json.loads(ART_DOODAD_MANIFEST.read_text())
+
+        # LIVE: cross-boundary consistency. art/doodads.json holds COPIES of
+        # our shipped green and our cap. A copy that must equal a source is a
+        # silent-compensation site (NOTES, sixth instance): if the green moves
+        # and this copy does not, every doodad is validated against a ground
+        # the game no longer draws, and nothing anywhere reports it.
+        their_hex = str(man.get("ground_hex", "")).lstrip("#").upper()
+        our_hex = "%02X%02X%02X" % SHIPPED_GREEN
+        hex_ok = their_hex == our_hex
+        if not hex_ok:
+            failures.append(
+                f"art/doodads.json ground_hex #{their_hex} != shipped green #{our_hex} "
+                f"- doodads are being validated against a ground the game does not draw")
+        print(f"  [LIVE] ground_hex #{their_hex} vs shipped #{our_hex}: "
+              f"{'PASS' if hex_ok else 'STALE COPY: FAIL'}")
+
+        their_cap = float(man.get("contrast_cap", -1))
+        cap_ok = their_cap == DOODAD_CONTRAST_CAP
+        if not cap_ok:
+            failures.append(
+                f"art/doodads.json contrast_cap {their_cap} != our {DOODAD_CONTRAST_CAP}")
+        print(f"  [LIVE] contrast_cap {their_cap} vs our {DOODAD_CONTRAST_CAP}: "
+              f"{'PASS' if cap_ok else 'DISAGREE: FAIL'}")
+
+        # DORMANT: the photometric verdict, wrapped not re-implemented.
+        verdict = "not run"
+        if ART_DOODAD_GATE.exists():
+            proc = subprocess.run([sys.executable, str(ART_DOODAD_GATE)],
+                                  capture_output=True, text=True)
+            verdict = "PASS" if proc.returncode == 0 else "FAIL"
+            tail = [ln for ln in proc.stdout.splitlines() if "p95" in ln]
+            print(f"  [DORMANT] art contrast gate: {verdict} "
+                  f"({len(tail)} doodads reported)")
+            for ln in tail:
+                print("      " + ln.strip())
+            if verdict == "FAIL" and DOODAD_CONTRAST_GATE_ARMED:
+                failures.append("doodad contrast gate failed (armed)")
+        else:
+            print("  [DORMANT] art contrast gate script absent")
+        if not DOODAD_CONTRAST_GATE_ARMED:
+            print("  NOTE: the contrast gate is DORMANT - implemented, wired, and")
+            print("  excluded from the roll-up above. It is red right now on real")
+            print("  assets, which is the proof it is not decorative. It arms when")
+            print("  the designer rules on the cap; see DOODAD_CONTRAST_GATE_ARMED.")
     print()
 
     # ---- 3. scroll diff (the swim test) ----
