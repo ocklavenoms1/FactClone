@@ -17,8 +17,11 @@ extends RefCounted
 ## Consumer interface contract (arc-wide, locked at Session 1 spec):
 ## every electric consumer reads world.power_satisfaction_at(b.anchor)
 ## and scales its throughput or visual feedback accordingly. Lamps
-## modulate brightness; future processors (Sessions 4+) multiply
-## cycle_ticks by 1.0 / max(0.1, sat).
+## modulate brightness; processors (electric inserter since the Inserter
+## Arc; electric smelter + drill since Electricity Session 4) stretch
+## their cycle to ceil(base_ticks / maxf(POWER_EPSILON, sat)) with
+## POWER_EPSILON = 0.05 -- the shipped form (inserter.gd), which
+## superseded the Session-1 sketch 1.0 / max(0.1, sat).
 ##
 ## All state lives on the world (Dictionary maps); poles have empty state.
 ## On placement/removal of pole/generator/consumer, world calls
@@ -598,7 +601,8 @@ static func _centre_dist_sq(a: Vector2i, b: Vector2i) -> int:
 ## Stage 1: walk all buildings. Classify by type:
 ##   - Generators (WATER_WHEEL, WINDMILL, STEAM_GENERATOR) → sum MAX_OUTPUT
 ##     into _component_raw_supply when output_active.
-##   - Consumers (ELECTRIC_LAMP, ELECTRIC_INSERTER) → sum DEMAND into
+##   - Consumers (ELECTRIC_LAMP, ELECTRIC_INSERTER, ELECTRIC_SMELTER,
+##     ELECTRIC_DRILL) → sum DEMAND into
 ##     _component_demand. Consumer draw is CONSTANT (never activity-gated)
 ##     — see the ELECTRIC_INSERTER arm below for why.
 ##   - Accumulators (ACCUMULATOR) → register in _component_accumulators
@@ -622,7 +626,8 @@ static func _centre_dist_sq(a: Vector2i, b: Vector2i) -> int:
 ## State mutation in pre-pass justified: accumulator charge IS network
 ## state. Consumer interface contract unchanged — world.power_satisfaction_at
 ## returns post-accumulator satisfaction; lamps modulate brightness identically;
-## future Session 4+ processors apply 1.0 / max(0.1, satisfaction) identically.
+## processor consumers (electric inserter, smelter, drill) stretch their
+## cycles by the shipped ceil(base / maxf(0.05, sat)) form identically.
 static func update_supply_demand(world) -> void:
 	if world._power_network_dirty:
 		rebuild_topology(world)

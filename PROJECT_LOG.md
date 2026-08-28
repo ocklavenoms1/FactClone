@@ -9,6 +9,38 @@ Each entry has three sections:
 
 ---
 
+## Electricity Session 4 — Electric Processors
+
+**Tag:** `session-electricity-processors` · **Suite:** 76 → 79 suites, all green · **Save:** v18 unchanged (append-only enums 37/38; NO_POWER state ints smelter=4 / drill=5 pinned by literal)
+
+### What shipped
+
+- **ELECTRIC_SMELTER (37) + ELECTRIC_DRILL (38)** beside the burner originals — no new tick modules. `smelter.gd` / `mining_drill.gd` each gained module-local `POWER_DEMAND_BY_TYPE` (10 each), derived `is_electric`, `_effective_target` in the shipped inserter form (`ceil(base / maxf(0.05, sat))`), an appended STATE_NO_POWER, and `if not electric` gates on every Burner call site. The burner suites stayed byte-identical through all five implementation tasks.
+- **Panels truthful for electric**: NO_POWER status arm in warm amber (inserter_panel's exact colour), fuel row gated off, progress denominators showing the EFFECTIVE target (32 / 64 / 640) while burners render byte-identically.
+- **`processor_rig` scenario** (`--scenario=processor_rig`, F3 in-session, F8 lever): 2 smelters + 2 drills = demand exactly 40 with the same three-position generator lever as electric_rig. `RigSupport` (extracted Task 1) now provably serves all four rigs — the shared-counter mutation reddened all four rig suites in one run.
+- **This ship commit closes the R5-shape comments**: `update_supply_demand`'s consumer enumeration now names both new types, and the two stale `1.0 / max(0.1, sat)` formula promises (power_network.gd header + Stage-2 doc) are corrected here and in NOTES' echoes — closed before a finding gets written from them.
+
+### Decisions
+
+- **The Q4 finding leads** — the burner path guarded by an emergent property, not a type check: one idiom-consistent defensive `.get("fuel_buffer", 0)` away from free machines. Closed by the shape assertion at make() plus the mutation duty — and the mutation MEASURED the sharper truth: the emergent guard did not exist (every reader was already defensive; dropping a state key crashed nothing). The shape literal is now the sole, deliberate guard on both machines. New instance + resolution recorded under silent compensation in NOTES: the absence that protects is one careful edit from the absence that bills nothing — and here it already was.
+- **The demand ladder, re-derived from code constants** (each processor draws 10; supplies are windmill 6 / water wheel 10 / steam generator 20): one steam generator carries TWO smelters exactly, zero headroom; N=4 machines = 40 = exactly two steam generators or four water wheels; SEVEN windmills (42) carry the same four with headroom 2. First real progression curve on the grid. (Dictated as “8/6, one generator carries four, six windmills” — corrected per the code-wins rule.)
+- **The dual-pin on freeze-and-resume** — wall-clock completion identity (`start + outage + T_eff`) alongside elapsed-ticks, because the elapsed form alone stays green under a drain-during-outage regression. Both machines demonstrated the split live: with the outage a stalled-cycle multiple, the elapsed-only variant recorded zero failures while the identity reddened.
+- **The 20% electric speed edge — 32 vs 40 ticks** (ratio 0.8, named in DATA so a balance pass sees intent; machine-side multiplier only, shared recipe rows untouched). Dictated as “16 vs 20”; the verified burner base is 40 (`recipes.gd` `time_ticks`, `DRILL_TICKS_PER_ORE`) — if the base is ever rebalanced, only the multiplier constant moves.
+- **The four dispositions** — panel reachability fixed live (arms at Task 2, comment-aware source pin at Task 5); the offsets gap commented as inherited and phrase-pinned so no future session compacts it blind; boot-order converted from luck to a named contract (mutation-isolated: only that check reddens); the demand comment in this commit.
+- **A second rig, not an extension** — electric_rig and its suite zero-diff all session; two scenarios with two exact-sum `==` invariants beat one with a recomputed total.
+
+### Lessons
+
+- **Shadow armor, twice**: un-gating the smelter's NO_FUEL write alone reddens nothing — unreachable behind the intact fuel-commit gate; identically the drill's park arm. A gate proven only in combination is recorded as such, not chased with a test.
+- **A rig that sums to 40 and never runs**: demand registers per-FOOTPRINT while machines read satisfaction per-ANCHOR — the first processor_rig layout passed the demand invariant with all four machines parked NO_POWER. Machine anchors must sit in supply range.
+- The drill commits fuel at cycle END where the smelter commits at cycle START — the same electric gates land in structurally different places; a copied gate map would have been wrong. Reading the machine before gating it is the task.
+
+### Arc status
+
+Electricity now has three real consumer types across four sessions — the grid is the backbone, not a side system. Remaining in the arc: nothing urgent; solar/accumulator-tier expansion and the medium-pole wire tier are candidates when wanted.
+
+---
+
 ## Belt Logistics Session 1 — Splitter + Underground Belts
 
 **Tag:** `session-belt-logistics-1` · **Suite:** 74 → 76 suites, all green · **Save:** v18 unchanged (append-only enums 34/35/36 + `.get()`-defaulted state; integers pinned by literal)

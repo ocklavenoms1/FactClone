@@ -331,13 +331,15 @@ Consumers require Chebyshev distance ≤ that pole tier's supply radius (supply 
 
 **Forward implications for future sessions:**
 
-- **Future electric processors (Sessions 5+: electric smelter, drill, inserter) are CONSUMERS** — they use supply-area rule. Their tick reads `world.power_satisfaction_at(b.anchor)` and applies the arc-wide cycle-multiplier `1.0 / max(0.1, satisfaction)`.
+- **Electric processors are CONSUMERS (all shipped: inserter at Inserter Arc S4; smelter + drill at Electricity S4, 2026-08-27)** — supply-area rule. Their tick reads `world.power_satisfaction_at(b.anchor)` and stretches the cycle by the SHIPPED form `ceil(base_ticks / maxf(POWER_EPSILON 0.05, sat))` (`inserter.gd`) — the `1.0 / max(0.1, satisfaction)` sketch originally written here was superseded before any processor used it; see the Session-1 correction entry below.
 - **Future generators (windmill, steam engine, solar) use strict adjacency** — same as water wheel. Their tick computes `output_active` based on their condition (wind direction, fuel level, daylight, etc.) and pre-tick supply pass sums them into the network's supply pool.
 - **Pole tier expansion (Session 3 candidate)** would add `RANGE_BY_TYPE` and/or `SUPPLY_RADIUS_BY_TYPE` parametric tables — medium pole has wider connection range AND larger supply area; substation even larger.
 
 ---
 
-## Queued: extract `RigSupport` — the third rig has now landed, and it is the trigger
+## Queued → DONE (2026-08-27): extract `RigSupport` — fired as Task 1 of Electric Processors
+
+**Done at commit `773c5bd`** — `rig_support.gd` (`pave_rect`, `place_or_adopt`, `owned_anchors`), the three rigs delegating with zero suite-literal movement. The proof matured at Task 6: the fourth rig (`processor_rig`) delegated instead of copying, and the shared-counter mutation (`placed += 2`) reddened ALL FOUR rig suites in one run. The original trigger analysis stands below as the record.
 
 `electric_rig.gd`, `pole_tier_rig.gd` and `pole_gameplay_rig.gd` each carry their own copy of
 two things: a **phase-1 pave loop** (fresh `Tile` + `set_overlay(STONE)`, skipping cells that
@@ -621,12 +623,13 @@ absorbed; re-scope it rather than building it. Two contracts got their first rea
 
 - **Session 3 — TBD.** Candidates: Solar generator (daylight cycle — needs a day/night system first), medium pole / substation tiers, electric-powered processors (the linear-satisfaction contract already supports throughput scaling; no consumer uses it yet beyond the lamp's brightness).
 - **Session 3 — Power Pole Tiers.** Medium pole + substation with wider connection range AND wider supply area. `RANGE_BY_TYPE` + `SUPPLY_RADIUS_BY_TYPE` parametric tables on `power_network.gd`. Reuses BFS — only lookups change.
-- **Session 4 — Electric Processors.** Electric variants of smelter, drill. First consumers using the `1.0 / max(0.1, satisfaction)` cycle-multiplier arc-wide contract.
+- **Session 4 — Electric Processors. SHIPPED 2026-08-27 (`session-electricity-processors`).** ELECTRIC_SMELTER (37) + ELECTRIC_DRILL (38): demand 10 each, speed 32 vs the burner 40 (ratio 0.8, machine-side), NO_POWER freeze/resume dual-pinned, truthful panels, `processor_rig` scenario (second `==` demand-40 invariant). The cycle contract shipped as `ceil(base / maxf(0.05, sat))`, not this line's original `1.0 / max(0.1, sat)` sketch.
 - **Session 5 — Electric Inserters (closes Inserter Arc).** Combines reach + speed + electric power. Reuses Inserter parametric tables. Last session of both arcs.
 
 **Cross-cutting contracts (locked at Session 1):**
 
-- **Consumer interface** — every electric consumer reads `world.power_satisfaction_at(b.anchor)`. Lamps modulate brightness; processors will multiply `cycle_ticks` by `1.0 / max(0.1, satisfaction)`.
+- **Consumer interface** — every electric consumer reads `world.power_satisfaction_at(b.anchor)`. Lamps modulate brightness; processors stretch cycles by `ceil(base_ticks / maxf(POWER_EPSILON 0.05, sat))` (the shipped form; the `1.0 / max(0.1, sat)` sketch was superseded before any processor used it).
+- **Rig-builder trap (processor_rig, 2026-08-27):** demand registers per-FOOTPRINT (`_supply_component_id` walks every cell) while a machine's tick reads satisfaction per-ANCHOR (`power_satisfaction_at(b.anchor)`). A layout can pass a demand-sum invariant with every machine parked NO_POWER — the first processor_rig draft did exactly that (demand 40, four parked machines). Machine ANCHORS must sit in supply range, not just any footprint cell; the rig header documents it.
 - **Network identity** — component IDs are dynamic labels, NOT stable references. Users identify networks by topology, not ID. Don't persist component IDs.
 - **Save** — only building positions persist. Network is rebuilt on load via dirty flag. Test `tile_modifications` quirk: save-roundtrip tests must write to BOTH `world.tiles` AND `world.tile_modifications` for terrain (e.g., water tiles), since SaveSystem only persists `tile_modifications`.
 
@@ -1487,6 +1490,27 @@ structural: a shape assertion at `make()` pinning the electric state key set as 
 plus the named mutation — add the idiom-consistent `.get()` and the suite must STILL
 redden. Protection must not rest on a crash-by-absence, because the crash is one polite
 refactor away from silence.
+
+**Resolution (2026-08-27, Tasks 3-4, measured): the emergent guard DID NOT EXIST.**
+Every `progress` reader in both modules was already a defensive `.get()` — dropping a
+key from the electric `make()` produced zero crashes and zero collateral failures; state
+self-healed on first commit, and the ONLY thing that reddened was the shape assertion
+(the drill run had one extra catcher, and it was an accident of the test's own
+`.get(..., -1)` default, not module protection). So "guarded by an emergent property"
+was optimistic: the property had already been refactored away, and the absence was
+ALREADY the kind that bills nothing. The shape literal is now the sole, deliberate
+guard on both machines — named at design time, proven load-bearing by mutation before
+ship.
+
+**Shadow armor, found twice by the same mutation duty:** un-gating the smelter's
+NO_FUEL write alone reddens NOTHING (suite fully green) — the arm is unreachable for
+electric while the upstream fuel-commit gate stands; identically for the drill's
+fuel-park arm behind its commit gate. Both gates are real (the combined probe reddens,
+with the electric machine visibly wearing burner state 2), but each is armor standing
+behind armor: a mutation that only fires in combination is recorded as such, not
+chased with its own test. The hazard this note guards against is the future
+"simplification" that removes the outer gate believing the inner one is covered —
+the inner gate's mutation record says it is covered ONLY while the outer gate stands.
 
 ### The detection question
 
