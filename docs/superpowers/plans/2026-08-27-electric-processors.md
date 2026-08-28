@@ -138,6 +138,13 @@ exists to prevent), drill hardcodes `"/ 40"` (`:145`) — must show the effectiv
       status string per panel (pays the NOTES gate-automation debt), no fuel text for
       electric, drill progress shows effective. Mutation: delete the NO_POWER arm → red.
 - [ ] Implement (`is_electric` gates + arms + row compaction per `inserter_panel.gd:182-190`).
+- [ ] **Panel reachability (user disposition, 2026-08-27): the E-key/open dispatch in
+      `main.gd` MUST gain arms for both electric types** — an unreachable panel is dead
+      code with a green suite, the silent-compensation shape in UI. Structural assertion:
+      the dispatch match covers both new types (grep-level pin, the indicator-contract
+      pattern). The PAUSE gate re-checks it live.
+- [ ] **`_slot_y_offsets`: leave as inherited; add ONE comment naming the inheritance
+      deliberate** (user disposition) — so no future session "fixes" the gap blind.
 - [ ] Pathspec commit.
 
 ## Task 6 — processor_rig scenario (M)
@@ -147,19 +154,31 @@ demand** against the 2×20 steam blocks (midpoint exactly 0.50), F-key lever per
 electric_rig conventions. New suite asserts placements and demand with **`==`** — never
 `>=` (#26 is the record of what lower bounds cost). `test_electric_rig.gd` untouched.
 - [ ] RED: the new rig suite's exact-sum literals. Implement. Commit.
+- [ ] **Boot-order precondition (user disposition): the rig suite asserts, as its own
+      NAMED check, that the first rig tick sees satisfaction 1.0** — with a comment
+      stating the boot-order dependency (power pre-pass before the building loop). The
+      current order working is luck until it is a contract; a future boot change would
+      otherwise shift every trajectory literal and redden the suite at the wrong suspect.
 
 ## Task 7 — Close-out (S)
 
-- [ ] Fix the two stale formula comments (`power_network.gd:21`, `:625`) + NOTES' echoes.
+- [ ] Fix the two stale formula comments (`power_network.gd:21`, `:625`) + NOTES' echoes,
+      **and the consumer-enumeration comment in `update_supply_demand`, which must name
+      the two new types** (user disposition — R5's shape, a stale comment findings get
+      written from). In the ship commit.
 - [ ] NOTES: silent-compensation instance "guarded by an emergent property" (user's
       wording: the absence that currently protects is one idiom-consistent edit from
       becoming the absence that bills nothing); arc updates.
 - [ ] `.gd.uid` sidecars for BOTH new suites (do not skip a fourth time). Boot smoke.
 - [ ] PROJECT_LOG entry, tag `session-electricity-processors`, push.
 
-## PAUSE-gate list (accumulates for this session's visual gate)
+## PAUSE-gate list (user-set 2026-08-27; SHIP AFTER THE GATE, NOT BEFORE)
 
-1. Electric smelter/drill visually distinct from burner originals at a glance.
-2. Brownout legibility: at 0.5 satisfaction both machines visibly run at half speed.
-3. NO_POWER panel status reads correctly; no fuel row on electric panels.
-4. `processor_rig` F-key sweep: 1.00 / 0.50 / 0.00 behave as the suite's literals say.
+1. **Both panels open via E** (post-reachability-fix) — live re-check of the dispatch arms.
+2. **Brownout on a running smelter visibly stretches the cycle**, with the panel showing
+   the effective time.
+3. **NO_POWER freezes mid-recipe and resumes to the wall-clock identity** — watch a batch
+   complete at outage + remainder.
+4. **Drill parity on ore** — electric extracts at the 0.8-ratio cadence beside a burner.
+5. **The free-machine check, live**: an electric smelter with an empty grid must do
+   nothing, forever.
