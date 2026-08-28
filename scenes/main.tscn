@@ -1,4 +1,4 @@
-[gd_scene load_steps=36 format=3 uid="uid://b1stewardmain"]
+[gd_scene load_steps=38 format=3 uid="uid://b1stewardmain"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/grid_world.gd" id="2_grid"]
@@ -35,14 +35,19 @@
 [ext_resource type="PackedScene" path="res://scenes/quantity_picker_modal.tscn" id="33_qpicker"]
 [ext_resource type="PackedScene" path="res://scenes/tooltip_manager.tscn" id="34_tooltip"]
 [ext_resource type="PackedScene" path="res://scenes/item_picker_modal.tscn" id="35_ipicker"]
+[ext_resource type="Shader" path="res://scripts/shaders/ground_grass.gdshader" id="36_groundgrass"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 10.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ground"]
+shader = ExtResource("36_groundgrass")
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
 [node name="Background" type="ColorRect" parent="."]
+material = SubResource("ShaderMaterial_ground")
 offset_left = -10000.0
 offset_top = -10000.0
 offset_right = 10000.0

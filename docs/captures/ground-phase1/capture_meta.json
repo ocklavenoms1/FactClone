@@ -1,0 +1,61 @@
+{
+	"captures": [
+		{
+			"cam_x": 8976.0,
+			"cam_y": 16.0,
+			"file": "ground_green_a.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		},
+		{
+			"cam_x": 8976.0,
+			"cam_y": 16.0,
+			"file": "ground_green_b.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		},
+		{
+			"cam_x": 8976.0,
+			"cam_y": 16.0,
+			"file": "ground_green_c.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		},
+		{
+			"cam_x": -7600.0,
+			"cam_y": -4592.0,
+			"file": "ground_composite.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		},
+		{
+			"cam_x": 8976.0,
+			"cam_y": 16.0,
+			"file": "ground_scroll_1.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		},
+		{
+			"cam_x": 9136.0,
+			"cam_y": 16.0,
+			"file": "ground_scroll_2.png",
+			"height": 1080,
+			"tick": 0,
+			"width": 1920,
+			"zoom": 1.5
+		}
+	],
+	"scroll_px_offset": 240,
+	"scroll_world_dx": 160.000012715659,
+	"world_to_screen_scale": 1.49999988079071
+}
