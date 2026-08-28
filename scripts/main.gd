@@ -155,10 +155,11 @@ var _demo_origin: Vector2i = Vector2i.ZERO
 const RIG_KIND_ELECTRIC: int = 0
 const RIG_KIND_POLE_TIERS: int = 1
 const RIG_KIND_POLE_GAMEPLAY: int = 2
+const RIG_KIND_PROCESSOR: int = 3
 
 # The respawn/re-attach key for each kind, indexed by RIG_KIND_*. Named here so
 # the toast and the key gates cannot drift apart.
-const RIG_RESPAWN_KEY: Array = ["F10", "F7", "F6"]
+const RIG_RESPAWN_KEY: Array = ["F10", "F7", "F6", "F3"]
 
 # Electric-rig scenario state (session-inserter-electric, PAUSE 1). Same
 # dedup shape as the F11 demo above — F10 spawns, Shift+F10 clears the flag.
@@ -368,7 +369,8 @@ func _ready() -> void:
 
 	# Scenario boot flags: `godot --path . -- --scenario=electric_rig`, or
 	# `-- --scenario=pole_tiers` for the Electricity Session 3 PAUSE 1 rig, or
-	# `-- --scenario=pole_gameplay` for its PAUSE 2 four-scenario rig.
+	# `-- --scenario=pole_gameplay` for its PAUSE 2 four-scenario rig, or
+	# `-- --scenario=processor_rig` for the Electric Processors PAUSE rig.
 	#
 	# MUST run here and not earlier. The rig is placed relative to the PLAYER
 	# TILE, and the player position is not final until the save-or-generate
@@ -381,8 +383,8 @@ func _ready() -> void:
 	# not consume. A bare `--verbose` without the separator is eaten by the
 	# engine and never reaches the project.
 	#
-	# The three scenarios are mutually exclusive: all three rigs register through
-	# the same _rig_* variables and all three are lever-driven by F8, so spawning
+	# The four scenarios are mutually exclusive: all four rigs register through
+	# the same _rig_* variables and all four are lever-driven by F8, so spawning
 	# two would leave F8 attached to whichever ran second while the first went
 	# dark 16 seconds later. `break` on the first match enforces that.
 	for arg in OS.get_cmdline_user_args():
@@ -394,6 +396,9 @@ func _ready() -> void:
 			break
 		if arg == "--scenario=pole_gameplay":
 			_spawn_pole_gameplay_rig(grid_world.world_to_tile(player.global_position))
+			break
+		if arg == "--scenario=processor_rig":
+			_spawn_processor_rig(grid_world.world_to_tile(player.global_position))
 			break
 
 ## Toast suffix naming how many unreadable entries the load dropped (audit #11),
@@ -669,6 +674,24 @@ func _process(delta: float) -> void:
 			_show_toast("[rig] A rig already exists at %s. Shift+F6 to allow respawn." % str(_rig_origin))
 		else:
 			_spawn_pole_gameplay_rig(grid_world.world_to_tile(player.global_position))
+
+	# F3 — spawn the PROCESSOR rig (Electric Processors, Task 6) below the
+	# player: two electric smelters (preloaded with iron ore) and two electric
+	# drills (on seeded stone deposits), each pushing into its own chest, on
+	# one bus fed by two steam generators. Demand is 2 x 10 + 2 x 10 = exactly
+	# 40, as every other rig, so F8 reads identically on any of the four. Same
+	# dedup contract: Shift+F3 clears the flag.
+	#
+	# Sits in this group, ABOVE the modal early-return, for the same reason
+	# the F6/F7/F8/F10 group does — see the block comment above them.
+	if Input.is_action_just_pressed("debug_spawn_processor_rig"):
+		if Input.is_key_pressed(KEY_SHIFT):
+			_rig_spawned = false
+			_show_toast("[rig] Rig flag cleared. Next F3 re-attaches if you have not moved, or spawns fresh — clean up the old rig manually if you have.")
+		elif _rig_spawned:
+			_show_toast("[rig] A rig already exists at %s. Shift+F3 to allow respawn." % str(_rig_origin))
+		else:
+			_spawn_processor_rig(grid_world.world_to_tile(player.global_position))
 
 	# F4 — add or remove the pole-gameplay rig's BRIDGE SUBSTATION in place, so
 	# the merge and the split can be watched rather than reasoned about. Builds
@@ -1778,6 +1801,44 @@ func _spawn_pole_gameplay_rig(player_tile: Vector2i) -> void:
 		return
 	_show_toast("[rig] Four scenarios ready. F4 adds/removes the bridge at %s (watch the two clusters merge and split). F8 cycles power." % str(rig["bridge_anchor"]))
 
+## Spawn the PROCESSOR rig (Electric Processors, Task 6).
+## Mirrors _spawn_pole_tier_rig's dedup + toast conventions exactly. All four
+## rigs share ElectricRig's power lever, so F8 works on whichever is spawned.
+##
+## _rig_source_chest / _rig_source_seeded are reset for the reason
+## _spawn_pole_tier_rig states: this rig has no SINGLE source chest for
+## _cycle_rig_power to refill — its four chests are output SINKS, and its
+## consumable seeds (smelter in_buffers, drill deposits) are re-seeded by
+## ProcessorRig.build itself on every spawn OR re-attach, which is also the
+## recovery path for the deposits after a save/load (richness is session
+## bookkeeping — see NOT PERSISTED in processor_rig.gd's header).
+##
+## The ADOPTED branch is load-bearing twice over here: it re-attaches the
+## lever (the reason ElectricRig.build states), AND the adoption-proved
+## anchors are what lets build() re-seed the smelters and deposits without
+## ever touching a machine the rig does not own.
+func _spawn_processor_rig(player_tile: Vector2i) -> void:
+	var origin: Vector2i = player_tile + ProcessorRig.ORIGIN_OFFSET
+	var rig: Dictionary = ProcessorRig.build(grid_world, origin)
+
+	_rig_spawned = true
+	_rig_kind = RIG_KIND_PROCESSOR
+	_rig_origin = origin
+	_rig_gen_anchors = rig["gen_anchors"]
+	_rig_source_chest = Vector2i.ZERO
+	_rig_source_seeded = false
+	_rig_power_state = ElectricRig.POWER_FULL
+
+	var placed: int = int(rig["placed"])
+	var skipped: int = int(rig["skipped"])
+	if bool(rig.get("adopted", false)):
+		_show_toast("[rig] Re-attached to the processor rig already at %s — smelter ore and drill deposits re-seeded. F8 cycles power." % str(origin))
+		return
+	if skipped > 0:
+		_show_toast("[rig] INCOMPLETE — %d of %d placed, %d skipped (collisions). F8 still cycles what got built; move and Shift+F3 for a clean one, then clean up the old rig manually." % [placed, placed + skipped, skipped])
+		return
+	_show_toast("[rig] Processors ready — 2 smelters + 2 drills, each filling its own chest, demand exactly 40. F8 cycles power; watch the Q-inspect progress lines stretch in brownout.")
+
 ## F4 — add or remove the pole-gameplay rig's bridge substation.
 ##
 ## Gated on _rig_kind, not merely on _rig_spawned: _rig_origin is shared by all
@@ -1849,7 +1910,7 @@ func _toggle_rig_bridge() -> void:
 ##     accurate, so the toast names the one right key.
 func _cycle_rig_power() -> void:
 	if not _rig_spawned:
-		_show_toast("[rig] No rig registered this session. Press F6 (pole-gameplay rig), F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
+		_show_toast("[rig] No rig registered this session. Press F3 (processor rig), F6 (pole-gameplay rig), F7 (pole-tier rig) or F10 (electric rig) — whichever matches the rig on screen. Each re-attaches to its own.")
 		return
 	if _rig_gen_anchors.is_empty():
 		_show_toast("[rig] The registered rig has no generators. Press %s to re-attach — only works if you have not moved since spawning it." % RIG_RESPAWN_KEY[_rig_kind])
@@ -1862,7 +1923,15 @@ func _cycle_rig_power() -> void:
 	# PRE-PASS that runs before the building tick loop, so the pole's Q-inspect
 	# Capacity line and the lamps lag the press by ~0.1 s. Not a bug, and it
 	# must not be "fixed" by moving the pre-pass.
-	_show_toast(ElectricRig.state_label(_rig_power_state))
+	#
+	# The label is per-kind where the numbers differ: the processor rig's
+	# machines cycle at 32/64 ticks, and quoting the electric rig's inserter
+	# numbers at a smelter would be exactly the kind of lying toast the
+	# Q-inspect panel work exists to prevent.
+	if _rig_kind == RIG_KIND_PROCESSOR:
+		_show_toast(ProcessorRig.state_label(_rig_power_state))
+	else:
+		_show_toast(ElectricRig.state_label(_rig_power_state))
 
 ## Hold the rig's chosen power state every frame, by fuel alone.
 ##

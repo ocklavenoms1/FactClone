@@ -180,6 +180,12 @@ const TESTS: Array = [
 	# the power state machine cases.
 	preload("res://scripts/tests/test_electric_smelter.gd"),
 	preload("res://scripts/tests/test_electric_drill.gd"),
+	# Electric Processors Task 6: the processor rig — 2 electric smelters + 2
+	# electric drills = demand EXACTLY 40 (`==`, the second exact-sum
+	# invariant beside test_electric_rig.gd's), the three-position steam
+	# lever, the boot-order precondition as its own named check, and
+	# adopt-or-refuse on occupied ground.
+	preload("res://scripts/tests/test_processor_rig.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
