@@ -10,13 +10,16 @@ Reads docs/captures/ground-phase1/*.png + capture_meta.json and checks:
   1. Luminance spread per candidate green (a/b/c): relative luminance
      0.2126R + 0.7152G + 0.0722B over sRGB bytes/255; designer constraint
      is spread (max - min) UNDER 0.12.
-  2. Darker + less saturated than wrought iron #46504E: ground max
-     luminance vs lum(#46504E), ground max HSV-saturation and max chroma
-     (max-min channel) vs the iron's. KNOWN CONTRADICTION: all three
-     candidate greens are MORE saturated than #46504E by both measures
-     (~0.34 vs 0.125 HSV-sat, ~20 vs 10 chroma). Measured and reported
-     honestly; the by-eye call is the designer's. NOT desaturated to force
-     a pass.
+  2. Saturation/value vs VERDIGRIS #4E7A66 (designer ruling 2026-08-28).
+     The original constraint - "darker and less saturated than wrought iron
+     #46504E" - is WITHDRAWN as written: near-neutral grey (HSV-sat 0.125)
+     excludes green by construction, and the rule failed its own candidate
+     colours. RESTATED against what it was actually protecting: verdigris,
+     the only saturated accent in the palette and the one electrical
+     signifier. Ground saturation must not exceed it; ground value must sit
+     well below it. Measured on TWO bases, because they disagree - see the
+     note printed by this section. The luminance-spread ceiling (item 1) is
+     unchanged at 0.12.
   3. Scroll diff (swim test): shift ground_scroll_1 by the integer pixel
      offset recorded in capture_meta.json and diff the overlap against
      ground_scroll_2. World-locked noise => the overlap must match.
@@ -26,9 +29,10 @@ Reads docs/captures/ground-phase1/*.png + capture_meta.json and checks:
      base-green frames must differ from each other.
 
 Exit code 0 only if the MECHANICAL gates hold (non-flat, candidates
-distinct, scroll overlap matches). The luminance-spread and saturation
-results are reported as data for the designer either way; spread failures
-are flagged in the output but the saturation contradiction is expected.
+distinct, scroll overlap matches, field saturation within verdigris).
+Luminance spread is reported and flagged but is the designer's ceiling to
+move. A scatter-fleck excursion above verdigris prints RULING NEEDED - it
+is never silent, which is the point of writing the constraint down here.
 
 Pure stdlib (zlib/struct) - no Pillow dependency; Godot's save_png output
 is 8-bit RGB/RGBA non-interlaced, decoded below.
@@ -42,7 +46,20 @@ from pathlib import Path
 
 CAPTURE_DIR = Path(__file__).resolve().parents[2] / "docs" / "captures" / "ground-phase1"
 
-IRON = (0x46, 0x50, 0x4E)  # wrought iron #46504E
+# Designer ruling, 2026-08-28. The iron reference was wrong by construction:
+# a near-neutral grey (HSV-sat 0.125) admits no green at all, so the rule
+# failed the very candidates it was written to judge. What it protects is
+# VERDIGRIS - the only saturated accent in the building palette and the one
+# electrical signifier. Ground saturation must not exceed it; ground value
+# must sit well below it. Named constants, so the constraint that drifted
+# once cannot drift silently again.
+VERDIGRIS = (0x4E, 0x7A, 0x66)  # #4E7A66
+VERDIGRIS_SAT = (max(VERDIGRIS) - min(VERDIGRIS)) / max(VERDIGRIS)   # 0.3607
+VERDIGRIS_VAL = max(VERDIGRIS) / 255.0                               # 0.4784
+# "Well below" made numeric: the ground's value ceiling as a fraction of
+# verdigris's. All three candidates sit near 0.47x, so 0.75 is a generous
+# floor that still catches a ground drifting up toward the accent.
+VALUE_HEADROOM = 0.75
 
 
 def decode_png(path):
@@ -114,9 +131,27 @@ def lum(r, g, b):
 
 
 def image_stats(w, h, ch, px):
-    """Single pass: min/max luminance, max HSV saturation, max chroma."""
+    """Single pass: luminance min/max, HSV saturation (field + max), value.
+
+    TWO saturation bases, because they answer different questions and this
+    render makes them disagree:
+
+      field_sat - the MEDIAN pixel saturation. The noise octaves are a
+        uniform RGB multiply (col = base * (1 + n)), and a uniform scale
+        leaves HSV saturation exactly invariant, so the median reproduces
+        the BASE COLOUR's saturation to the digit. This is the basis the
+        designer's ruling quotes.
+      max_sat - the single most saturated pixel. Elevated ONLY inside the
+        scatter flecks, because the scatter darkens by SUBTRACTION
+        (col -= darkness) and subtracting a constant from all three
+        channels raises (mx-mn)/mx. See the note printed by main().
+    """
     min_l, max_l = 10.0, -10.0
     max_sat, max_chroma = 0.0, 0
+    max_val = 0.0
+    sat_hist = {}
+    over_verdigris = 0
+    total = 0
     stride = w * ch
     for y in range(h):
         row = px[y * stride:(y + 1) * stride]
@@ -132,12 +167,29 @@ def image_stats(w, h, ch, px):
             c = mx - mn
             if c > max_chroma:
                 max_chroma = c
+            v = mx / 255.0
+            if v > max_val:
+                max_val = v
+            total += 1
             if mx > 0:
                 s = c / mx
                 if s > max_sat:
                     max_sat = s
+                if s > VERDIGRIS_SAT:
+                    over_verdigris += 1
+                k = round(s, 4)
+                sat_hist[k] = sat_hist.get(k, 0) + 1
+    # Median from the histogram - no 2M-element list.
+    field_sat, seen = 0.0, 0
+    for k in sorted(sat_hist):
+        seen += sat_hist[k]
+        if seen >= total // 2:
+            field_sat = k
+            break
     return {"min_lum": min_l, "max_lum": max_l, "spread": max_l - min_l,
-            "max_sat": max_sat, "max_chroma": max_chroma}
+            "max_sat": max_sat, "max_chroma": max_chroma,
+            "field_sat": field_sat, "max_val": max_val,
+            "over_verdigris": over_verdigris, "total_px": total}
 
 
 def count_pixel_diffs(w, h, ch1, px1, ch2, px2):
@@ -227,25 +279,41 @@ def main():
             print(f"    (reported to the designer; not a mechanical gate)")
     print()
 
-    # ---- 2. vs wrought iron #46504E ----
-    ir, ig, ib = IRON
-    iron_lum = lum(ir, ig, ib)
-    iron_sat = (max(IRON) - min(IRON)) / max(IRON)
-    iron_chroma = max(IRON) - min(IRON)
-    print("== vs wrought iron #46504E ==")
-    print(f"  iron: lum {iron_lum:.4f}  HSV-sat {iron_sat:.4f}  chroma {iron_chroma}")
+    # ---- 2. vs verdigris #4E7A66 (restated constraint) ----
+    print("== vs verdigris #4E7A66 (restated constraint, designer ruling 2026-08-28) ==")
+    print(f"  verdigris: HSV-sat {VERDIGRIS_SAT:.4f}  value {VERDIGRIS_VAL:.4f}")
+    print("  WITHDRAWN: 'less saturated than wrought iron #46504E' - a near-neutral")
+    print("  grey excludes green by construction; the rule failed its own candidates.")
+    print("  RESTATED: ground saturation must not exceed verdigris (the only saturated")
+    print("  accent, the electrical signifier); ground value well below it.")
     for name in ["ground_green_a.png", "ground_green_b.png", "ground_green_c.png"]:
         st = images[name][4]
-        darker = st["max_lum"] < iron_lum
-        less_sat = st["max_sat"] < iron_sat
-        less_chr = st["max_chroma"] < iron_chroma
-        print(f"  {name}: max_lum {st['max_lum']:.4f} ({'darker: PASS' if darker else 'NOT darker: FAIL'})  "
-              f"max_sat {st['max_sat']:.4f} ({'PASS' if less_sat else 'MORE saturated: FAIL'})  "
-              f"max_chroma {st['max_chroma']} ({'PASS' if less_chr else 'MORE chromatic: FAIL'})")
-    print("  NOTE (known, expected): the candidate greens are MORE saturated than")
-    print("  #46504E by both HSV-sat and chroma - the designer's two constraints")
-    print("  (readable green ground, less saturated than iron) contradict each")
-    print("  other. Measured honestly above; the by-eye call is the designer's.")
+        field_ok = st["field_sat"] <= VERDIGRIS_SAT
+        val_ok = st["max_val"] <= VERDIGRIS_VAL * VALUE_HEADROOM
+        if not field_ok:
+            failures.append(
+                f"{name}: field saturation {st['field_sat']:.4f} exceeds verdigris {VERDIGRIS_SAT:.4f}")
+        if not val_ok:
+            failures.append(
+                f"{name}: max value {st['max_val']:.4f} not well below verdigris {VERDIGRIS_VAL:.4f}")
+        print(f"  {name}: field_sat {st['field_sat']:.4f} ({'PASS' if field_ok else 'EXCEEDS: FAIL'})  "
+              f"max_val {st['max_val']:.4f} = {st['max_val'] / VERDIGRIS_VAL:.2f}x verdigris "
+              f"({'PASS' if val_ok else 'TOO CLOSE: FAIL'})")
+        if st["over_verdigris"] > 0:
+            pct = 100.0 * st["over_verdigris"] / st["total_px"]
+            print(f"    RULING NEEDED: {st['over_verdigris']} px ({pct:.4f}%) exceed verdigris "
+                  f"saturation, max {st['max_sat']:.4f} - scatter flecks only.")
+    print()
+    print("  WHY TWO BASES, and why they disagree: the noise octaves are a uniform")
+    print("  RGB multiply, which leaves HSV saturation exactly invariant - so the")
+    print("  FIELD (median) saturation reproduces the base colour's to the digit,")
+    print("  and that is the basis the ruling's own numbers are quoted on. The")
+    print("  scatter layer darkens by SUBTRACTION, and subtracting a constant from")
+    print("  all three channels RAISES (mx-mn)/mx: the flecks are the most saturated")
+    print("  pixels in the frame. Making the scatter multiplicative would leave the")
+    print("  whole field saturation-invariant BY CONSTRUCTION - the constraint could")
+    print("  then not be violated at all, rather than being checked after the fact.")
+    print("  That changes the look, so it is the designer's call, not this script's.")
     print()
 
     # ---- 3. scroll diff (the swim test) ----
