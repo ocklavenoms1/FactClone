@@ -2722,3 +2722,59 @@ paused-tick discipline actually holds (Route C trap 1) — worth more than the
 assertion that it should, and it means any future pixel diff is signal rather
 than noise. Make the restore-and-recapture a standing step of any capture
 harness: you were going to run it anyway to undo the mutation.
+
+---
+
+## Standing terrain invariants (designer, 2026-08-28) — both derivations re-verified
+
+Two rules that bind every future terrain, doodad and ground-shader decision.
+Recorded before the doodad session so nobody re-derives them, and — more to the
+point — so nobody schedules work that one of them has already ruled out.
+
+### 1. No ground feature smaller than 4 px. Ever.
+
+Buildings cap their features at 1/8 of object width, ~4 px at 1x, because the
+4x render is LANCZOS-downsampled to the sprite and finer detail is eaten by the
+resample. **The ground does not downsample** — the shader draws at final
+resolution. So ground detail finer than 4 px puts energy in a frequency band the
+buildings structurally cannot hold, and the eye reads the difference as the
+buildings being pasted onto the ground rather than standing on it.
+
+**This kills fine octaves permanently.** The shipped `fine_period_tiles = 0.5`
+(16 px at 1x) is legal; anything approaching sub-4-px structure is not, at any
+amplitude. It also binds doodads: a 2-px-wide blade is a violation even when the
+doodad's overall size is legal.
+
+The rule is about the FEATURE, not the object: measure the smallest coherent
+mark, not the bounding box.
+
+### 2. The ground is the darkest thing on screen. Always.
+
+Every terrain holds at least **1.35:1** against wrought iron `#46504E`, the
+darkest building material. Derivation, re-verified 2026-08-28:
+
+```
+rel-luminance(#46504E) = 0.0759
+contrast = (0.0759 + 0.05) / (L + 0.05) >= 1.35
+      ->  L <= 0.1259/1.35 - 0.05 = 0.04326
+```
+
+So the ceiling is **rel-luminance 0.043**. Green A `#2E3A26` sits at **0.0375**
+(contrast 1.44), with room to spare.
+
+**Declared consequence, so it is not rediscovered as a surprise: light sand or
+desert terrain CANNOT PASS.** Measured against the ceiling: a normal sand
+`#C2B280` is 0.4487 (10x over), a pale sand 0.6526, and even a deliberately
+darkened `#8A7A50` is 0.1990 — still 4.6x over. There is no sand that reads as
+sand and clears 0.043.
+
+If a light terrain is ever wanted, it is **an outline decision on twenty
+buildings**, not a terrain decision: the buildings would need their own dark
+edge to survive a light ground. Do not schedule "sand terrain" as a small item.
+Whoever proposes it is proposing a re-render of the whole building set.
+
+### Both invariants are mechanically checkable and belong in `ground_verify.py`
+
+Neither is currently gated. Invariant 2 is one line against `SHIPPED_GREEN`;
+invariant 1 needs a minimum-feature measurement over the doodad sprites and a
+floor on the shader's finest octave period. Add them with the doodad gates.
