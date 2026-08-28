@@ -2424,3 +2424,128 @@ eye, one asset at a time. That is the same silent-compensation shape as
 everything else this session - which is why the anchor now has an empirical
 verifier and the shadow has a tripwire, rather than both resting on being
 currently true.
+
+## 34. Ground doodads, and a contrast cap the rig cannot meet
+
+A new asset class: small ground decoration, modelled in code rather than
+generated. A 6px tuft of grass is below the resolution at which image-to-3D
+carries any intent, so Tripo is not involved - and that removes the whole
+palette_drift chain with it, because a doodad is authored ON the palette and
+there is no generation to correct.
+
+Four shipped: `grass_tuft`, `pebble_cluster`, `weed_clump`, `fallen_twig`.
+Manifest is `art/doodads.json`; builder `art/blender/make_doodads.py`.
+
+### The anchor is a different contract, and says so
+
+Buildings anchor at the footprint bottom-centre. Doodads have no footprint, so
+they anchor at their GROUND CENTRE - world (0,0,0):
+
+```
+building:  draw_position = footprint_bottom_centre - anchor_px
+doodad:    draw_position = ground_point            - anchor_px
+```
+
+Every doodad JSON carries `"anchor_mode": "ground_centre"` explicitly. The two
+conventions are one word apart, and confusing them costs a placement bug that
+looks like an art bug - which has already happened once (section 33), so the
+metadata states which contract it is rather than leaving it to be inferred.
+
+### plan_squash is 1.0, and the instruction to squash was a double correction
+
+The brief specified ground-plane doodads with "plan shape squashed 0.86603".
+That is the right instinct for a 60 degree camera and the wrong one for THIS
+pipeline, because the anamorphic correction already undoes the camera squash:
+the master renders at `h * GROUND_SQUASH` and the downsample stretches it back,
+which is precisely why a ground tile is 32x32 square and not 32x27.7 (see
+sections 0 and 1).
+
+Measured, not argued. `_calib_disc` is a flat unit-diameter disc that goes
+through the identical doodad path:
+
+| threshold | measured | aspect h/w |
+|---|---|---|
+| alpha > 127 | 32 x 33 px | 1.031 |
+| alpha > 200 | 32 x 31 px | 0.969 |
+
+1:1 within a pixel. A second 0.86603 would have made these the only objects in
+the game whose ground plan disagreed with the tile grid they sit on.
+
+Note also that "6px tall" needed converting through the OTHER projection: world
+height maps at `cos(60) * 36.9502 = 18.475 px` per tile, not 32. Asking for 6px
+of world height would have produced an 11px sprite.
+
+### THE CONTRAST CAP CANNOT BE MET, AND THE REASON IS THE RIG
+
+The gate is built, wired next to `assert_palette_era`, and **currently fails
+all four doodads**. That is the gate working, not the gate broken:
+
+| doodad | best achievable p95 | needs cap of at least |
+|---|---|---|
+| `fallen_twig` | 1.79:1 | 1.79 |
+| `pebble_cluster` | 2.07:1 | 2.07 |
+| `grass_tuft` | 2.33:1 | 2.33 |
+| `weed_clump` | 2.59:1 | 2.59 |
+
+"Best achievable" is not a guess. With the specular lobe off the material is
+pure Lambertian, so rendered luminance is exactly proportional to the albedo
+scale, and the optimum can be swept analytically over the pixels of a single
+render.
+
+**Why 1.25 is unreachable.** A cap of C admits a luminance window C squared
+wide - from `ground / C` to `ground * C`. At C = 1.25 that window is 1.5625:1.
+A doodad whose own shading spans more than that cannot be fitted inside it by
+ANY uniform scale, because scaling slides a distribution without narrowing it.
+
+And the rig delivers more than the window. `_calib_dome` - a flat-shaded
+hemisphere, presenting every normal a ground doodad can present - measures:
+
+```
+p5 0.04945   p50 0.09443   p95 0.13473   ->  2.72:1
+```
+
+So the floor under any cap is **sqrt(2.72) = 1.65:1**, and only a form
+perfectly centred in the band reaches it. *No rounded doodad can be quieter in
+value than the light falling on it.* A cap of 1.25 asks for less variation than
+the rig produces.
+
+The dome is committed and never regenerated, for the same reason as the HF
+floor: a calibration fixture that moves cannot calibrate anything.
+
+### Two wrong turns, both of which looked like progress
+
+**Driving the albedo down.** The first solver darkened materials to 0.003 and
+the measured contrast did not move - an identical 2.66:1 at scale 0.003 and at
+0.0119. The Principled BSDF dielectric specular lobe is albedo-INDEPENDENT, so
+below a certain point the render is entirely specular and the base colour is
+doing nothing at all. Same shape as the roughness and metallic clamps that
+silently did nothing because their sockets were linked: **a default quietly
+doing work nobody asked it for.** Doodad materials now set `Specular IOR Level`
+to 0.
+
+**Reading the shading range off `alpha > 0.9` pixels.** On a 9x8 sprite that
+subset does not contain the distribution extremes, so it reported ranges that
+fitted the cap while the real composited statistic did not. Replaced by
+sweeping the actual gate statistic.
+
+Geometry flattening did work and was kept - pressed stones instead of spheres,
+a narrowed leaf-tilt spread, a flattened twig - on the grounds that 3D shading
+is illegible at 6-9px anyway, so the form loses nothing readable.
+
+### What has to give, and the three options
+
+The cap, the locked rig, and rounded doodad forms cannot all hold at once.
+
+1. **Raise the cap to 1.8** - clears the twig and the pebbles as built, and
+   leaves grass and weed needing flatter forms. 2.6 clears all four as they
+   stand.
+2. **Keep 1.25 and make doodads flat decals** - near-identical normals present
+   almost no shading range. Legible at this size, but grass blades become
+   cards.
+3. **Light doodads flatter than buildings** - which matches the fact that the
+   ground they sit in is an unlit flat-colour shader, so a fully lit 3D doodad
+   is already in a different lighting regime from its own background. This is a
+   deviation from "same rig" and is not taken unilaterally.
+
+The sprites on disk are each solved to their own optimum, so whichever cap is
+chosen, only the doodads above it need rework.

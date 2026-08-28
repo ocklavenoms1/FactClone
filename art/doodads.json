@@ -1,0 +1,99 @@
+{
+  "_schema": {
+    "name": "output basename; renders to art/sprites/doodads/<name>.png",
+    "kind": "'upright' (blades/leaves standing up) or 'ground' (lies flat on the ground plane)",
+    "height_px": "target sprite height in FINAL pixels for upright doodads. Converted to world Z by z = px / 18.4752, because one tile of world HEIGHT projects to WALL_RATIO (0.577) of a tile of screen width, not to a full tile. Asking for '6px tall' in world units would give 11px on screen.",
+    "plan_px": "target sprite width in FINAL pixels for ground doodads. Plan is 1:1 - one tile of ground DEPTH projects to exactly 32px, same as one tile of width (see PIPELINE.md 34).",
+    "plan_squash": "Y scale applied to the plan shape before rendering. 1.0 = true plan. See PIPELINE.md 34 for why this is 1.0 and not GROUND_SQUASH: the camera squashes the ground by 0.86603 and the anamorphic downsample stretches it back, so ground shapes already arrive at true proportions and a second squash would make a doodad the only thing in the game disagreeing with its own tile grid.",
+    "materials": "locked palette member names. Doodads are authored ON palette and so bypass palette_drift entirely - there is no Tripo generation to correct.",
+    "seed": "deterministic RNG seed. Same seed must give the same doodad forever, or the sprite changes under people who have approved it.",
+    "status": "real | calibration"
+  },
+  "ground_hex": "#2E3A26",
+  "contrast_cap": 1.25,
+  "doodads": [
+    {
+      "name": "_calib_disc",
+      "kind": "ground",
+      "plan_px": 32,
+      "plan_squash": 1.0,
+      "materials": [
+        "fieldstone"
+      ],
+      "seed": 1,
+      "status": "calibration",
+      "note": "A flat unit-diameter disc lying on the ground. Renders through the exact doodad path so the plan aspect ratio can be MEASURED rather than derived. If ground plan shapes arrive at true proportions this comes back 32x32 and round; a stray squash anywhere in the chain shows up here as an ellipse. Never used in game."
+    },
+    {
+      "name": "_calib_dome",
+      "kind": "ground",
+      "plan_px": 24,
+      "plan_squash": 1.0,
+      "materials": [
+        "fieldstone"
+      ],
+      "seed": 2,
+      "status": "calibration",
+      "note": "A flat-shaded hemisphere: every normal a ground doodad can present, under the locked rig. Its rendered p95/p5 luminance IS the rig's diffuse dynamic range, and therefore the hard floor under any contrast cap - a doodad cannot be flatter in value than the light falling on it. Committed and measured, never used in game."
+    },
+    {
+      "name": "grass_tuft",
+      "kind": "upright",
+      "height_px": 6,
+      "plan_squash": 1.0,
+      "blades": 4,
+      "spread_px": 5,
+      "materials": [
+        "weathered_oak",
+        "verdigris"
+      ],
+      "seed": 1101,
+      "status": "real",
+      "note": "3-4 upright blades, oak/verdigris mix. Thin and near-vertical, so the key light hits at a grazing angle and it renders dark - which is what lets it clear the contrast cap.",
+      "albedo_value_scale": 0.253
+    },
+    {
+      "name": "pebble_cluster",
+      "kind": "ground",
+      "plan_px": 9,
+      "plan_squash": 1.0,
+      "stones": 3,
+      "materials": [
+        "fieldstone"
+      ],
+      "seed": 2202,
+      "status": "real",
+      "note": "Three low stones lying on the ground plane. Faces point UP into the key, which is the hard case for the contrast cap.",
+      "albedo_value_scale": 0.154
+    },
+    {
+      "name": "weed_clump",
+      "kind": "upright",
+      "height_px": 8,
+      "plan_squash": 1.0,
+      "leaves": 5,
+      "spread_px": 8,
+      "materials": [
+        "verdigris",
+        "weathered_oak"
+      ],
+      "seed": 3303,
+      "status": "real",
+      "note": "Broadleaf, wider than the tuft. Leaves tilt toward horizontal, so it catches more key than the grass does.",
+      "albedo_value_scale": 0.1698
+    },
+    {
+      "name": "fallen_twig",
+      "kind": "ground",
+      "plan_px": 11,
+      "plan_squash": 1.0,
+      "materials": [
+        "weathered_oak"
+      ],
+      "seed": 4404,
+      "status": "real",
+      "note": "A single stick lying on the ground with one small side branch. Ground plane, so the same key-facing problem as the pebbles.",
+      "albedo_value_scale": 0.1553
+    }
+  ]
+}

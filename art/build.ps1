@@ -16,6 +16,7 @@ param(
     [switch]$Sheet,
     [switch]$Calibrate,
     [switch]$NoMaterialNorm,
+    [switch]$SkipDoodads,
     [string]$Blender = "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 )
 
@@ -60,6 +61,23 @@ if ($eraFailed) {
     exit 1
 }
 Write-Host ""
+
+# Hard gate, same place and for the same reason: a doodad that carries as much
+# contrast as a machine reads as a machine. It fails silently by looking fine
+# in isolation, so it is checked as a class, before anything else runs.
+# -SkipDoodads exists for building a single asset while the doodad cap is
+# under discussion; it is not for making the number go away.
+if (-not $SkipDoodads) {
+    $dd = python (Join-Path $ArtDir "tools\assert_doodad_contrast.py")
+    $ddFailed = ($LASTEXITCODE -ne 0)
+    $dd | ForEach-Object { Write-Host $_ }
+    if ($ddFailed) {
+        Write-Host ""
+        Write-Host "BUILD FAILED: doodad contrast over cap (see above)." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
 
 foreach ($a in $manifest.assets) {
     if ($Only -and $a.name -ne $Only) { continue }

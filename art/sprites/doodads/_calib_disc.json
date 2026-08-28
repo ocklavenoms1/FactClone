@@ -1,0 +1,30 @@
+{
+  "name": "_calib_disc",
+  "kind": "ground",
+  "status": "calibration",
+  "materials": [
+    "fieldstone"
+  ],
+  "plan_squash": 1.0,
+  "albedo_value_scale": 1.0,
+  "seed": 1,
+  "sprite_px": [
+    34,
+    35
+  ],
+  "render_px": [
+    136,
+    121
+  ],
+  "anchor_px": [
+    17.0,
+    17.52
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/_calib_disc_4x.png",
+  "lock_stamp": "434c0cf56d8f",
+  "crop_offset_px": [
+    0,
+    0
+  ]
+}

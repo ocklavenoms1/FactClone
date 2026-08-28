@@ -1,0 +1,30 @@
+{
+  "name": "pebble_cluster",
+  "kind": "ground",
+  "status": "real",
+  "materials": [
+    "fieldstone"
+  ],
+  "plan_squash": 1.0,
+  "albedo_value_scale": 0.154031,
+  "seed": 2202,
+  "sprite_px": [
+    9,
+    8
+  ],
+  "render_px": [
+    36,
+    28
+  ],
+  "anchor_px": [
+    4.54,
+    5.17
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/pebble_cluster_4x.png",
+  "lock_stamp": "434c0cf56d8f",
+  "crop_offset_px": [
+    0,
+    0
+  ]
+}

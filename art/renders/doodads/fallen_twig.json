@@ -1,0 +1,26 @@
+{
+  "name": "fallen_twig",
+  "kind": "ground",
+  "status": "real",
+  "materials": [
+    "weathered_oak"
+  ],
+  "plan_squash": 1.0,
+  "albedo_value_scale": 0.155289,
+  "seed": 4404,
+  "sprite_px": [
+    14,
+    7
+  ],
+  "render_px": [
+    56,
+    24
+  ],
+  "anchor_px": [
+    7.0,
+    4.13
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/fallen_twig_4x.png",
+  "lock_stamp": "434c0cf56d8f"
+}

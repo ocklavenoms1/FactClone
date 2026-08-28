@@ -1,0 +1,31 @@
+{
+  "name": "weed_clump",
+  "kind": "upright",
+  "status": "real",
+  "materials": [
+    "verdigris",
+    "weathered_oak"
+  ],
+  "plan_squash": 1.0,
+  "albedo_value_scale": 0.169825,
+  "seed": 3303,
+  "sprite_px": [
+    7,
+    9
+  ],
+  "render_px": [
+    32,
+    35
+  ],
+  "anchor_px": [
+    2.53,
+    6.4
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/weed_clump_4x.png",
+  "lock_stamp": "434c0cf56d8f",
+  "crop_offset_px": [
+    1,
+    1
+  ]
+}

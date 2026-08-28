@@ -1,0 +1,30 @@
+{
+  "name": "_calib_dome",
+  "kind": "ground",
+  "status": "calibration",
+  "materials": [
+    "fieldstone"
+  ],
+  "plan_squash": 1.0,
+  "albedo_value_scale": 1.0,
+  "seed": 2,
+  "sprite_px": [
+    27,
+    28
+  ],
+  "render_px": [
+    108,
+    97
+  ],
+  "anchor_px": [
+    13.5,
+    14.93
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/_calib_dome_4x.png",
+  "lock_stamp": "434c0cf56d8f",
+  "crop_offset_px": [
+    0,
+    0
+  ]
+}
