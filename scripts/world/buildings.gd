@@ -1010,10 +1010,12 @@ const POWER_NETWORK_TYPES: Dictionary = {
 	Type.ACCUMULATOR: true,
 	Type.ELECTRIC_LAMP: true,
 	Type.ELECTRIC_INSERTER: true,
-	# Electric Processors Task 3: joins the set WITH its demand arm in
-	# power_network.gd Stage 1 (Task 2 deliberately deferred both together).
-	# ELECTRIC_DRILL joins at Task 4, with its own arm, for the same reason.
+	# Electric Processors Tasks 3/4: each joins the set WITH its demand arm
+	# in power_network.gd Stage 1 (Task 2 deliberately deferred both
+	# together — a member here without an arm there would rebuild the
+	# network on placement yet bill nothing).
 	Type.ELECTRIC_SMELTER: true,
+	Type.ELECTRIC_DRILL: true,
 }
 
 ## The subset of POWER_NETWORK_TYPES that are POLES — the buildings that form

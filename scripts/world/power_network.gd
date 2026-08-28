@@ -698,6 +698,16 @@ static func update_supply_demand(world) -> void:
 			if sm_comp < 0:
 				continue
 			world._component_demand[sm_comp] = int(world._component_demand.get(sm_comp, 0)) + Smelter.power_demand(b.type)
+		elif b.type == Buildings.Type.ELECTRIC_DRILL:
+			# CONSUMER rule (_supply_component_id), demand UNCONDITIONAL —
+			# same rationale as the ELECTRIC_SMELTER arm directly above
+			# (Electric Processors Task 4, locked at the design pass). The
+			# number lives in MiningDrill.POWER_DEMAND_BY_TYPE, keyed by
+			# type.
+			var dr_comp: int = _supply_component_id(world, b)
+			if dr_comp < 0:
+				continue
+			world._component_demand[dr_comp] = int(world._component_demand.get(dr_comp, 0)) + MiningDrill.power_demand(b.type)
 		elif b.type == Buildings.Type.ACCUMULATOR:
 			var acc_comp: int = _adjacent_component_id(world, b)
 			if acc_comp < 0:

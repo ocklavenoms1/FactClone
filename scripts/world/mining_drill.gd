@@ -14,13 +14,27 @@ extends RefCounted
 ##
 ## Stops when:
 ##   - All covered deposits depleted (STATE_DEPLETED)
-##   - Fuel buffer empty (STATE_NO_FUEL)
+##   - Fuel buffer empty (STATE_NO_FUEL — burner only)
 ##   - Output buffer full and prefer_dir won't accept (STATE_BLOCKED_OUTPUT)
+##   - Electric only: network satisfaction <= POWER_EPSILON (STATE_NO_POWER;
+##     drill_progress HELD wherever the outage found it, output pushes keep
+##     running — see the power gate in tick())
+##
+## ELECTRIC VARIANT (session-electricity-processors, Task 4): the same state
+## machine, parametrised — NOT a second module (duplicating a shipped state
+## machine is the #15/#18 drift shape, refused at design time). Every Burner
+## call site is gated on is_electric(b); the Burner.make_state() merge in
+## make() deliberately STAYS ungated (locked Q4: fuel fields present-but-
+## unused on the electric variant — the shape assertion in the test suite
+## pins the key set). Speed: electric drills 1 ore per
+## ceil(40 × ELECTRIC_SPEED_RATIO) = 32 ticks vs the burner's 40, stretched
+## by network satisfaction — see _effective_target.
 
 # Per-ore-tick rate. At 20 sim ticks/sec, 40 ticks = 0.5 ore/sec uniform.
 # Slower than manual mining for stone/coal/clay (which is 2/sec) but
 # faster than manual iron/copper (1/sec). Tradeoff: drill doesn't need
-# player attention. Future electric drill upgrades this rate.
+# player attention. The electric drill upgrades this rate machine-side:
+# ceil(40 × 0.8) = 32 — see ELECTRIC_SPEED_RATIO.
 const DRILL_TICKS_PER_ORE: int = 40
 
 # Ore produced per fuel unit consumed. Combined with DRILL_TICKS_PER_ORE,
@@ -37,6 +51,13 @@ const STATE_DRILLING: int = 1
 const STATE_NO_FUEL: int = 2
 const STATE_BLOCKED_OUTPUT: int = 3
 const STATE_DEPLETED: int = 4
+# APPEND-ONLY from here: the state int round-trips through saves, so the
+# values above can never be renumbered. NO_POWER is the ELECTRIC variant's
+# stall state (a burner can never reach it), written by the power gate in
+# tick() when network satisfaction is at or below POWER_EPSILON. It sits
+# AFTER the deposit check on purpose: DEPLETED outranks NO_POWER — the
+# deposit being gone is the permanent fact, the outage the transient one.
+const STATE_NO_POWER: int = 5
 
 # Visuals
 const BODY_COLOR: Color = Color(0.45, 0.40, 0.32)
@@ -47,6 +68,86 @@ const BLOCKED_TINT: Color = Color(1.0, 0.95, 0.4)       # yellow tint
 const DEPLETED_TINT: Color = Color(0.55, 0.55, 0.55)    # dim gray
 
 const DEFAULT_RECIPE_ID: String = ""   # drill is NOT recipe-driven
+
+# ---------------------------------------------------------------------------
+# Electric variant (session-electricity-processors, Task 4).
+# ---------------------------------------------------------------------------
+
+# The single source of truth for "is this drill power-driven": is_electric
+# is DERIVED from membership, so "draws power" and "is not a burner" cannot
+# drift apart — the shipped electric-inserter shape (inserter.gd's table).
+#
+# 10 units — the electric smelter's own number (2× the electric inserter's
+# 5), locked at the design pass: 2 electric smelters + 2 electric drills =
+# the Task-6 rig's exact 40. Flagged as the likeliest playtest retune.
+#
+# The draw is CONSTANT, never duty-cycled — an IDLE electric drill still
+# draws its full 10. PowerNetwork.update_supply_demand is a pre-pass that
+# runs BEFORE the building tick loop, so any activity state it sampled
+# would be one tick stale; gating demand on activity would close a delayed-
+# feedback loop (undamped — the network sizing itself to last tick's
+# activity) and lamps sharing the component would flicker. See the
+# ELECTRIC_DRILL arm in power_network.gd Stage 1.
+const POWER_DEMAND_BY_TYPE: Dictionary = {
+	Buildings.Type.ELECTRIC_DRILL: 10,
+}
+
+# Floor on the satisfaction divisor in _effective_target, AND the NO_POWER
+# cutoff (`sat <= POWER_EPSILON` parks the machine). Documented-equal to
+# Inserter.POWER_EPSILON and Smelter.POWER_EPSILON: 0.05 is the
+# ELECTRIC_LAMP's on/off threshold, so "too dark to bother" and "too weak
+# to run" stay the SAME point on the dial across every electric consumer.
+# A test literal pins 0.05, so drift from the shared value reddens instead
+# of silently re-rating the brownout.
+const POWER_EPSILON: float = 0.05
+
+# Electric speed multiplier — the machine-side half of the locked speed
+# decision: the electric drill produces 1 ore per ceil(40 × 0.8) = 32
+# ticks vs the burner's 40, ratio 0.8. MACHINE-SIDE MULTIPLIER ONLY:
+# DRILL_TICKS_PER_ORE stays the burner's rated 40 (the ELECTRIC_DRILL DATA
+# row records the same numbers for the next balance pass). If the user
+# ever corrects the balance base, only this multiplier moves.
+const ELECTRIC_SPEED_RATIO: float = 0.8
+
+## Power units this drill draws from its network per tick. 0 for the
+## burner (lookup miss). Read by PowerNetwork.update_supply_demand Stage 1
+## to accumulate component demand. Takes the TYPE, not the building: the
+## demand is a property of the registry row, and Stage 1's arm has the
+## type in hand.
+static func power_demand(t: int) -> int:
+	return int(POWER_DEMAND_BY_TYPE.get(t, 0))
+
+## True if this drill is power-driven rather than fuel-driven. Derived
+## from POWER_DEMAND_BY_TYPE membership on purpose — one source of truth,
+## see the table's docstring. Gates every Burner call site in tick() and
+## info_lines().
+static func is_electric(b: Building) -> bool:
+	return POWER_DEMAND_BY_TYPE.has(b.type)
+
+## The tick count drill_progress must reach before an ore is produced —
+## the brownout rule (target-stretch, locked at the design pass): int
+## drill_progress accumulates 1 per tick, and THIS TARGET is recomputed
+## every tick from live satisfaction, so elapsed work is revalued when
+## satisfaction changes. No float progress, no rate scaling.
+##
+##   burner:   DRILL_TICKS_PER_ORE (40), UNCHANGED — returned BEFORE the
+##             satisfaction lookup runs. The early return is load-bearing,
+##             not a micro-optimisation: a world with no power network
+##             reports satisfaction 0.0 everywhere, and a burner that fell
+##             through would crawl at the 640-tick floor.
+##   electric: ceil(ceil(40 × 0.8) / max(POWER_EPSILON, sat))
+##             sat 1.00 → 32    sat 0.50 → 64    sat 0.05 → 640 (the floor)
+##
+## The form is copied from the shipped inserter/smelter
+## (Inserter.effective_cycle_ticks, Smelter._effective_target) — NOT from
+## the stale Session-1 formula comments in power_network.gd (Task 7 fixes
+## those).
+static func _effective_target(b: Building, world) -> int:
+	if not is_electric(b):
+		return DRILL_TICKS_PER_ORE
+	var base_ticks: int = int(ceil(float(DRILL_TICKS_PER_ORE) * ELECTRIC_SPEED_RATIO))
+	var sat: float = world.power_satisfaction_at(b.anchor)
+	return int(ceil(float(base_ticks) / maxf(POWER_EPSILON, sat)))
 
 ## Build initial state. Called from Buildings.make.
 ##
@@ -62,6 +163,11 @@ const DEFAULT_RECIPE_ID: String = ""   # drill is NOT recipe-driven
 ## `b_type` (Electric Processors Task 2, the Inserter.make pattern): the
 ## ELECTRIC_DRILL dispatch arm passes its own enum so the building dict
 ## carries the on-disk 38; every existing caller keeps the burner default.
+##
+## The Burner.make_state() merge below is deliberately UNGATED — for BOTH
+## variants (locked Q4: fuel fields present-but-unused on the electric
+## variant; the test suite's shape assertion pins the key set, and the
+## fuel-sentinel case pins that the fields stay dead).
 static func make(pos: Vector2i, dir: int = 0, b_type: int = Buildings.Type.MINING_DRILL) -> Building:
 	var state: Dictionary = {
 		"dir": dir,
@@ -122,18 +228,57 @@ static func validate_placement(world, anchor: Vector2i, b_type: int = Buildings.
 		return "Drill must cover an ore deposit."
 	return ""
 
-## Per-tick logic. Dispatched from Buildings.tick_one.
+## Per-tick logic. Dispatched from Buildings.tick_one — both MINING_DRILL
+## and ELECTRIC_DRILL route here; the differences are the `electric` gates
+## on the Burner call sites and the power gate between the deposit check
+## and the room check.
 static func tick(b: Building, world) -> void:
-	# Step 1: pull fuel (any edge).
-	Burner.try_pull_fuel(b, world, -1)
+	# The electric variant is not a burner: no fuel slot in DATA, no fuel
+	# pull, no fuel commit, and it must never show a fuel state. Every
+	# Burner call site below is gated on this one flag (the shipped
+	# electric-inserter/smelter pattern).
+	var electric: bool = is_electric(b)
+
+	# Step 1: pull fuel (any edge) — burner only. The burner drill has no
+	# fuel prefer_dir (try_pull_fuel -1 scans all four edges), so ungated
+	# EVERY edge of an electric drill would eat wood passing on a belt —
+	# the source-tile-as-fuel bug times four.
+	if not electric:
+		Burner.try_pull_fuel(b, world, -1)
 
 	# Step 2: try to push existing output buffer (might unblock from prior tick).
 	_try_push_outputs(b, world)
 
 	# Step 3: pick the best deposit (highest richness, deterministic tiebreak).
+	# This runs BEFORE the power gate on purpose (locked precedence, Task
+	# 4): DEPLETED outranks NO_POWER — the deposit being gone is the
+	# permanent fact, the outage the transient one. A drill that flipped to
+	# NO_POWER here would tell the player to fix their grid to revive a
+	# hole in the ground.
 	var target: Vector2i = _pick_best_deposit(b, world)
 	if target == Vector2i(2147483647, 2147483647):
 		b.state["state"] = STATE_DEPLETED
+		return
+
+	# Step 3b (electric only): the POWER GATE. At or below POWER_EPSILON —
+	# `<=`, the exact comparison the electric inserter, the electric
+	# smelter and the lamp's glow share — the machine PARKS: drill_progress
+	# is HELD exactly where the outage found it (mid-accumulation,
+	# wherever it stands — unlike burner NO_FUEL, which only ever parks AT
+	# the threshold, because fuel is committed at production time while
+	# power is a precondition for every accumulation tick). The park is a
+	# state label plus a return and NOTHING else: steps 1-3 above keep
+	# running, so output pushes continue through the outage (locked stall
+	# scope, mirroring burner NO_FUEL's minimal diff).
+	#
+	# RESUME (power back while parked) needs no arm of its own: the gate
+	# simply stops firing and step 5 below continues accumulating from the
+	# held drill_progress toward the live effective target, consuming
+	# nothing — the drill has no commit step to re-enter, so there is no
+	# reset-and-double-consume hazard here; the wall-clock completion
+	# identity in the test suite pins the resume anyway.
+	if electric and world.power_satisfaction_at(b.anchor) <= POWER_EPSILON:
+		b.state["state"] = STATE_NO_POWER
 		return
 
 	# Step 4: decide if we can drill this tick.
@@ -145,14 +290,33 @@ static func tick(b: Building, world) -> void:
 		return
 
 	# Step 5: advance drill progress.
+	# EFFECTIVE, not rated: recomputed every tick from live satisfaction
+	# for the electric variant (target-stretch), the rated
+	# DRILL_TICKS_PER_ORE unchanged for the burner.
 	var progress: int = int(b.state.get("drill_progress", 0)) + 1
-	if progress < DRILL_TICKS_PER_ORE:
+	if progress < _effective_target(b, world):
 		b.state["drill_progress"] = progress
 		b.state["state"] = STATE_DRILLING
 		return
 
 	# Step 6: full ore production tick. Consume fuel + drain richness + produce ore.
-	if not Burner.consume_tick(b, DRILL_ORE_PER_FUEL):
+	# Burner: the fuel commit happens HERE, at production time (the
+	# structural difference from the smelter, which commits at cycle
+	# start). Electric: the commit is free — its cost is the CONSTANT
+	# network demand, already registered by the pre-pass, never a
+	# per-ore debit (the fuel-sentinel test pins that consume_tick is
+	# never even called), so production is unconditional on fuel.
+	var fuel_ok: bool = true
+	if not electric:
+		fuel_ok = Burner.consume_tick(b, DRILL_ORE_PER_FUEL)
+	if not fuel_ok and not electric:
+		# `and not electric`, not a bare `if not fuel_ok`: NO_FUEL and its
+		# park-at-threshold are burner-only — an electric machine must
+		# never show 2, and only NO_POWER may park it (mid-accumulation,
+		# not at the threshold). With the commit gate above intact this
+		# extra guard is unreachable for the electric variant; it exists
+		# so a future edit that breaks that gate cannot ALSO park an
+		# electric machine in a fuel state it has no way to leave.
 		# No fuel — keep progress at threshold; will produce as soon as fuel arrives.
 		b.state["drill_progress"] = DRILL_TICKS_PER_ORE
 		b.state["state"] = STATE_NO_FUEL
@@ -277,6 +441,11 @@ static func info_lines(b: Building, world) -> Array:
 			status = "Output blocked"
 		STATE_DEPLETED:
 			status = "Depleted"
+		STATE_NO_POWER:
+			# Electric only. Without this arm a parked machine would fall
+			# through to "(idle)" — the exact lie the inserter panel work
+			# exists to prevent (the panels' own arms are Task 5).
+			status = "NO POWER"
 	lines.append("Status: %s" % status)
 
 	# Currently producing — Q11 prominent line. Reflects highest-richness
@@ -288,9 +457,12 @@ static func info_lines(b: Building, world) -> Array:
 			var item_type: int = int(_RESOURCE_TO_ITEM[ore_type])
 			lines.append("Currently producing: %s" % Items.name_of(item_type))
 
-	# Fuel from Burner.
-	for line in Burner.info_lines(b):
-		lines.append(line)
+	# Fuel from Burner — burner only: the electric variant's deliberately-
+	# kept-but-dead fuel fields would otherwise render as a live fuel gauge
+	# (and a spurious "NO FUEL" hint) on a machine with no fuel path.
+	if not is_electric(b):
+		for line in Burner.info_lines(b):
+			lines.append(line)
 
 	# Output buffer.
 	var buf: Array = b.state.get("output_buffer", [])
