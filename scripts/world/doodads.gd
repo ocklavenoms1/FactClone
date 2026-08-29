@@ -96,7 +96,17 @@ const SPRITE_DIR: String = "res://art/sprites/doodads"
 ## the manifest's `status == "real"` set, so — per NOTES.md, "read it, don't
 ## copy it; if you must copy it, assert the copy" — `test_doodads.gd` (D2)
 ## asserts it against the manifest.
-const VARIANT_NAMES: Array = ["grass_tuft", "pebble_cluster", "weed_clump", "fallen_twig"]
+## ROSTER, and it is a DELIBERATE EDIT every time. Updated 2026-08-28 when the
+## art session replaced the confetti set (grass_tuft / weed_clump /
+## fallen_twig) with three ground-cover patches, keeping pebble_cluster.
+## test_doodads.gd (D2) reddened on the mismatch, which is the assertion
+## doing its job: an automatic re-bind to whatever the manifest lists would
+## silently re-roll every existing world's layout. Order IS the variant
+## index, so reordering this array is also a layout change; it follows the
+## manifest's own declaration order for the status=="real" entries.
+## VARIANT_COUNT stayed 4 across this change, so no hash roll moved and
+## every golden literal in the suite still holds.
+const VARIANT_NAMES: Array = ["ground_cover_patch_A", "ground_cover_patch_B", "ground_cover_patch_C", "pebble_cluster"]
 ## The divisor in the variant roll. Changing it re-rolls every doodad
 ## everywhere; it is a constant and not `VARIANT_NAMES.size()` so that the
 ## re-roll cannot happen as a side effect of adding art.
@@ -153,11 +163,11 @@ const PLACEHOLDER_INK: Color = Color(0.243137, 0.274510, 0.211765, 1.0)
 ## buildings being pasted onto the ground rather than standing on it. That is
 ## why these are blocky bars and not hairline blades.
 ##
-## `fallen_twig` (index 3) is strongly ASYMMETRIC about its vertical axis — the
+## Index 3 is strongly ASYMMETRIC about its vertical axis — the
 ## side branch sits on one side only. It is the witness for the mirror bit: a
 ## broken mirror on a symmetric shape looks exactly like a working one.
 const PLACEHOLDER_SPECS: Array = [
-	{   # 0 grass_tuft — two upright bars of unequal height (asymmetric)
+	{   # 0 — two upright bars of unequal height (asymmetric)
 		"size": Vector2i(9, 10), "anchor": Vector2i(4, 9),
 		"rects": [[0, 2, 4, 8], [5, 0, 4, 10]],
 	},
@@ -165,11 +175,11 @@ const PLACEHOLDER_SPECS: Array = [
 		"size": Vector2i(10, 8), "anchor": Vector2i(5, 7),
 		"rects": [[0, 3, 5, 5], [6, 0, 4, 5]],
 	},
-	{   # 2 weed_clump — a broad low mass with one raised leaf (asymmetric)
+	{   # 2 — a broad low mass with one raised leaf (asymmetric)
 		"size": Vector2i(12, 9), "anchor": Vector2i(6, 8),
 		"rects": [[0, 4, 12, 5], [1, 0, 4, 4]],
 	},
-	{   # 3 fallen_twig — a stick with ONE side branch (the mirror witness)
+	{   # 3 — a stick with ONE side branch (the mirror witness)
 		"size": Vector2i(14, 6), "anchor": Vector2i(7, 5),
 		"rects": [[0, 2, 14, 4], [9, 0, 4, 4]],
 	},
