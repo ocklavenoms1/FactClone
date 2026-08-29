@@ -551,8 +551,17 @@ static func _d_manifest_contract(failures: Array) -> void:
 		"(D2) the manifest's status=='real' entries %s must be exactly Doodads.VARIANT_NAMES %s — if art adds or renames a doodad, the variant table is a deliberate edit here, not an automatic re-bind that silently re-rolls every world's layout"
 			% [str(real_names), str(declared)])
 
-	_check(failures, is_equal_approx(float(manifest.get("contrast_cap", -1.0)), CONTRAST_CAP),
-		"(D) manifest contrast_cap must be %f, got %s" % [CONTRAST_CAP, str(manifest.get("contrast_cap", null))])
+	# The manifest's photometric cap is DELIBERATELY NOT ASSERTED HERE, and this
+	# comment is why, so it does not get "restored" by a future session.
+	# The game reads sprite_px, anchor_px, plan_squash and status. It does not
+	# read the cap. Asserting it here made THIS suite -- the game's placement
+	# suite -- go red on 2026-08-28 when the art session renamed contrast_cap to
+	# median_cap while redesigning the gate, a change with no bearing on any
+	# line of placement code. Cross-boundary photometric consistency is a
+	# GATE-layer concern and lives in scripts/tools/ground_verify.py, which
+	# caught the same drift on the same run and is the right place for it.
+	# The rule: this suite asserts what the game READS; the gate layer asserts
+	# what the two sides must AGREE on.
 	_check(failures, str(manifest.get("ground_hex", "")) == GROUND_HEX,
 		"(D) manifest ground_hex must be %s, got %s" % [GROUND_HEX, str(manifest.get("ground_hex", ""))])
 

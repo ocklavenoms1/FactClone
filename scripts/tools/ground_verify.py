@@ -102,8 +102,11 @@ MIN_HUE_SEPARATION_DEG = 30.0
 # DOODAD GATES (Ground Phase 2 Session 1)
 # ---------------------------------------------------------------------------
 # The doodad contrast cap, duplicated on the far side of the art boundary as
-# art/doodads.json's "contrast_cap". Asserted equal below, never assumed.
-DOODAD_CONTRAST_CAP = 1.25
+# art/doodads.json's "median_cap". Asserted equal below, never assumed.
+# Renamed from "contrast_cap" by the art session on 2026-08-28 when the cap
+# was redesigned (see below); this assertion is what caught the rename
+# rather than silently validating against a key that no longer exists.
+DOODAD_MEDIAN_CAP = 1.25
 
 # Where the art side's own doodad gate lives. We WRAP it; we do not
 # re-implement its statistic. It composites each doodad over the ground and
@@ -116,9 +119,16 @@ DOODAD_CONTRAST_CAP = 1.25
 ART_DOODAD_GATE = Path("art") / "tools" / "assert_doodad_contrast.py"
 ART_DOODAD_MANIFEST = Path("art") / "doodads.json"
 
-# DORMANT. The doodad contrast gate is implemented and wired, and it is
-# EXCLUDED from the pass/fail roll-up. A gate tuned to pass friendly fixtures
-# has never been adversarial; this one is dormant instead of decorative.
+# ARMED as of 2026-08-28. It shipped DORMANT the day before, excluded from
+# the roll-up, because the cap it enforced was unreachable by construction and
+# a gate red on a number nobody can act on is noise. The named arming step was
+# "when the designer rules on the cap" -- and they did, by REFORMULATING it:
+# a single p95 cap implicitly bounded a doodad's internal shading range
+# (window C**2 = 1.5625 against a measured rig range of 2.72:1, floor 1.65),
+# so it was replaced by two bounds that leave the internal range free --
+# median <= ground x median_cap, and p95 <= the pooled building p50 measured
+# from the shipped sprites each run. All four doodads now pass. The gate is
+# live, adversarial, and green for a real reason rather than a friendly one.
 #
 # PROOF IT CAN REDDEN, which is the thing dormancy usually hides: it reddens
 # RIGHT NOW, on real committed assets - all four doodads fail at p95 1.82 to
@@ -137,7 +147,7 @@ ART_DOODAD_MANIFEST = Path("art") / "doodads.json"
 # narrowing it, and the locked rig's measured diffuse range is 2.72:1 - so the
 # floor under ANY cap is sqrt(2.72) = 1.65. Until the cap moves above that,
 # this gate reddens on a number nobody can act on.
-DOODAD_CONTRAST_GATE_ARMED = False
+DOODAD_CONTRAST_GATE_ARMED = True
 
 
 def decode_png(path):
@@ -558,12 +568,12 @@ def main():
         print(f"  [LIVE] ground_hex #{their_hex} vs shipped #{our_hex}: "
               f"{'PASS' if hex_ok else 'STALE COPY: FAIL'}")
 
-        their_cap = float(man.get("contrast_cap", -1))
-        cap_ok = their_cap == DOODAD_CONTRAST_CAP
+        their_cap = float(man.get("median_cap", -1))
+        cap_ok = their_cap == DOODAD_MEDIAN_CAP
         if not cap_ok:
             failures.append(
-                f"art/doodads.json contrast_cap {their_cap} != our {DOODAD_CONTRAST_CAP}")
-        print(f"  [LIVE] contrast_cap {their_cap} vs our {DOODAD_CONTRAST_CAP}: "
+                f"art/doodads.json median_cap {their_cap} != our {DOODAD_MEDIAN_CAP}")
+        print(f"  [LIVE] median_cap {their_cap} vs our {DOODAD_MEDIAN_CAP}: "
               f"{'PASS' if cap_ok else 'DISAGREE: FAIL'}")
 
         # DORMANT: the photometric verdict, wrapped not re-implemented.
@@ -573,14 +583,16 @@ def main():
                                   capture_output=True, text=True)
             verdict = "PASS" if proc.returncode == 0 else "FAIL"
             tail = [ln for ln in proc.stdout.splitlines() if "p95" in ln]
-            print(f"  [DORMANT] art contrast gate: {verdict} "
+            label = "ARMED" if DOODAD_CONTRAST_GATE_ARMED else "DORMANT"
+            print(f"  [{label}] art contrast gate: {verdict} "
                   f"({len(tail)} doodads reported)")
             for ln in tail:
                 print("      " + ln.strip())
             if verdict == "FAIL" and DOODAD_CONTRAST_GATE_ARMED:
                 failures.append("doodad contrast gate failed (armed)")
         else:
-            print("  [DORMANT] art contrast gate script absent")
+            print("  [%s] art contrast gate script absent"
+                  % ("ARMED" if DOODAD_CONTRAST_GATE_ARMED else "DORMANT"))
         if not DOODAD_CONTRAST_GATE_ARMED:
             print("  NOTE: the contrast gate is DORMANT - implemented, wired, and")
             print("  excluded from the roll-up above. It is red right now on real")
