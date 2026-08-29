@@ -1,0 +1,66 @@
+{
+  "asset": "smelter",
+  "materials": 1,
+  "runs": [
+    {
+      "spec": 0.5,
+      "albedo_scale": 0.15,
+      "file": "smelter_spec050_a0150.png"
+    },
+    {
+      "spec": 0.5,
+      "albedo_scale": 0.3,
+      "file": "smelter_spec050_a0300.png"
+    },
+    {
+      "spec": 0.5,
+      "albedo_scale": 0.5,
+      "file": "smelter_spec050_a0500.png"
+    },
+    {
+      "spec": 0.5,
+      "albedo_scale": 0.75,
+      "file": "smelter_spec050_a0750.png"
+    },
+    {
+      "spec": 0.5,
+      "albedo_scale": 1.0,
+      "file": "smelter_spec050_a1000.png"
+    },
+    {
+      "spec": 0.5,
+      "albedo_scale": 1.4,
+      "file": "smelter_spec050_a1400.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 0.15,
+      "file": "smelter_spec000_a0150.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 0.3,
+      "file": "smelter_spec000_a0300.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 0.5,
+      "file": "smelter_spec000_a0500.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 0.75,
+      "file": "smelter_spec000_a0750.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 1.0,
+      "file": "smelter_spec000_a1000.png"
+    },
+    {
+      "spec": 0.0,
+      "albedo_scale": 1.4,
+      "file": "smelter_spec000_a1400.png"
+    }
+  ]
+}

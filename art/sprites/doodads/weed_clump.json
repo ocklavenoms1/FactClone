@@ -7,7 +7,7 @@
     "weathered_oak"
   ],
   "plan_squash": 1.0,
-  "albedo_value_scale": 0.169825,
+  "albedo_value_scale": 0.224676,
   "seed": 3303,
   "sprite_px": [
     7,
@@ -18,8 +18,8 @@
     35
   ],
   "anchor_px": [
-    2.53,
-    6.4
+    2.38,
+    6.27
   ],
   "anchor_mode": "ground_centre",
   "master": "art/renders/doodads/weed_clump_4x.png",

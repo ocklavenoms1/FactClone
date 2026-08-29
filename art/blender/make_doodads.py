@@ -77,8 +77,10 @@ def palette_material(member, value_scale=1.0, tag=""):
     member's identity and gives up only its brightness.
 
     It has to give that up. Every locked member's albedo is 2.0-4.4x the
-    ground's luminance BEFORE any light is added, so no palette-value material
-    under the locked rig can sit inside a 1.25:1 cap. See PIPELINE.md 34.
+    ground's luminance BEFORE any light is added, so a doodad at palette VALUE
+    reads as an object rather than as ground texture. Hue is kept whole because
+    hue is where the legibility actually comes from - grey pebbles and brown
+    twigs separate from green ground at any value, for free. See PIPELINE.md 34.
     """
     name = f"doodad_{member}_{tag}_{value_scale:.4f}"
     if name in bpy.data.materials:
@@ -171,7 +173,7 @@ def build_upright(cfg, rng):
         for i in range(n):
             az = rng.uniform(0, 2 * math.pi)
             hh = h * rng.uniform(0.72, 1.0)
-            v, f = blade(rng, hh, spread * 0.10, az, spread * rng.uniform(0.20, 0.32))
+            v, f = blade(rng, hh, spread * 0.10, az, spread * rng.uniform(0.18, 0.42))
             ob = new_object(f"{cfg['name']}_blade{i}", v, f, mats[i % len(mats)], vs, tag)
             r = spread * 0.5 * math.sqrt(rng.random()) * 0.6
             a = rng.uniform(0, 2 * math.pi)
@@ -183,8 +185,7 @@ def build_upright(cfg, rng):
         n = int(cfg["leaves"])
         for i in range(n):
             az = (i / n) * 2 * math.pi + rng.uniform(-0.35, 0.35)
-            # narrow tilt spread: leaves that agree about where the sun is
-            tilt = rng.uniform(0.72, 0.92)
+            tilt = rng.uniform(0.55, 1.15)
             v, f = leaf(rng, spread * rng.uniform(0.42, 0.60),
                         spread * rng.uniform(0.26, 0.38), az, tilt)
             ob = new_object(f"{cfg['name']}_leaf{i}", v, f, mats[i % len(mats)], vs, tag)
@@ -230,10 +231,12 @@ def build_ground(cfg, rng):
             ob = bpy.context.active_object
             ob.name = f"{cfg['name']}_stone{i}"
             # stones are wider than they are tall - they sit, they do not float
-            # FLAT. A sphere sweeps its normals through 90deg and blows the
-            # contrast band open on its own; a pressed stone points mostly up.
-            ob.scale = (rng.uniform(0.95, 1.15), rng.uniform(0.9, 1.1),
-                        rng.uniform(0.16, 0.22))
+            # Stones sit in the dirt rather than resting on it, so they are
+            # wider than tall - but this is a FORM choice. The flattening that
+            # was here to satisfy the withdrawn contrast cap is gone; internal
+            # shading range is unconstrained now.
+            ob.scale = (rng.uniform(0.9, 1.2), rng.uniform(0.8, 1.1),
+                        rng.uniform(0.42, 0.6))
             a = rng.uniform(0, 2 * math.pi)
             d = plan * 0.5 * rng.uniform(0.15, 0.42)
             ob.location = (math.cos(a) * d, math.sin(a) * d, r * 0.30)
@@ -249,10 +252,7 @@ def build_ground(cfg, rng):
         ob = bpy.context.active_object
         ob.name = f"{cfg['name']}_stick{i}"
         ob.rotation_euler = (0.0, math.pi / 2, az)
-        # pressed flat for the same reason as the stones - a full round barrel
-        # shows every normal from vertical to grazing in six pixels
-        ob.scale = (0.34, 1.0, 1.0)
-        ob.location = (off[0], off[1], rad * 0.34)
+        ob.location = (off[0], off[1], rad)
         ob.data.materials.append(palette_material(mats[0], vs, tag))
         obs.append(ob)
     return obs

@@ -2549,3 +2549,152 @@ The cap, the locked rig, and rounded doodad forms cannot all hold at once.
 
 The sprites on disk are each solved to their own optimum, so whichever cap is
 chosen, only the doodads above it need rework.
+
+## 34a. The doodad cap, corrected: two bounds instead of one
+
+Section 34 recorded a cap that could not be met. The metric was wrong, not the
+rig and not the models: it capped p95 against the ground, which constrains a
+doodad INTERNAL shading range, when the intent was to constrain how much the
+thing stands out. A cap of C admits a window C squared wide, and the rig
+diffuse range is 2.72:1, so 1.25 sat below the physical floor of 1.65.
+
+Replaced by two bounds, both on VALUE only:
+
+```
+(1) median <= ground * 1.25      does it read as an object
+(2) p95    <= building p50       no part of a decoration is as bright as
+                                 the TYPICAL part of a machine
+```
+
+The ceiling in (2) is set by the machines, not the ground, and is MEASURED from
+the shipped sprites on every run rather than stored, so it tracks the assets.
+Pooled building p50 is currently **0.0779**.
+
+**Internal shading range is unconstrained.** The flattening applied under the
+old cap - pressed stones, narrowed leaf tilt, a squashed twig - has been
+reverted. Blades are blades again. The only geometry change kept is the twig
+azimuth, which was a form fix: a stick pointing into depth reads as a blob.
+
+### The two bounds trade against each other, and the trade is the point
+
+Because `p95 ~= median * sqrt(internal range)`, a doodad with more internal form
+has a longer tail above its median, so bound (2) binds first and pushes it
+darker. Measured, with full form restored:
+
+| doodad | own range | median vs ground | binds on |
+|---|---|---|---|
+| `grass_tuft` | 1.75:1 | 1.21:1 | median-vs-ground |
+| `fallen_twig` | 1.83:1 | 1.10:1 | median-vs-ground |
+| `pebble_cluster` | 3.22:1 | 0.83:1 | p95-vs-buildings |
+| `weed_clump` | 4.65:1 | 0.91:1 | p95-vs-buildings |
+
+**The busiest form ends up the quietest in value, and nothing was hand-tuned.**
+The solver takes the min of the two closed-form scales; that is the whole
+mechanism.
+
+### One discrepancy in the brief, resolved toward the ratio
+
+The brief gave both "median <= 1.25:1" and "on #2E3A26 that is rel-lum 0.059".
+Those disagree: ground rel-lum is 0.0375, so 1.25:1 is **0.0468**, while 0.059
+is ground * 1.25 squared. The ratio is implemented as authoritative and lives
+in the manifest as `median_cap`, so moving it is one edit if 0.059 was intended.
+
+### Sizes are screen pixels, and the two projections are not the same
+
+Now stated in a `_units` block at the top of `art/doodads.json` so nobody
+re-derives them and, worse, uses the wrong one:
+
+```
+world HEIGHT  -> cos(60) * 36.9502 = 18.4752 px per tile
+ground DEPTH  -> sin(60) * 36.9502 = 32.0    px per tile
+```
+
+`_calib_disc` and `_calib_dome` are both permanent committed fixtures - one
+pins the plan aspect at 1:1, the other measures the rig diffuse range.
+
+## 35. The specular default: rendered luminance is AFFINE in albedo
+
+Found because it broke the doodad solver, where albedo was driven low enough
+for it to dominate outright. Chased back into the buildings because the whole
+albedo correction rests on the opposite assumption.
+
+**Specular is never set anywhere in the building path.** Every building ever
+rendered has carried the Principled BSDF default `Specular IOR Level = 0.5`,
+which is ALBEDO-INDEPENDENT.
+
+### Measured on three assets, with a control
+
+`probe_specular.py` renders one asset across a sweep of uniform albedo scales,
+twice - once at the 0.5 default and once at 0 - and `fit_specular.py` fits a
+line to each series.
+
+| asset | specular 0.5 | specular 0.0 (control) | offset share |
+|---|---|---|---|
+| `chest` | L = 0.05928a **+ 0.01688** | L = 0.06044a **- 0.00002** | 22.2% |
+| `smelter` | L = 0.05093a **+ 0.01359** | L = 0.05180a **- 0.00008** | 21.1% |
+| `power_pole` | L = 0.03120a **+ 0.01053** | L = 0.03245a **+ 0.00001** | 25.2% |
+
+All six fits are R2 = 1.0000. The controls come back at zero to five decimal
+places, which is what makes the finding trustworthy: the method can see
+proportionality when proportionality is there.
+
+**A fifth to a quarter of every building render is light that does not come
+from its albedo.**
+
+### What it does to hue, which is the part that matters
+
+The specular lobe is achromatic, so it desaturates - and by different amounts
+per asset, because it is geometry-dependent:
+
+| asset | chromaticity shift | saturation removed |
+|---|---|---|
+| `chest` | 0.0744 | 23.5% |
+| `smelter` | 0.0200 | 24.8% |
+| `power_pole` | 0.1047 | 30.0% |
+
+The single most telling number: with specular OFF, the chest rendered
+chromaticity is (0.569, 0.307, 0.124), which is **0.0107 from the locked
+weathered_oak target**. With specular ON it is 0.0801 - seven times further.
+
+### What this corrects in the record
+
+Section 11 reported a rendered oak chromaticity spread of 0.090 across three
+assets and concluded the remap degrades hue. **The rendered half of that verdict
+was substantially measuring this lighting default**, not the correction: the
+per-asset specular shift alone is 0.020 to 0.105, the same magnitude as the
+disagreement it was blamed for.
+
+What still stands: the albedo-space finding. Sections 11 and 32 measured raw and
+corrected chromaticity on TEXTURES, which specular cannot touch, and there the
+old per-channel gain did move albedo away from target. The split correction
+remains justified. What was overstated is the SIZE of the problem and the
+rendered verdict built on it.
+
+What does NOT change: the section 25 form-driven lightness decision. The
+albedo-multiplicative slope k varies 1.90x across the three assets (0.0593,
+0.0509, 0.0312) while the offset s varies only 1.60x, so form genuinely drives
+lightness through the slope. Turning specular off would make the cross-asset
+spread slightly WORSE on that measure, not better - the offset is large enough
+to compress relative differences.
+
+### Not fixed, and deliberately not
+
+Setting `Specular IOR Level` to 0 for buildings would make rendered luminance
+proportional to albedo, make rendered hue land near target, and remove a default
+nobody chose. It would also change the pixels of all three approved and pinned
+assets, and it would flatten the material read on wrought iron, which is the one
+place a dielectric highlight is doing something wanted. That is a judgement
+about how the game should look, not a correctness fix, and it needs its own pass
+and one approval of the set.
+
+Doodads already have it off, and must: the closed-form solver in
+`calibrate_doodads.py` is only valid because rendered luminance is exactly
+proportional to albedo there.
+
+**The general lesson, third instance this project.** The roughness and metallic
+clamps did nothing because their sockets were linked. The emission mask never
+fired because thresholds were in the wrong colour space. Now a lighting default
+has been supplying a fifth of every render. Each time, a value nobody chose was
+doing work nobody attributed to it, and each time it was found only when
+something downstream refused to behave. **A default is a decision that nobody
+wrote down.**

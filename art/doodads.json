@@ -1,16 +1,25 @@
 {
+  "_units": {
+    "px_per_tile_width": 32,
+    "px_per_v_unit": 36.9502,
+    "px_per_tile_of_world_HEIGHT": 18.4752,
+    "px_per_tile_of_ground_DEPTH": 32.0,
+    "_note": "ALL SIZES IN THIS FILE ARE SCREEN PIXELS AT 1x. The builder converts. Height and plan use DIFFERENT constants: world height projects at cos(60)*36.9502 = 18.4752 px per tile, ground depth at sin(60)*36.9502 = 32.0 px per tile. So height_px 6 means 6/18.4752 = 0.3248 world units, and a ground shape is 1:1 with tile width. Stated here so nobody re-derives them, and so nobody uses the wrong one."
+  },
+  "ground_hex": "#2E3A26",
+  "median_cap": 1.25,
+  "_gate": "TWO bounds, see art/tools/assert_doodad_contrast.py. (1) median <= ground * median_cap - does it read as an object. (2) p95 <= pooled building p50, MEASURED each run from the shipped sprites - no part of a decoration is as bright as the typical part of a machine. They trade automatically: p95 ~= median * sqrt(internal range), so a busier form gets pushed darker. INTERNAL SHADING RANGE IS UNCONSTRAINED. VALUE ONLY - hue separation is free and unlimited.",
   "_schema": {
     "name": "output basename; renders to art/sprites/doodads/<name>.png",
     "kind": "'upright' (blades/leaves standing up) or 'ground' (lies flat on the ground plane)",
     "height_px": "target sprite height in FINAL pixels for upright doodads. Converted to world Z by z = px / 18.4752, because one tile of world HEIGHT projects to WALL_RATIO (0.577) of a tile of screen width, not to a full tile. Asking for '6px tall' in world units would give 11px on screen.",
     "plan_px": "target sprite width in FINAL pixels for ground doodads. Plan is 1:1 - one tile of ground DEPTH projects to exactly 32px, same as one tile of width (see PIPELINE.md 34).",
-    "plan_squash": "Y scale applied to the plan shape before rendering. 1.0 = true plan. See PIPELINE.md 34 for why this is 1.0 and not GROUND_SQUASH: the camera squashes the ground by 0.86603 and the anamorphic downsample stretches it back, so ground shapes already arrive at true proportions and a second squash would make a doodad the only thing in the game disagreeing with its own tile grid.",
     "materials": "locked palette member names. Doodads are authored ON palette and so bypass palette_drift entirely - there is no Tripo generation to correct.",
     "seed": "deterministic RNG seed. Same seed must give the same doodad forever, or the sprite changes under people who have approved it.",
-    "status": "real | calibration"
+    "status": "real | calibration",
+    "albedo_value_scale": "scalar on linear albedo, solved by art/tools/calibrate_doodads.py. Uniform across RGB, so palette HUE is preserved exactly and only brightness is given up.",
+    "plan_squash": "Y scale on the plan shape. 1.0 = true plan, and it stays 1.0: the camera squashes the ground by GROUND_SQUASH and the anamorphic downsample stretches it back, so ground shapes already arrive at true proportions. Measured on _calib_disc, 1:1 within a pixel. A second squash would make a doodad the only thing disagreeing with its own tile grid. See PIPELINE.md 34."
   },
-  "ground_hex": "#2E3A26",
-  "contrast_cap": 1.25,
   "doodads": [
     {
       "name": "_calib_disc",
@@ -50,7 +59,7 @@
       "seed": 1101,
       "status": "real",
       "note": "3-4 upright blades, oak/verdigris mix. Thin and near-vertical, so the key light hits at a grazing angle and it renders dark - which is what lets it clear the contrast cap.",
-      "albedo_value_scale": 0.253
+      "albedo_value_scale": 0.8703
     },
     {
       "name": "pebble_cluster",
@@ -64,7 +73,7 @@
       "seed": 2202,
       "status": "real",
       "note": "Three low stones lying on the ground plane. Faces point UP into the key, which is the hard case for the contrast cap.",
-      "albedo_value_scale": 0.154
+      "albedo_value_scale": 0.2254
     },
     {
       "name": "weed_clump",
@@ -80,7 +89,7 @@
       "seed": 3303,
       "status": "real",
       "note": "Broadleaf, wider than the tuft. Leaves tilt toward horizontal, so it catches more key than the grass does.",
-      "albedo_value_scale": 0.1698
+      "albedo_value_scale": 0.2247
     },
     {
       "name": "fallen_twig",
@@ -93,7 +102,7 @@
       "seed": 4404,
       "status": "real",
       "note": "A single stick lying on the ground with one small side branch. Ground plane, so the same key-facing problem as the pebbles.",
-      "albedo_value_scale": 0.1553
+      "albedo_value_scale": 0.3906
     }
   ]
 }

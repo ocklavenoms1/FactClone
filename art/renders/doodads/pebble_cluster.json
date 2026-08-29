@@ -6,7 +6,7 @@
     "fieldstone"
   ],
   "plan_squash": 1.0,
-  "albedo_value_scale": 0.154031,
+  "albedo_value_scale": 0.225411,
   "seed": 2202,
   "sprite_px": [
     9,
@@ -17,8 +17,8 @@
     28
   ],
   "anchor_px": [
-    4.54,
-    5.17
+    4.53,
+    5.14
   ],
   "anchor_mode": "ground_centre",
   "master": "art/renders/doodads/pebble_cluster_4x.png",

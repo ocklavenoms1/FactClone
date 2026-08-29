@@ -6,7 +6,7 @@
     "weathered_oak"
   ],
   "plan_squash": 1.0,
-  "albedo_value_scale": 0.155289,
+  "albedo_value_scale": 0.390623,
   "seed": 4404,
   "sprite_px": [
     14,
@@ -18,7 +18,7 @@
   ],
   "anchor_px": [
     7.0,
-    4.13
+    4.27
   ],
   "anchor_mode": "ground_centre",
   "master": "art/renders/doodads/fallen_twig_4x.png",
