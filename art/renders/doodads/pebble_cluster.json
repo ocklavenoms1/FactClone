@@ -1,12 +1,13 @@
 {
   "name": "pebble_cluster",
-  "kind": "ground",
   "status": "real",
   "materials": [
     "fieldstone"
   ],
+  "kind": "ground",
   "plan_squash": 1.0,
-  "albedo_value_scale": 0.225411,
+  "rarity_per_tiles": 40,
+  "albedo_value_scale": 0.228418,
   "seed": 2202,
   "sprite_px": [
     9,

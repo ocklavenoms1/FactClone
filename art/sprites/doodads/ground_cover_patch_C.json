@@ -1,0 +1,32 @@
+{
+  "name": "ground_cover_patch_C",
+  "status": "real",
+  "materials": [
+    "veg_blade",
+    "veg_blade_deep"
+  ],
+  "kind": "patch",
+  "plan_squash": 1.0,
+  "rarity_per_tiles": 4,
+  "albedo_value_scale": 0.261993,
+  "seed": 5303,
+  "sprite_px": [
+    33,
+    29
+  ],
+  "render_px": [
+    132,
+    100
+  ],
+  "anchor_px": [
+    16.86,
+    19.39
+  ],
+  "anchor_mode": "ground_centre",
+  "master": "art/renders/doodads/ground_cover_patch_C_4x.png",
+  "lock_stamp": "434c0cf56d8f",
+  "crop_offset_px": [
+    0,
+    0
+  ]
+}

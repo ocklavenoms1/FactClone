@@ -2698,3 +2698,123 @@ has been supplying a fifth of every render. Each time, a value nobody chose was
 doing work nobody attributed to it, and each time it was found only when
 something downstream refused to behave. **A default is a decision that nobody
 wrote down.**
+
+## 36. The doodad set was confetti. Patches, not objects.
+
+Three of the four original doodads are retired: `grass_tuft`, `weed_clump`,
+`fallen_twig`. `pebble_cluster` survives, demoted to a rare mineral accent at
+roughly one per forty tiles.
+
+The set was wrong at the specification, not the build, and in two ways:
+
+**Individual objects at one per eight tiles is confetti.** Ground does not read
+as ground because of scattered single objects. It reads as ground because
+vegetation comes in PATCHES - dense clumps two or three tiles across,
+overlapping, with clear ground between them. **Density VARIANCE is the thing,
+not density.** So the unit of authoring is now the patch, and placement is
+clustered by a low-frequency mask rather than uniform.
+
+**Half the set was debris.** Pebbles and a twig are dead objects on bare dirt,
+which is why the field read as a vacant lot.
+
+New set: `ground_cover_patch_A` (2x2, round, dense), `ground_cover_patch_B`
+(3x2, two lobes so a field is not one shape repeated), `ground_cover_patch_C`
+(1x1, sparse, the fade-out at a patch edge), and the demoted pebbles.
+
+### Vegetation is not a machine material
+
+The hue rule is new and hard: **vegetation is GREENER than the ground, or equal.
+Never yellower.** Ground #2E3A26 is hue 96, vegetation sits 96-115, and yellow
+is reserved for a dead terrain that does not exist yet.
+
+The retired `grass_tuft` rendered at hue **38.7** - measured on the shipped
+sprite, and 57 degrees warm of the ground it lay on. That is why it read as
+straw rather than grass.
+
+Meeting the rule required leaving the locked palette, and the reason is
+structural rather than a preference: **not one member of natural-5 lands in the
+window.** Oak is hue 29.5, verdigris 152.7, leather 10.9, iron 168.0;
+fieldstone is 100 but it is a grey, so used as grass it reads as gravel. The
+locked palette is a MACHINE-MATERIALS palette. Grass is terrain, not equipment,
+so vegetation derives from the ground's own hue family and lives in a
+`vegetation_palette` block in `art/doodads.json`. Minerals keep `lock.PALETTE`,
+and the hue gate exempts them by MATERIAL rather than by name, so the exemption
+cannot be claimed by relabelling an asset.
+
+**The gate measures the RENDERED sprite, not the albedo**, because the key
+light is warm (1.0, 0.965, 0.912) and drags hue toward yellow - an albedo
+inside the window can still render outside it. As it happens the cool fill and
+rim win here and the patches render greener than their albedo, 109.6 to 113.3
+against albedos of 104 to 112. That is a reason to keep measuring the render,
+not a reason to stop.
+
+### The value bounds are a CEILING, not a target
+
+They stayed, unchanged, and they were never the problem - they stopped the
+first set shouting over the buildings and they do the same for patches. What
+changed is that the solver no longer aims AT them. It aims at **parity with the
+ground** and lets both bounds clamp, because a doodad solved to sit at 1.25:1
+has spent value on legibility that hue gives away for free.
+
+Two measurement errors were fixed getting there, and both are the same shape:
+
+**Measuring the sprite's own RGB rather than what reaches the screen.** A grass
+patch is mostly SEMI-TRANSPARENT - the gaps between blades are where the ground
+shows through, and they are most of its area. Charging the patch for a darkness
+no player sees drove the first solve to half the ground's brightness: dark
+blotches, not grass.
+
+**Then compositing over the whole bounding box.** With every pixel included,
+both statistics collapse onto the ground itself and stop describing the doodad
+at all - the solver reported p95 = 0.0373 for every patch, which is just
+#2E3A26. Fixed by measuring composited but only where alpha > 0.25, i.e. where
+the doodad actually forms the pixel rather than merely overlapping it.
+
+Final, with the whole set inside both bounds and internal range unconstrained:
+
+| doodad | median vs ground | p95 vs building ceiling | own range | hue |
+|---|---|---|---|---|
+| `ground_cover_patch_A` | 0.63:1 | 0.87 | 11.79:1 | 109.6 |
+| `ground_cover_patch_B` | 0.59:1 | 0.88 | 15.28:1 | 110.1 |
+| `ground_cover_patch_C` | 0.97:1 | 0.79 | 3.98:1 | 113.3 |
+| `pebble_cluster` | 0.90:1 | 0.87 | 3.00:1 | exempt |
+
+A and B sit below the ground because dense overlapping blades genuinely are
+darker than open dirt - the shadow between blades is what gives a patch depth.
+
+### The accidental-tool check exists, and is NOT a gate
+
+The retired twig read as a HAMMER: a long bar with a shorter bar meeting it
+near perpendicular. That is the third accidental tool or cross this project has
+shipped, after the pole was rejected twice as a crucifix, and it matters more
+than it sounds - the eye names tools before it names debris, and the player is
+scanning for equipment.
+
+`art/tools/tool_silhouette.py` reduces a shape to its principal axis and
+profiles the perpendicular reach along it. A stick is flat; a hammer has one
+narrow band far wider than the rest; a clump is wide everywhere.
+
+**It measures on the 4x master, not the sprite.** Run on the final sprite it
+inverted completely - it passed the hammer at limb 1.00x while failing a
+legitimate grass clump at 7.25x - because at 5-15px there are not enough pixels
+to profile. That was quantisation, not shape.
+
+**It is a diagnostic, not a gate, and that is deliberate.** At 4x it does
+separate the known cases - retired twig 3.20x, grass patch C 2.13x - but that
+is a threshold drawn between two samples with legitimate art sitting close to
+the line. Setting a constant there would be the tuned-constant mistake, and
+section 22 already bought the lesson that a gate which fails good work is worse
+than no gate. It prints numbers and writes a silhouette sheet; the eye decides.
+When enough bad cases exist to place a threshold honestly, it can be promoted.
+
+### Placement, which belongs to the game side
+
+Written into the manifest as `_placement` so it travels with the assets:
+patches go down CLUSTERED, never uniform. Hash a low-frequency mask over world
+position, place patches only where the mask is high, leave the rest bare. A and
+B at high mask values, C around their edges as the fade-out, pebbles as a rare
+accent independent of the vegetation mask.
+
+`doodad_sheet.py` now renders a field that way rather than scattering
+uniformly, because the failure mode is a SET failure and a strip of individually
+reasonable sprites cannot show it.

@@ -50,7 +50,13 @@ from PIL import Image
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 SPRITES = os.path.join(REPO, "art", "sprites", "doodads")
 LUM = np.array([0.2126, 0.7152, 0.0722])
-ALPHA_MIN = 0.5     # the body, not the antialiased fringe
+# Composited, but only where the doodad actually FORMS the pixel. At alpha > 0
+# a tight-cropped patch is mostly gap, so both statistics collapse onto the
+# ground itself and stop describing the doodad at all - the first attempt at
+# this solved every patch to a near-black scale while reporting p95 = 0.0373,
+# which is just the ground. A quarter coverage is where a pixel starts being
+# the doodad rather than the dirt behind it.
+ALPHA_MIN = 0.25
 
 
 def srgb_to_linear(a):
@@ -62,12 +68,29 @@ def hex_lin(h):
     return srgb_to_linear(np.array([int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]))
 
 
-def lum_of(path, amin=ALPHA_MIN):
+def lum_of(path, amin=ALPHA_MIN, over=None):
+    """Luminance of what reaches the screen.
+
+    `over` composites the sprite onto the ground first, and for a dense patch
+    that is not a refinement, it is the difference between right and wrong. A
+    grass patch is mostly SEMI-TRANSPARENT: the gaps between blades are where
+    the ground shows through, and they are the majority of its area. Measuring
+    the sprite's own RGB there charges the patch for a darkness the player
+    never sees, which drove the first solve to push patches to half the
+    ground's brightness - dark blotches, not grass.
+
+    Buildings are opaque, so their own pixels ARE what they put on screen and
+    the ceiling stays a like-for-like comparison.
+    """
     im = np.asarray(Image.open(path).convert("RGBA")).astype(np.float64) / 255.0
     sel = im[..., 3] > amin
     if not sel.any():
         return None
-    return (srgb_to_linear(im[..., :3]) @ LUM)[sel]
+    rgb = srgb_to_linear(im[..., :3])
+    if over is not None:
+        a = im[..., 3:4]
+        rgb = rgb * a + over * (1.0 - a)
+    return (rgb @ LUM)[sel]
 
 
 def building_sprite_names():
@@ -128,7 +151,7 @@ def main():
         if not os.path.exists(p):
             print(f"  [--  ] {name}: not rendered")
             continue
-        l = lum_of(p)
+        l = lum_of(p, over=hex_lin(man["ground_hex"]))
         if l is None:
             print(f"  [--  ] {name}: empty sprite")
             continue

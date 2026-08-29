@@ -1,11 +1,12 @@
 {
   "name": "_calib_dome",
-  "kind": "ground",
   "status": "calibration",
   "materials": [
     "fieldstone"
   ],
+  "kind": "ground",
   "plan_squash": 1.0,
+  "rarity_per_tiles": null,
   "albedo_value_scale": 1.0,
   "seed": 2,
   "sprite_px": [

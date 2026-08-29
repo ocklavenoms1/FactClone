@@ -73,7 +73,18 @@ if (-not $SkipDoodads) {
     $dd | ForEach-Object { Write-Host $_ }
     if ($ddFailed) {
         Write-Host ""
-        Write-Host "BUILD FAILED: doodad contrast over cap (see above)." -ForegroundColor Red
+        Write-Host "BUILD FAILED: doodad value bounds exceeded (see above)." -ForegroundColor Red
+        exit 1
+    }
+    # Vegetation must be greener than the ground, never yellower. Measured on
+    # the RENDERED sprite: the key light is warm and drags hue toward yellow,
+    # so an albedo inside the window can still render outside it.
+    $dh = python (Join-Path $ArtDir "tools/assert_doodad_hue.py")
+    $dhFailed = ($LASTEXITCODE -ne 0)
+    $dh | ForEach-Object { Write-Host $_ }
+    if ($dhFailed) {
+        Write-Host ""
+        Write-Host "BUILD FAILED: vegetation hue outside the window (see above)." -ForegroundColor Red
         exit 1
     }
     Write-Host ""

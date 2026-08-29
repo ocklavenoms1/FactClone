@@ -68,6 +68,9 @@ def get_args():
     return a
 
 
+VEG = {}
+
+
 def palette_material(member, value_scale=1.0, tag=""):
     """On-palette HUE, value scaled to sit against the ground.
 
@@ -89,7 +92,7 @@ def palette_material(member, value_scale=1.0, tag=""):
     mat.use_nodes = True
     nt = mat.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-    h = lock.PALETTE[member].lstrip("#")
+    h = (VEG[member] if member in VEG else lock.PALETTE[member]).lstrip("#")
     srgb = [int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
     lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in srgb]
     lin = [c * value_scale for c in lin]
@@ -159,6 +162,68 @@ def leaf(rng, length, width, azim, tilt):
             b = 2 * (i - 1)
             faces.append((b, b + 1, b + 3, b + 2))
     return verts, faces
+
+
+def density_at(shape, u, v, hw, hd):
+    """Blade probability at plan position (u, v), normalised to the footprint.
+
+    The rim matters more than the centre. A patch that ends at a hard edge
+    reads as a tile; one that thins out over its last third overlaps its
+    neighbours and reads as ground.
+    """
+    if shape == "sparse":
+        r = math.hypot(u / max(hw, 1e-6), v / max(hd, 1e-6))
+        return 0.9 if r <= 1.0 else 0.0
+    if shape == "lobed":
+        best = 0.0
+        for cx, cy, rad in ((-hw * 0.42, -hd * 0.12, 0.62), (hw * 0.40, hd * 0.16, 0.70)):
+            r = math.hypot((u - cx) / max(hw * rad, 1e-6), (v - cy) / max(hd * rad, 1e-6))
+            best = max(best, max(0.0, 1.0 - r * r))
+        return best
+    r = math.hypot(u / max(hw, 1e-6), v / max(hd, 1e-6))
+    return max(0.0, 1.0 - r * r)
+
+
+def build_patch(cfg, rng):
+    """A dense clump of blades, accumulated into ONE mesh per colour.
+
+    Individual 6px objects scattered one per eight tiles is confetti; ground
+    reads as ground because vegetation comes in patches with clear ground
+    between them. So the unit of authoring is the patch, and density VARIANCE
+    across it is the point - solid core, broken rim.
+    """
+    vs = float(cfg.get("albedo_value_scale", 1.0))
+    tag = cfg["name"]
+    mats = cfg["materials"]
+    w_t, d_t = cfg["size_tiles"]
+    hw, hd = w_t / 2.0, d_t / 2.0
+    h = cfg["height_px"] / PX_PER_Z
+    shape = cfg.get("shape", "round")
+    buckets = {m: ([], []) for m in mats}
+    placed, guard = 0, 0
+    target = int(cfg["blades"])
+    while placed < target and guard < target * 60:
+        guard += 1
+        u = rng.uniform(-hw, hw)
+        v = rng.uniform(-hd, hd)
+        if rng.random() > density_at(shape, u, v, hw, hd):
+            continue
+        placed += 1
+        m = mats[rng.randrange(len(mats))]
+        verts, faces = buckets[m]
+        base = len(verts)
+        az = rng.uniform(0, 2 * math.pi)
+        hh = h * rng.uniform(0.55, 1.15)
+        bw = (0.10 if shape != "sparse" else 0.085) * (w_t / 2.0) * 0.5
+        bv, bf = blade(rng, hh, bw * rng.uniform(0.7, 1.2), az,
+                       hh * rng.uniform(0.25, 0.75))
+        verts += [(x + u, y + v, z) for (x, y, z) in bv]
+        faces += [tuple(i + base for i in f) for f in bf]
+    obs = []
+    for m, (verts, faces) in buckets.items():
+        if verts:
+            obs.append(new_object(f"{tag}_{m}", verts, faces, m, vs, tag))
+    return obs
 
 
 def build_upright(cfg, rng):
@@ -291,8 +356,8 @@ def render_one(cfg, out_dir):
         if ob.type == "MESH":
             bpy.data.objects.remove(ob, do_unlink=True)
     rng = random.Random(int(cfg["seed"]))
-    obs = (build_upright(cfg, rng) if cfg["kind"] == "upright"
-           else build_ground(cfg, rng))
+    obs = {"patch": build_patch, "upright": build_upright,
+           "ground": build_ground}[cfg["kind"]](cfg, rng)
     fr = frame_doodad(obs, float(cfg.get("plan_squash", 1.0)))
 
     scene = bpy.context.scene
@@ -306,10 +371,11 @@ def render_one(cfg, out_dir):
 
     meta = {
         "name": cfg["name"],
-        "kind": cfg["kind"],
         "status": cfg.get("status", "real"),
         "materials": cfg["materials"],
+        "kind": cfg["kind"],
         "plan_squash": float(cfg.get("plan_squash", 1.0)),
+        "rarity_per_tiles": cfg.get("rarity_per_tiles"),
         "albedo_value_scale": float(cfg.get("albedo_value_scale", 1.0)),
         "seed": cfg["seed"],
         "sprite_px": fr["sprite_px"],
@@ -332,6 +398,7 @@ def main():
     a = get_args()
     with open(os.path.join(REPO, "art", "doodads.json")) as f:
         man = json.load(f)
+    VEG.update(man.get("vegetation_palette", {}))
     out_dir = os.path.join(REPO, "art", "renders", "doodads")
     os.makedirs(out_dir, exist_ok=True)
     todo = [d for d in man["doodads"]

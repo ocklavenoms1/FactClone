@@ -70,6 +70,7 @@ def main():
     mcap = float(man.get("median_cap", 1.25))
     med_ceiling = gl * mcap
     bld = gate.building_p50()
+    ground = gate.hex_lin(man["ground_hex"])
     print(f"  ground rel-lum {gl:.4f}   median ceiling {med_ceiling:.4f} "
           f"({mcap}:1)   building p50 ceiling {bld:.4f}")
 
@@ -80,14 +81,41 @@ def main():
             continue
         name = d["name"]
         render(name, 1.0)
-        l = gate.lum_of(os.path.join(REPO, "art", "sprites", "doodads", f"{name}.png"))
+        # SAME statistic the gate uses, composited over the ground. Measuring
+        # the doodad's own RGB here while the gate composites is two definitions
+        # of one number, and it solved every patch to an identical wrong scale.
+        l = gate.lum_of(os.path.join(REPO, "art", "sprites", "doodads", f"{name}.png"),
+                        over=ground)
         med1, p951 = float(np.median(l)), float(np.percentile(l, 95))
-        s_med = med_ceiling / max(med1, 1e-12)
-        s_p95 = bld / max(p951, 1e-12)
-        scale = min(s_med, s_p95) * MARGIN
-        binder = "median-vs-ground" if s_med < s_p95 else "p95-vs-buildings"
+        # TARGET is parity with the ground, not the cap. The cap is a CEILING:
+        # a doodad solved to sit at 1.25:1 is one that has spent value on
+        # legibility that hue gives away free. Both bounds then clamp.
+        # Compositing makes the statistic AFFINE in the scale - a partly
+        # transparent pixel keeps its share of ground no matter how dark the
+        # blade gets - so a ratio no longer solves it. Sweep instead, over the
+        # pixels already in hand.
+        import numpy as _np
+        from PIL import Image as _I
+        im = _np.asarray(_I.open(os.path.join(REPO, "art", "sprites", "doodads",
+                                              f"{name}.png")).convert("RGBA")).astype(float) / 255.
+        al = im[..., 3:4]
+        keep = im[..., 3] > gate.ALPHA_MIN
+        ld = gate.srgb_to_linear(im[..., :3])
+        best = None
+        for s in _np.exp(_np.linspace(_np.log(0.01), _np.log(4.0), 700)):
+            comp = ld * s * al + ground * (1.0 - al)
+            L = (comp @ gate.LUM)[keep]
+            med, p95 = float(_np.median(L)), float(_np.percentile(L, 95))
+            if med <= med_ceiling * MARGIN and p95 <= bld * MARGIN:
+                d_par = abs(_np.log(max(med, 1e-12) / gl))
+                if best is None or d_par < best[1]:
+                    best = (float(s), d_par, med, p95)
+        scale, _, med_f, p95_f = best if best else (0.05, 0, 0, 0)
+        binder = ("parity" if abs(_np.log(max(med_f, 1e-12) / gl)) < 0.05
+                  else "clamped by a ceiling")
         render(name, scale)
-        l2 = gate.lum_of(os.path.join(REPO, "art", "sprites", "doodads", f"{name}.png"))
+        l2 = gate.lum_of(os.path.join(REPO, "art", "sprites", "doodads", f"{name}.png"),
+                         over=ground)
         rng = float(np.percentile(l2, 95)) / max(float(np.percentile(l2, 5)), 1e-12)
         d["albedo_value_scale"] = round(scale, 4)
         print(f"  {name:15} scale {scale:7.4f}  binds on {binder:17} "
