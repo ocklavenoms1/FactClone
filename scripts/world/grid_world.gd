@@ -575,7 +575,7 @@ func place_building(t: int, pos: Vector2i, dir: int = 0, extra = null) -> bool:
 	buildings[pos] = b
 	for cell in _footprint_cells(t, pos, dir):
 		occupied[cell] = pos
-	if t == Buildings.Type.PIPE or t == Buildings.Type.PUMP:
+	if Buildings.FLUID_NETWORK_TYPES.has(t):
 		_fluid_network_dirty = true
 	if Buildings.POWER_NETWORK_TYPES.has(t):
 		_power_network_dirty = true
@@ -598,7 +598,7 @@ func remove_building_at(pos: Vector2i) -> bool:
 	for cell in _footprint_cells(b.type, anchor, Buildings.dir_of(b)):
 		occupied.erase(cell)
 	buildings.erase(anchor)
-	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
+	if Buildings.FLUID_NETWORK_TYPES.has(b.type):
 		_fluid_network_dirty = true
 	if Buildings.POWER_NETWORK_TYPES.has(b.type):
 		_power_network_dirty = true
@@ -689,22 +689,62 @@ func fluid_available_for_building_edge(b: Building, world_dir: int, _fluid_type:
 				return true
 	return false
 
-## Rebuild pipe → component map and mark each component with whether it
-## contains an adjacent pump. BFS from each unvisited pipe; sort starting
+## Rebuild carrier cell → component map and mark each component with whether
+## it contains an adjacent pump. BFS from each unvisited carrier; sort starting
 ## points to keep component IDs deterministic across runs.
+##
+## NODES are Buildings.FLUID_CARRIER_TYPES: plain PIPE and the two halves of an
+## underground PIPE tunnel. A tunnel half is a node exactly as a pipe is — it
+## joins whatever pipes touch it cardinally, and its own cell answers
+## is_pipe_in_pump_component the way the pipe it replaced did. PUMP is
+## deliberately NOT a node: it marks a component from outside, and promoting it
+## would silently merge two independent runs that both touch it.
+##
+## EDGES are the ordinary cardinal adjacency PLUS, since Belt Logistics Session
+## 2 Piece 2, one tunnel edge per PAIRED underground pipe. That edge is the
+## whole of what an underground pipe is: no lanes, no volume, no timing,
+## because there is no flow simulation for any of them to belong to.
 func _rebuild_fluid_network() -> void:
 	_pipe_component.clear()
 	_component_has_pump.clear()
 
-	var pipe_anchors: Array = []
+	var carrier_anchors: Array = []
 	for anchor in buildings:
-		if buildings[anchor].type == Buildings.Type.PIPE:
-			pipe_anchors.append(anchor)
+		if Buildings.FLUID_CARRIER_TYPES.has(buildings[anchor].type):
+			carrier_anchors.append(anchor)
 	# Determinism: sort lexicographically.
-	pipe_anchors.sort_custom(func(a, b): return a.x < b.x or (a.x == b.x and a.y < b.y))
+	carrier_anchors.sort_custom(func(a, b): return a.x < b.x or (a.x == b.x and a.y < b.y))
+
+	# The tunnel edges, resolved ONCE, up front, from the SORTED anchor list so
+	# the link table cannot inherit `buildings`' insertion order — component
+	# ids would otherwise depend on the sequence in which a player happened to
+	# build. Pairing is asked of Underground.paired_exit and nothing else: its
+	# docstring's contract names this function as a caller, and a second
+	# derivation of the span scan here would drift from the one the renderer
+	# and the panel use, joining networks no dashed line is drawn across.
+	#
+	# Stored BOTH WAYS because the fluid graph is undirected — an exit must
+	# reach its entry as readily as the entry reaches the exit. Values are
+	# ARRAYS, not single cells: two entries at different distances may legally
+	# pair to the SAME exit, and a scalar would let whichever was resolved last
+	# silently orphan the other.
+	var tunnel_links: Dictionary = {}
+	for anchor in carrier_anchors:
+		var eb: Building = buildings[anchor]
+		if eb.type != Buildings.Type.UNDERGROUND_PIPE_ENTRY:
+			continue
+		var partner: Building = Underground.paired_exit(eb, self)
+		if partner == null:
+			continue
+		var out_links: Array = tunnel_links.get(anchor, [])
+		out_links.append(partner.anchor)
+		tunnel_links[anchor] = out_links
+		var back_links: Array = tunnel_links.get(partner.anchor, [])
+		back_links.append(anchor)
+		tunnel_links[partner.anchor] = back_links
 
 	var next_id: int = 0
-	for start in pipe_anchors:
+	for start in carrier_anchors:
 		if _pipe_component.has(start):
 			continue
 		var has_pump: bool = false
@@ -722,10 +762,16 @@ func _rebuild_fluid_network() -> void:
 				var nb: Building = building_at(n)
 				if nb == null:
 					continue
-				if nb.type == Buildings.Type.PIPE and not _pipe_component.has(n):
+				if Buildings.FLUID_CARRIER_TYPES.has(nb.type) and not _pipe_component.has(n):
 					queue.append(n)
 				elif nb.type == Buildings.Type.PUMP:
 					has_pump = true
+			# The tunnel edge: a paired half reaches its partner directly, with
+			# nothing touched in between — the cells the tunnel passes UNDER
+			# are ground, not pipe, and stay outside the network.
+			for linked in tunnel_links.get(p, []):
+				if not _pipe_component.has(linked):
+					queue.append(linked)
 		_component_has_pump[next_id] = has_pump
 		next_id += 1
 

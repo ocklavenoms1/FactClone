@@ -1,9 +1,26 @@
 class_name Underground
 extends RefCounted
 
-## Underground belt pair — the ENTRY owns everything that moves; the EXIT is
-## passive. Belt Logistics Session 1, Task 5; design record:
-## docs/scoping/belt-logistics-1.md (Q6, Q6b, Q7, Q8).
+## Underground tunnels — TWO FAMILIES, one pairing predicate.
+##
+## BELT family (Belt Logistics Session 1, Task 5; design record:
+## docs/scoping/belt-logistics-1.md — Q6, Q6b, Q7, Q8). The ENTRY owns
+## everything that moves; the EXIT is passive. Everything below the pairing
+## section describes this family and only this family.
+##
+## PIPE family (Belt Logistics Session 2, Piece 2). A paired underground pipe
+## is ONE EDGE in the fluid connectivity graph and NOTHING ELSE: no lanes, no
+## volume, no timing, no state but `dir`. There is no fluid flow simulation
+## for any of those to belong to, so a tunnel carrying a latency constant
+## would be inventing a number with no source — the opposite of the belt
+## family's locked one-belt-tile lane, which is derivable from
+## Belt.SLOTS_PER_TILE. The whole of the pipe family's behaviour is
+## `make_pipe_half` below, its row in EXIT_TYPE_FOR_ENTRY, and the tunnel-link
+## step in GridWorld._rebuild_fluid_network that reads that row through
+## paired_exit. Fluid is UNDIRECTED: entry vs exit is a player-facing
+## CONVENTION kept for glyph legibility and family consistency, not a
+## constraint the fluid obeys — recorded so a future one-type simplification
+## is a decision on the shelf rather than one re-derived from scratch.
 ##
 ## ─────────────────────────────────────────────────────────────────────────
 ## THE CONVENTION (single source for the pair's geometry under rotation)
@@ -102,7 +119,36 @@ extends RefCounted
 ## Maximum covered cells between entry and exit — the pairing scan looks
 ## 2 .. UNDERGROUND_MAX_SPAN+1 cells ahead of the entry. Module-own and
 ## pinned by a test literal on purpose; see the header (Q6b).
+##
+## BOTH FAMILIES SHARE THIS ONE CONSTANT, deliberately: a belt tunnel and a
+## pipe tunnel reach the same distance, and a player who has learned one has
+## learned the other. The consequence is that a belt-side rebalance rebalances
+## every pipe tunnel in every save, which is exactly the silent-compensation
+## shape Q6b named — so the literal 3 is pinned TWICE, once in
+## test_underground.gd (A7, belts) and once in test_underground_pipe.gd (1,
+## pipes). Two suites reddening is what makes a rebalance a deliberate
+## two-file edit instead of a side effect.
 const UNDERGROUND_MAX_SPAN: int = 3
+
+## THE FAMILY TABLE — entry type → the ONE exit type it may pair with.
+##
+## This dictionary IS the belt/pipe distinction. It is written down rather
+## than emergent: without it the two families would be kept apart only by the
+## accident of never being placed next to each other, and the first player to
+## run a pipe tunnel alongside a belt tunnel would find them pairing. A miss
+## returns -1 from exit_type_for below, which means "not a tunnel entry of any
+## family" — the answer for an EXIT, for a PIPE, and for everything else.
+##
+## A new tunnel family (a longer tier, a fluid-specific tunnel) is one row
+## here and nothing else in this file.
+const EXIT_TYPE_FOR_ENTRY: Dictionary = {
+	Buildings.Type.UNDERGROUND_BELT_ENTRY: Buildings.Type.UNDERGROUND_BELT_EXIT,
+	Buildings.Type.UNDERGROUND_PIPE_ENTRY: Buildings.Type.UNDERGROUND_PIPE_EXIT,
+}
+
+## The exit type `entry_type` may pair with, or -1 if it is not a tunnel entry.
+static func exit_type_for(entry_type: int) -> int:
+	return int(EXIT_TYPE_FOR_ENTRY.get(entry_type, -1))
 
 static func make_entry(pos: Vector2i, dir: int = Belt.DIR_E) -> Building:
 	var slots: Array = []
@@ -118,35 +164,66 @@ static func make_exit(pos: Vector2i, dir: int = Belt.DIR_E) -> Building:
 		"dir": dir,
 	})
 
+## BOTH pipe halves, from one constructor, because they ARE the same building:
+## `dir` and nothing else. The belt pair needs two constructors because the
+## entry carries a lane and a tunnel array and the exit carries neither; the
+## pipe pair carries nothing on either side, so two functions would be two
+## copies of one line. `t` is the caller's enum value (Buildings.make passes
+## it straight through), and it is what the ramp glyph and the family table
+## read to tell the halves apart.
+##
+## `dir` reuses the Belt.DIR_* enum — the same four-direction vocabulary every
+## rotatable building in the registry speaks (Buildings.dir_of reads it). For
+## the pipe family it fixes the pairing scan's AXIS, not a flow direction:
+## fluid crosses a paired tunnel in whichever direction the network demands.
+static func make_pipe_half(pos: Vector2i, dir: int, t: int) -> Building:
+	return Building.new(t, pos, {
+		"dir": dir,
+	})
+
 # ---------- pairing (the Q6 decision, in code) ----------
 
-## THE pairing predicate — the `poles_connected` of this arc.
+## THE pairing predicate — the `poles_connected` of this arc — for BOTH
+## families, belt and pipe.
 ##
 ## CONTRACT: this function is the ONLY answer to "which exit does this
 ## entry feed?". Every caller — try_accept's refuse-when-unpaired gate,
-## both tick passes, info_lines, and the renderer's dedicated indicator
+## both tick passes, info_lines, the renderer's dedicated indicator
 ## pass (GridWorld._draw_underground_pair_indicators, Task 6's dashed
-## tunnel indicator) — must call THIS, never re-derive the scan from a
-## distance check. Two derivations drift, and the divergence is invisible
-## until a tunnel draws where no items flow — the same failure
+## tunnel indicator), and the fluid resolver's tunnel-link step
+## (GridWorld._rebuild_fluid_network, Session 2 Piece 2) — must call THIS,
+## never re-derive the scan from a distance check. Two derivations drift, and
+## the divergence is invisible until a tunnel draws where no items flow, or
+## joins a fluid network no player can see joined — the same failure
 ## poles_connected and wasteland_accepts_tier exist to prevent. Recomputed
 ## on demand, never stored (Q6): there is no partner field to go stale.
 ##
+## ONE FUNCTION, BOTH FAMILIES, THE DISTINCTION EXPLICIT. The exit type this
+## scan will accept comes from EXIT_TYPE_FOR_ENTRY — the entry's OWN row —
+## and never from "does this look like an exit". A belt entry therefore
+## cannot pair with a pipe exit at any distance or facing, and vice versa,
+## because the refusal is a table lookup rather than a consequence of the two
+## families never meeting on a map. An entry type with no row (and any EXIT,
+## and any other building) returns null immediately.
+##
 ## The scan: walk k = 2 .. UNDERGROUND_MAX_SPAN+1 cells from the entry's
-## anchor along the ENTRY'S OWN dir; the NEAREST UNDERGROUND_BELT_EXIT
-## whose dir EQUALS the entry's dir wins. Anything else — an exit facing
-## another way, another entry, any other building, empty ground — is
-## SKIPPED, not a blocker (the tunnel passes under the surface). k starts
-## at 2, so a pair always covers at least one cell and the tunnel is never
-## zero-length.
+## anchor along the ENTRY'S OWN dir; the NEAREST exit of the entry's paired
+## type whose dir EQUALS the entry's dir wins. Anything else — an exit facing
+## another way, an exit of the other family, another entry, any other
+## building, empty ground — is SKIPPED, not a blocker (the tunnel passes under
+## the surface). k starts at 2, so a pair always covers at least one cell and
+## the tunnel is never zero-length.
 static func paired_exit(entry: Building, world: Node2D) -> Building:
+	var want: int = exit_type_for(entry.type)
+	if want < 0:
+		return null
 	var d: int = Buildings.dir_of(entry)
 	var step: Vector2i = Belt.DIR_VECS[d]
 	for k in range(2, UNDERGROUND_MAX_SPAN + 2):
 		var candidate: Building = world.building_at(entry.anchor + step * k)
 		if candidate == null:
 			continue
-		if candidate.type != Buildings.Type.UNDERGROUND_BELT_EXIT:
+		if candidate.type != want:
 			continue
 		if Buildings.dir_of(candidate) != d:
 			continue
@@ -310,6 +387,8 @@ static func _shift_segment(arr: Array, base: int) -> void:
 # ---------- info ----------
 
 static func info_lines(b: Building, world = null) -> Array:
+	if is_pipe_half(b.type):
+		return _pipe_info_lines(b, world)
 	if b.type == Buildings.Type.UNDERGROUND_BELT_EXIT:
 		return [
 			"Flow: %s" % Belt.DIR_NAMES[Buildings.dir_of(b)],
@@ -337,6 +416,36 @@ static func info_lines(b: Building, world = null) -> Array:
 			lines.append("UNPAIRED — refusing input (upstream will jam)")
 	return lines
 
+## Is `t` one of the PIPE family's two halves? The one place that question is
+## asked, so the two enum values never get spelled out at a call site.
+static func is_pipe_half(t: int) -> bool:
+	return t == Buildings.Type.UNDERGROUND_PIPE_ENTRY or t == Buildings.Type.UNDERGROUND_PIPE_EXIT
+
+## The pipe family's panel. It reports three things, and deliberately not a
+## fourth: the facing (with its convention caveat spelled out, because a
+## player who sees a direction on a fluid building will assume it constrains
+## flow), the PAIRING — through the same paired_exit every other caller uses,
+## so the panel can never claim an edge the resolver did not build — and the
+## live connectivity of the half's own cell. There is no throughput line, no
+## contents line and no fill line, because a pipe tunnel carries nothing.
+static func _pipe_info_lines(b: Building, world) -> Array:
+	var lines: Array = [
+		"Facing: %s (pairing axis — fluid itself is undirected)" % Belt.DIR_NAMES[Buildings.dir_of(b)],
+		"Carries nothing: one edge in the fluid network.",
+	]
+	if world == null:
+		return lines
+	if b.type == Buildings.Type.UNDERGROUND_PIPE_ENTRY:
+		var exit: Building = paired_exit(b, world)
+		if exit != null:
+			lines.append("Paired exit: %s" % str(exit.anchor))
+		else:
+			lines.append("UNPAIRED — the network is cut here")
+	else:
+		lines.append("Passive half — the entry owns the pairing scan.")
+	lines.append("Fluid: %s" % ("pump reachable" if world.is_pipe_in_pump_component(b.anchor) else "no pump in this network"))
+	return lines
+
 # ---------- visual ----------
 
 ## Task 6. Entry vs exit must be DISTINGUISHABLE at a glance (a named
@@ -351,29 +460,49 @@ static func info_lines(b: Building, world = null) -> Array:
 ## the exit — the belt's own bright-front convention). Draws strictly inside
 ## the 1x1 footprint; the dashed pair-indicator between the halves is
 ## grid_world's DEDICATED pass, never drawn here (the z-order finding).
+##
+## SESSION 2 PIECE 2 — the same glyph, the other family's palette. The pipe
+## halves reuse every line of geometry below (a ramp into the ground is a ramp
+## into the ground) and swap the belt's trim/chevron colours for the pipe's
+## tube colours, INCLUDING Pipe's live-vs-dry distinction: a tunnel mouth in a
+## pump-bearing network reads bright exactly as the pipe beside it does, and a
+## dry one reads muted. `canvas` IS the GridWorld (grid_world._draw passes
+## self), the same duck-typed connectivity query Pipe.draw already makes.
 static func draw(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_size: int) -> void:
 	var ts: float = float(tile_size)
 	var rect: Rect2 = Rect2(world_pos, Vector2(ts, ts))
+	# The entry half of EITHER family is the one with a row in the family
+	# table; that is the same question the pairing scan asks, so the glyph and
+	# the predicate can never disagree about which end is which.
+	var is_entry: bool = EXIT_TYPE_FOR_ENTRY.has(b.type)
+	var trim: Color = Belt.TRIM_COLOR
+	var mark: Color = Belt.ARROW_COLOR
+	var mark_bright: Color = Belt.ARROW_BRIGHT
+	if is_pipe_half(b.type):
+		var live: bool = canvas.is_pipe_in_pump_component(b.anchor)
+		trim = Pipe.TUBE_OUTLINE
+		mark = Pipe.TUBE_PUMP if live else Pipe.TUBE_DRY
+		mark_bright = Pipe.HUB_PUMP if live else Pipe.HUB_DRY
 	canvas.draw_rect(rect, Buildings.DATA[b.type]["swatch_color"], true)
-	canvas.draw_rect(rect, Belt.TRIM_COLOR, false, 1.5)
+	canvas.draw_rect(rect, trim, false, 1.5)
 
 	var d: int = Buildings.dir_of(b)
-	if b.type == Buildings.Type.UNDERGROUND_BELT_ENTRY:
+	if is_entry:
 		# Mouth on the front edge; ramp walls converge into it; chevrons
 		# walk the rear half toward it, bright last.
-		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.66, 1.00, 0.10, 0.90), Belt.TRIM_COLOR)
-		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.10), _axis_point(world_pos, ts, d, 0.66, 0.24), Belt.ARROW_COLOR, 1.5)
-		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.90), _axis_point(world_pos, ts, d, 0.66, 0.76), Belt.ARROW_COLOR, 1.5)
-		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.16, 0.5), d, ts, Belt.ARROW_COLOR)
-		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.44, 0.5), d, ts, Belt.ARROW_BRIGHT)
+		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.66, 1.00, 0.10, 0.90), trim)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.10), _axis_point(world_pos, ts, d, 0.66, 0.24), mark, 1.5)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.06, 0.90), _axis_point(world_pos, ts, d, 0.66, 0.76), mark, 1.5)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.16, 0.5), d, ts, mark)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.44, 0.5), d, ts, mark_bright)
 	else:
 		# Mirrored: mouth on the rear edge; ramp walls spread out of it;
 		# chevrons walk the front half away from it, bright at the emit edge.
-		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.00, 0.34, 0.10, 0.90), Belt.TRIM_COLOR)
-		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.24), _axis_point(world_pos, ts, d, 0.94, 0.10), Belt.ARROW_COLOR, 1.5)
-		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.76), _axis_point(world_pos, ts, d, 0.94, 0.90), Belt.ARROW_COLOR, 1.5)
-		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.56, 0.5), d, ts, Belt.ARROW_COLOR)
-		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.84, 0.5), d, ts, Belt.ARROW_BRIGHT)
+		canvas.draw_colored_polygon(_axis_quad(world_pos, ts, d, 0.00, 0.34, 0.10, 0.90), trim)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.24), _axis_point(world_pos, ts, d, 0.94, 0.10), mark, 1.5)
+		canvas.draw_line(_axis_point(world_pos, ts, d, 0.34, 0.76), _axis_point(world_pos, ts, d, 0.94, 0.90), mark, 1.5)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.56, 0.5), d, ts, mark)
+		_draw_chevron(canvas, _axis_point(world_pos, ts, d, 0.84, 0.5), d, ts, mark_bright)
 
 ## Map flow-axis coordinates into world pixels inside this 1x1 tile:
 ## t_along runs 0 (rear edge, where the feeder pushes in) to 1 (front edge,

@@ -23,6 +23,12 @@ extends RefCounted
 ##      power topology or the supply/demand totals — and additionally to
 ##      POLE_TYPES if it is a pole. Miss this and the building works, but the
 ##      network silently never rebuilds when you place one.
+##  12. Add to FLUID_NETWORK_TYPES below if placing or removing it changes the
+##      pipe connectivity graph — and additionally to FLUID_CARRIER_TYPES if it
+##      is a NODE in that graph rather than a source marking it. Miss this and
+##      the building works, but the network silently never rebuilds when you
+##      place one: it is correct in every freshly loaded world and absent from
+##      every session that was already running.
 ##
 ## Future processor machines (Oven, Press, etc.) are usually just steps 1-4
 ## + 7 + 9-10 because they reuse Processor.tick.
@@ -171,6 +177,24 @@ enum Type {
 	# and by the two suites' literal assertions.
 	ELECTRIC_SMELTER,
 	ELECTRIC_DRILL,
+	# Belt Logistics Session 2, Piece 2: the underground PIPE pair. Two enum
+	# entries for the same reason the belt pair has two — the ramp glyph
+	# mirrors, and the family reads like the belt family — but note what is
+	# NOT true here: fluid is UNDIRECTED, so entry/exit is a player-facing
+	# CONVENTION rather than a constraint the fluid obeys. Recorded so a
+	# future one-type simplification is a decision available on the shelf
+	# rather than something re-derived from scratch (design record,
+	# docs/scoping/belt-logistics-1.md).
+	#
+	# A paired pipe tunnel is ONE EDGE in the fluid connectivity graph and
+	# nothing else: no lanes, no volume, no timing, no state but `dir`. There
+	# is no fluid flow simulation for any of those to belong to. Both halves
+	# are members of FLUID_NETWORK_TYPES *and* FLUID_CARRIER_TYPES below.
+	# Appended at the END so every previously-saved type keeps its integer:
+	# UNDERGROUND_PIPE_ENTRY = 39, UNDERGROUND_PIPE_EXIT = 40 — pinned by the
+	# save format and by test_underground_pipe.gd's literal assertions.
+	UNDERGROUND_PIPE_ENTRY,
+	UNDERGROUND_PIPE_EXIT,
 }
 
 const DATA: Dictionary = {
@@ -845,6 +869,31 @@ const DATA: Dictionary = {
 		"walkable": true,
 		# No slot_layout — passive belt infrastructure, same as BELT/PIPE.
 	},
+	Type.UNDERGROUND_PIPE_ENTRY: {
+		"name": "Underground Pipe Entry",
+		"swatch_color": Color(0.26, 0.34, 0.44),    # pipe-blue, sunk dark
+		"footprint": Vector2i(1, 1),
+		# PIPE's ground rules verbatim — a tunnel mouth is a pipe fitting.
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		# The entry faces a direction — its dir is where the tunnel runs, and
+		# the pairing scan requires the exit to agree. See the enum comment:
+		# the DIRECTION of fluid through it is convention, the FACING is not.
+		"supports_direction": true,
+		"player_drainable": false,
+		# NOT walkable, matching PIPE (which omits the key and reads false).
+		# The belt tunnel is walkable because belts are; pipes are not.
+		# No slot_layout — passive fluid infrastructure, same as PIPE.
+	},
+	Type.UNDERGROUND_PIPE_EXIT: {
+		"name": "Underground Pipe Exit",
+		"swatch_color": Color(0.58, 0.66, 0.74),    # pipe-blue, surfacing pale
+		"footprint": Vector2i(1, 1),
+		"requires_overlay": [Terrain.Overlay.STONE, Terrain.Overlay.PATH, Terrain.Overlay.SOIL_TILLED],
+		"supports_direction": true,
+		"player_drainable": false,
+		# NOT walkable — see the entry row above.
+		# No slot_layout — passive fluid infrastructure, same as PIPE.
+	},
 	Type.WATER_WHEEL: {
 		"name": "Water Wheel",
 		"swatch_color": Color(0.40, 0.55, 0.65),    # wet wood-teal
@@ -1018,6 +1067,42 @@ const POWER_NETWORK_TYPES: Dictionary = {
 	Type.ELECTRIC_DRILL: true,
 }
 
+## Every building type whose placement or removal changes the FLUID topology,
+## and therefore must set world._fluid_network_dirty.
+##
+## The exact counterpart of POWER_NETWORK_TYPES above, and it exists for the
+## same reason. Until Belt Logistics Session 2 the two invalidation sites in
+## grid_world.gd (place, remove) read `t == Type.PIPE or t == Type.PUMP` — a
+## hardcoded pair sitting ONE LINE from the membership test doing the same job
+## for power. Adding the pipe tunnel past that pair would have produced a
+## building that places, saves and reloads correctly, is correct in every
+## freshly loaded world, and does not exist to any session that was already
+## running: the fluid cache is only rebuilt when something marks it dirty.
+## That is audit finding #1's shape reached through a new door, and the whole
+## of test_underground_pipe.gd sub-case (2) exists to hold this table shut.
+##
+## Dictionary-as-set (Godot 4 has no built-in Set); values are ignored.
+const FLUID_NETWORK_TYPES: Dictionary = {
+	Type.PIPE: true,
+	Type.PUMP: true,
+	Type.UNDERGROUND_PIPE_ENTRY: true,
+	Type.UNDERGROUND_PIPE_EXIT: true,
+}
+
+## The subset of FLUID_NETWORK_TYPES that are CARRIERS — the cells that are
+## NODES in the connectivity graph GridWorld._rebuild_fluid_network floods.
+## Exactly the POWER_NETWORK_TYPES / POLE_TYPES relationship, one layer down.
+##
+## PUMP is deliberately ABSENT. A pump MARKS a component (`_component_has_pump`)
+## from outside it; it is not a member. Promoting it to a node would silently
+## merge two independent pipe runs that happen to touch the same pump — a
+## behaviour change wearing the costume of a table edit.
+const FLUID_CARRIER_TYPES: Dictionary = {
+	Type.PIPE: true,
+	Type.UNDERGROUND_PIPE_ENTRY: true,
+	Type.UNDERGROUND_PIPE_EXIT: true,
+}
+
 ## The subset of POWER_NETWORK_TYPES that are POLES — the buildings that form
 ## network components via BFS and project a supply area. Generators and
 ## consumers are in POWER_NETWORK_TYPES but not here.
@@ -1027,11 +1112,18 @@ const POLE_TYPES: Dictionary = {
 	Type.SUBSTATION: true,
 }
 
-## The underground belt pair — entry and exit are distinct enum values (they
-## tick and draw differently), and this predicate is the single shared "is
-## part of an underground belt" answer, mirroring POLE_TYPES above. Task 5's
-## pairing scan filters on this set; a tier or variant added to the pair must
-## be added here by hand or the scan silently never finds it.
+## The underground BELT pair — entry and exit are distinct enum values (they
+## tick and draw differently), and this set is the shared "is part of an
+## underground belt" answer, mirroring POLE_TYPES above.
+##
+## CORRECTION (Belt Logistics Session 2, Piece 2): the sentence that used to
+## stand here — "Task 5's pairing scan filters on this set" — was never true.
+## The scan matches on ONE exit type looked up from the entry's own family
+## row, and since Piece 2 that lookup is Underground.EXIT_TYPE_FOR_ENTRY, the
+## live table for BOTH families. The underground PIPE pair is deliberately not
+## listed below: this set means the BELT pair specifically, and widening it to
+## "any tunnel half" would put the belt and pipe families back into one bucket
+## that nothing reads — which is what this set is today. It has no callers.
 ##
 ## Dictionary-as-set (Godot 4 has no built-in Set); values are ignored.
 const UNDERGROUND_TYPES: Dictionary = {
@@ -1308,6 +1400,12 @@ static func make(t: int, pos: Vector2i, dir: int = 0, extra = null) -> Building:
 			return Smelter.make(pos, dir, Type.ELECTRIC_SMELTER)
 		Type.ELECTRIC_DRILL:
 			return MiningDrill.make(pos, dir, Type.ELECTRIC_DRILL)
+		Type.UNDERGROUND_PIPE_ENTRY, Type.UNDERGROUND_PIPE_EXIT:
+			# ONE constructor for both halves, because they ARE the same
+			# building: `dir` and nothing else. Neither half has a tick_one or
+			# post_tick_one case — a pipe tunnel is a connectivity edge, not a
+			# carrier, so there is nothing for a tick to move.
+			return Underground.make_pipe_half(pos, dir, t)
 	push_error("Buildings.make: unknown type %d" % t)
 	return null
 
@@ -1462,11 +1560,16 @@ static func draw_one(b: Building, canvas: CanvasItem, world_pos: Vector2, tile_s
 			# Task 6 replaced the Task-1 stub plate: chevrons mark the input
 			# edge and both output edges, rotated via the port accessors.
 			Splitter.draw(b, canvas, world_pos, tile_size)
-		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT:
+		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT, \
+		Type.UNDERGROUND_PIPE_ENTRY, Type.UNDERGROUND_PIPE_EXIT:
 			# Task 6 replaced the Task-2 stub plates: ramp-into-ground glyph
 			# on the entry, mirrored ramp-out on the exit, both
 			# direction-readable. The dashed pair-indicator is grid_world's
 			# DEDICATED pass beside _draw_power_wires, not drawn here.
+			# Session 2 Piece 2: the PIPE halves share the same glyph builder
+			# and take the pipe family's colours — including the live/dry tube
+			# colour, so a tunnel mouth reads its connectivity exactly as the
+			# pipe beside it does.
 			Underground.draw(b, canvas, world_pos, tile_size)
 	# Post-pass: draw multi-tile footprint border and port indicators on top
 	# of every per-type draw. Single helpers handle this for all buildings;
@@ -1700,11 +1803,13 @@ static func info_lines_for(b: Building, world = null) -> Array:
 			return Accumulator.info_lines(b, world)
 		Type.SPLITTER:
 			return Splitter.info_lines(b)
-		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT:
+		Type.UNDERGROUND_BELT_ENTRY, Type.UNDERGROUND_BELT_EXIT, \
+		Type.UNDERGROUND_PIPE_ENTRY, Type.UNDERGROUND_PIPE_EXIT:
 			# One shared handler; it branches on the type. The entry's line
 			# set reports the pairing via Underground.paired_exit — the SAME
-			# predicate the tick path uses (its two-caller contract), so the
-			# panel can never disagree with where items actually flow.
+			# predicate the tick path and the fluid resolver use (its
+			# three-caller contract), so the panel can never disagree with
+			# where items actually flow or where fluid actually connects.
 			return Underground.info_lines(b, world)
 	# Generic fallback: dump state keys.
 	var lines: Array = ["(no custom info — generic fallback)"]

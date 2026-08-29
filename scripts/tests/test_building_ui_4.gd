@@ -102,6 +102,12 @@ static func run(parent: Node) -> Dictionary:
 		# as BELT/SPLITTER above.
 		Buildings.Type.UNDERGROUND_BELT_ENTRY,
 		Buildings.Type.UNDERGROUND_BELT_EXIT,
+		# The underground PIPE pair joined in Belt Logistics Session 2 Piece 2:
+		# fluid-family passive infrastructure, no slot_layout — same standing
+		# as PIPE/PUMP above. A paired pipe tunnel is one edge in the fluid
+		# connectivity graph and holds nothing, so there is nothing to open.
+		Buildings.Type.UNDERGROUND_PIPE_ENTRY,
+		Buildings.Type.UNDERGROUND_PIPE_EXIT,
 	]
 	for type_value in Buildings.DATA.keys():
 		var t: int = int(type_value)

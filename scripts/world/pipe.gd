@@ -25,13 +25,22 @@ static func make(pos: Vector2i) -> Building:
 	return Building.new(Buildings.Type.PIPE, pos, {})
 
 ## Returns true if `b` (a building at neighbor pos) should auto-connect
-## to a pipe — i.e. it's a pipe, a pump, or any processor whose current
+## to a pipe — i.e. it's in the fluid network's type table (pipe, pump, or
+## either half of an underground pipe tunnel), or any processor whose current
 ## recipe declares a fluid input. Data-driven so new fluid-consuming
 ## machines don't need to be hard-listed here.
+##
+## The first clause reads Buildings.FLUID_NETWORK_TYPES rather than naming
+## PIPE and PUMP, and that is the point: it used to be the same hardcoded pair
+## grid_world's two invalidation sites carried, so a new fluid type had THREE
+## places to be forgotten in. A tunnel mouth an adjacent pipe refuses to reach
+## for draws as a pipe run that stops one tile short of a tunnel that is in
+## fact carrying — the arc's already-recorded "signals by omission" shape, in
+## the first place a player looks.
 static func _is_connectable(b: Building) -> bool:
 	if b == null:
 		return false
-	if b.type == Buildings.Type.PIPE or b.type == Buildings.Type.PUMP:
+	if Buildings.FLUID_NETWORK_TYPES.has(b.type):
 		return true
 	if b.state.has("recipe_id"):
 		var recipe: Dictionary = Recipes.get_recipe(b.state["recipe_id"])

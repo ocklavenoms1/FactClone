@@ -97,6 +97,45 @@ one belt in the gap restores flow (probe-verified). The candidate marker above s
 cover BOTH unpaired-entry and blocked-exit — the tunnel's failure states all signal by
 omission today.
 
+### SESSION 2, PIECE 2 — underground PIPES (shipped 2026-08-28)
+
+Recorded here rather than in a new file for the same reason the ratification block above
+is here: this is one arc, and Session 2 is answering Session 1's questions.
+
+| # | Decision | Why |
+|---|---|---|
+| P1 | **The pipe tunnel carries nothing.** A paired underground pipe is ONE EDGE in the fluid connectivity graph — no lanes, no volume, no state, no latency | there is no fluid FLOW simulation for any of those to belong to. The belt tunnel's one-belt-tile lane is derivable from `Belt.SLOTS_PER_TILE`; a fluid latency constant would be the free parameter with no source that Q8 refused for belts |
+| P2 | **Two enum entries** (`UNDERGROUND_PIPE_ENTRY` 39 / `_EXIT` 40), not one | consistency with the belt pair and ramp-glyph legibility. **THE DIRECTION IS CONVENTION**, not a fluid constraint — see the note below |
+| P3 | Same span, same-direction facing, recompute-on-demand pairing; no stored partner | Q6/Q6b transfer verbatim. `UNDERGROUND_MAX_SPAN` is SHARED with belts and now pinned by a literal in **two** suites, so a belt-side rebalance is a deliberate two-file edit rather than a silent rebalance of every pipe tunnel |
+| P4 | `Underground.paired_exit` **generalised over both families**, with the belt/pipe distinction as an explicit table (`EXIT_TYPE_FOR_ENTRY`) | one predicate, one contract; the refusal to cross families is a table lookup, not the accident of two families never meeting on a map |
+| P5 | `Buildings.FLUID_NETWORK_TYPES` replaces the hardcoded `PIPE or PUMP` pair at both `grid_world` invalidation sites | see the finding below — it is the session's load-bearing one |
+
+**THE DIRECTION IS CONVENTION (P2), stated so it need not be re-derived.** Fluid is
+undirected: a paired tunnel is an undirected edge and fluid crosses it in whichever
+direction the network demands. Entry vs exit exists for the player's eye (the ramp glyph
+mirrors) and for family consistency with belts. **A future one-type simplification is
+therefore available on the shelf** — collapse the pair into a single
+`UNDERGROUND_PIPE` type whose two ends pair by facing — and the only costs are the save
+migration and the loss of the mirrored glyph. Nothing in the fluid model resists it.
+
+**THE INVALIDATION GAP (the finding this piece was routed through).** Until this piece,
+`grid_world.gd`'s place and remove paths read `if t == Type.PIPE or t == Type.PUMP` — a
+hardcoded pair sitting ONE LINE from a membership test against `POWER_NETWORK_TYPES`
+doing the identical job for power. A new fluid type shipped past that pair would place,
+save and reload correctly, be correct in every freshly loaded world, and *not exist* to
+any session already running. That is audit finding #1's shape (`mark_fluid_network_dirty`
+at zero callers for months, invisible because all 44 tests of the day worked in
+cold-cache worlds) reached through a new door. Both sites are now membership tests, the
+`buildings.gd` header checklist carries the fluid item beside the power one, and
+`test_underground_pipe.gd` sub-case (2) places and removes each half MID-SESSION against
+a warm cache — with sub-case (3) beside it as the cold-cache control that *passes with
+the bug present*.
+
+**Known gap left for Piece 3 (the failure marker).** `Buildings._fluid_active`, the port-
+indicator helper, still tests `nb.type != Type.PIPE`, so a machine fed off a tunnel mouth
+draws a dark fluid port while fluid is in fact arriving. Left deliberately: it is a
+signalling surface, and Piece 3 owns the tunnel's signalling.
+
 ## Session task order
 
 1. **Dir-aware footprints** (the enabler; canary = `test_hover_preview_agreement.gd`, reddening there is signal)

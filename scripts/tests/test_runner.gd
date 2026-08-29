@@ -195,6 +195,15 @@ const TESTS: Array = [
 	# non-anchor cell of a 2x2 is its own sub-case. Draw ORDER is pinned
 	# against the source (route A), comment-aware.
 	preload("res://scripts/tests/test_doodads.gd"),
+	# Belt Logistics Session 2 Piece 2: the underground PIPE tunnel — one edge
+	# in the fluid connectivity graph and nothing else. Its key sub-case is
+	# audit #1's closure test re-aimed: the tunnel halves are placed and
+	# removed MID-SESSION against a RESOLVED cache, with a cold-cache control
+	# beside it that passes with the invalidation bug present. Also pins the
+	# on-disk enum ints 39/40, the span literal from the pipe side (Q6b), the
+	# entry→exit family table that keeps belts and pipes from pairing with
+	# each other, and the empty state schema.
+	preload("res://scripts/tests/test_underground_pipe.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.
