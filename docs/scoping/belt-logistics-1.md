@@ -1,6 +1,6 @@
 # Belt Logistics Session 1 — design record
 
-**Status: SESSION 1 SHIPPED 2026-08-27 (`session-belt-logistics-1`), PAUSE 1 passed all five checks.** Three interpretive resolutions still awaiting formal ratification (T-junction, gap-0, exit-discount) — see NOTES arc section.
+**Status: SESSION 1 SHIPPED 2026-08-27 (`session-belt-logistics-1`), PAUSE 1 passed all five checks. All three interpretive resolutions RATIFIED 2026-08-28 (Session 2 design pass) — see the ratification block below.**
 Full evidence in the design-pass transcript; this is the decision record that survives it.
 Scope (user-set): SPLITTER + UNDERGROUND BELT pair. No filtering (filters live in the
 inserter tier). Belts only; underground pipes are a follow-up.
@@ -55,10 +55,25 @@ inserter tier). Belts only; underground pipes are a follow-up.
    two output edges are readable from the chevrons — including whether the T-junction
    shape itself reads (bears on the open T-junction ratification).
 
-⚠ Three ratifications are OPEN at this gate and it is the right place to settle them
-from live play: the splitter's T-junction shape (body-along-flow, lateral branches),
-gap-0-does-not-pair (adjacent exit never pairs), and the exit-cell discount (crossing
-costs gap+1 belt-tiles for gap+2 cells of footprint).
+### RATIFIED 2026-08-28 (designer, opening Belt Logistics Session 2)
+
+All three were carried into PAUSE 1 as open questions and all three gate-passed. They
+are confirmed as designed; each is now a decision, not an interpretation.
+
+- **T-junction shape — RATIFIED as designed.** Body along the flow axis, two lateral
+  branches. Gate check 5 confirmed the input edge and both output edges read from the
+  chevrons at normal zoom, which was the specific doubt that kept it open.
+- **Gap-0 does not pair — RATIFIED as designed.** An exit placed immediately adjacent to
+  an entry never pairs; a tunnel must span something. Gate check 4 exercised the span
+  boundary (refusal at 4, flow at 3) and nothing about the adjacent case read as a bug
+  during play.
+- **Exit-cell discount — RATIFIED as designed.** Crossing costs `gap+1` belt-tile
+  equivalents for `gap+2` cells of footprint; the exit cell is free. Gate check 4's
+  re-pair-on-move confirmed the arithmetic behaves as players expect when the exit
+  slides, which was the case the discount could have made surprising.
+
+All three were resolved from live play at the gate they were routed to, which is what
+the routing was for.
 
 ### Gate finding (PAUSE 1, 2026-08-27): the unpaired state signals only by omission
 
