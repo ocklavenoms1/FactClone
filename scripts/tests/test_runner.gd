@@ -204,6 +204,14 @@ const TESTS: Array = [
 	# entry→exit family table that keeps belts and pipes from pairing with
 	# each other, and the empty state schema.
 	preload("res://scripts/tests/test_underground_pipe.gd"),
+	# Belt Logistics Session 2 Piece 3: the tunnel-failure marker's decision
+	# functions — pairing_diagnosis (a REPORTER beside paired_exit, asserted
+	# never to disagree with it), the blocked-exit predicate built through the
+	# real jam path, the gap-0 pipe truthful-coexistence panel pin, and the
+	# two structural pins (indicator pass iterates EXIT_TYPE_FOR_ENTRY;
+	# _fluid_active dropped its `!= Type.PIPE` pre-filter). Route A: the
+	# drawing itself stays behind the headless ceiling.
+	preload("res://scripts/tests/test_tunnel_diagnosis.gd"),
 ]
 
 ## Directories that hold save fixtures, for the per-test sidecar scrub below.

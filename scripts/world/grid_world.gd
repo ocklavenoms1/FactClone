@@ -2163,20 +2163,66 @@ func _pole_wire_anchor(anchor: Vector2i) -> Vector2:
 ## renderer). Re-deriving the scan from a distance check here is exactly the
 ## drift the contract forbids: two derivations diverge, and a tunnel then
 ## draws where no items flow — the renderer-vs-BFS divergence
-## poles_connected exists to prevent. An UNPAIRED entry draws NOTHING: a
-## broken pair must read as a jam (the Q7 backpressure decision, and the
-## arc's PAUSE-gate broken-pair check), never as a live tunnel.
+## poles_connected exists to prevent. (paired_entry, asked for the exit
+## halves below, is itself contracted to answer through paired_exit — one
+## derivation either way.)
+##
+## SESSION 2 PIECE 3 — the unpaired stub, and BOTH families. The PAUSE-1
+## gate recorded that an unpaired entry signals only by the ABSENCE of this
+## pass's dashed line — and pipes did not even have the line (the old
+## belt-only filter). Now every tunnel half of every EXIT_TYPE_FOR_ENTRY
+## family draws here: a PAIRED entry draws the full dashed line to its exit;
+## an UNPAIRED half draws a short, sparse AMBER stub out of its mouth toward
+## where the missing partner goes (forward from an entry, backward from an
+## exit). The stub's subject is the TUNNEL, not the mouth — a mouth-coloured
+## marker would blame a building; the stub depicts the missing half of a
+## structure (the designer's correction of the red-mouth proposal, recorded
+## in the Piece 3 design pass). At ~1.5 tiles, shorter and sparser than any
+## real pair's line (the nearest pair spans 2 anchors), incomplete cannot be
+## misread as paired-with-short-span. The Q7 reading stands: a broken pair
+## still never draws a LIVE tunnel line.
 func _draw_underground_pair_indicators() -> void:
 	const DASH_COLOR: Color = Color(0.80, 0.78, 0.55, 0.85)   # pale straw — reads over grass and stone
 	const DASH_WIDTH: float = 2.0
 	const DASH_LEN: float = 6.0
+	const STUB_COLOR: Color = Color(0.95, 0.72, 0.20, 0.90)   # amber — an incomplete structure, not a fault on a building
+	const STUB_TILES: float = 1.5                             # visibly shorter than any real pair's line
+	const STUB_DASH: float = 4.0                              # shorter dashes, wider gaps than the pair line's 6/6
+	const STUB_GAP: float = 7.0
 	for anchor_key in buildings:
 		var b: Building = buildings[anchor_key]
-		if b.type != Buildings.Type.UNDERGROUND_BELT_ENTRY:
+		var is_entry: bool = Underground.EXIT_TYPE_FOR_ENTRY.has(b.type)
+		var is_exit: bool = Underground.entry_type_for(b.type) >= 0
+		if not is_entry and not is_exit:
 			continue
-		var exit_b: Building = Underground.paired_exit(b, self)
-		if exit_b == null:
-			continue   # unpaired: no line — see the header
 		var half: Vector2 = Vector2(TILE_SIZE, TILE_SIZE) * 0.5
-		draw_dashed_line(tile_to_world_origin(b.anchor) + half,
-			tile_to_world_origin(exit_b.anchor) + half, DASH_COLOR, DASH_WIDTH, DASH_LEN)
+		var centre: Vector2 = tile_to_world_origin(b.anchor) + half
+		var along: Vector2 = Vector2(Belt.DIR_VECS[Buildings.dir_of(b)])
+		if is_entry:
+			var exit_b: Building = Underground.paired_exit(b, self)
+			if exit_b != null:
+				draw_dashed_line(centre, tile_to_world_origin(exit_b.anchor) + half,
+					DASH_COLOR, DASH_WIDTH, DASH_LEN)
+				continue
+			# Unpaired ENTRY: stub from the mouth (front edge) ALONG the
+			# facing — pointing where the partner goes.
+			_draw_unpaired_stub(centre + along * (float(TILE_SIZE) * 0.5), along,
+				float(TILE_SIZE) * STUB_TILES, STUB_COLOR, DASH_WIDTH, STUB_DASH, STUB_GAP)
+		else:
+			if Underground.paired_entry(b, self) != null:
+				continue   # healthy: the line is drawn once, from its entry
+			# Unpaired EXIT: stub from its mouth (rear edge) BACKWARD along
+			# -facing — where its missing entry would be. Both halves of an
+			# incomplete tunnel say so.
+			_draw_unpaired_stub(centre - along * (float(TILE_SIZE) * 0.5), -along,
+				float(TILE_SIZE) * STUB_TILES, STUB_COLOR, DASH_WIDTH, STUB_DASH, STUB_GAP)
+
+## A short run of sparse dashes from `from` along the unit vector `dir_v` —
+## draw_dashed_line spaces gaps equal to its dashes, and the stub needs
+## SPARSER than the pair line to read as "incomplete", so it lays its own.
+func _draw_unpaired_stub(from: Vector2, dir_v: Vector2, length: float, color: Color, width: float, dash: float, gap: float) -> void:
+	var t: float = 0.0
+	while t < length:
+		var seg_end: float = minf(t + dash, length)
+		draw_line(from + dir_v * t, from + dir_v * seg_end, color, width)
+		t = seg_end + gap

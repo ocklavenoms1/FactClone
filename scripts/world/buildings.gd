@@ -1714,20 +1714,16 @@ static func _solid_output_active(canvas: CanvasItem, cell: Vector2i, _item_type:
 	return false
 
 static func _fluid_active(canvas: CanvasItem, cell: Vector2i) -> bool:
-	# Pipe at this cell that's part of a pump-bearing fluid network.
-	if not canvas.has_building_at(cell):
-		return false
-	var nb: Building = canvas.building_at(cell)
-	if nb == null or nb.type != Type.PIPE:
-		return false
-	# fluid_available_at scans 4-neighbors of `cell` for a connected component.
-	# A cell that IS a pipe in a pump component will be true on its own
-	# neighbors, so we check the pipe's own component via the same probe at
-	# any neighbor — using the cell itself works because the pipe lookup is
-	# one step removed in fluid_available_at. Simpler: ask GridWorld directly
-	# via its private maps, but those aren't exposed; the public probe at
-	# this cell answers "does an adjacent network have a pump", which is
-	# weaker than what we want. Use a wrapper.
+	# Membership in a pump-bearing component IS the whole question, and
+	# is_pipe_in_pump_component already answers false on its own for empty
+	# cells and non-carriers — the carrier roster (plain PIPE and both
+	# underground pipe halves) belongs to the fluid resolver, not to this
+	# helper. The old pre-filter here (a hardcoded plain-PIPE type check)
+	# made a machine fed off a tunnel mouth draw a dark fluid port while
+	# fluid was in fact arriving — the design record's named Piece-3 gap
+	# (belt-logistics-1.md, "Known gap left for Piece 3"). Deleting it is
+	# the fix; re-adding any type test would re-open it for the next
+	# carrier type too.
 	return canvas.is_pipe_in_pump_component(cell)
 
 ## Drain a player-drainable building into the player's inventory.
